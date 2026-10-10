@@ -107,7 +107,7 @@ describe('readCompass — real plain export', () => {
   it('OIDC is listed but unusable', () => {
     const rows = read();
     expect(rows[3]).toMatchObject({ nameHint: 'Fixture OIDC', defaultTicked: false, input: {}, secrets: {} });
-    expect(rows[3]!.unusable).toMatch(/OIDC/);
+    expect(rows[3]!.unusable).toBe("OIDC sign-in isn't supported yet.");
   });
 
   it('a plain export seals nothing', () => {
@@ -152,7 +152,7 @@ describe('readCompass — real encrypted export', () => {
 
   it('OIDC stays unusable', () => {
     const rows = read();
-    expect(rows[3]!.unusable).toMatch(/OIDC/);
+    expect(rows[3]!.unusable).toBe("OIDC sign-in isn't supported yet.");
   });
 });
 
@@ -212,11 +212,22 @@ describe('readCompass — hand-edited entries', () => {
     expect(row.input.host).toBe('db.example.test');
   });
 
-  it('an SSH tunnel with neither password, key nor sealed secrets has no auth method', () => {
+  it('an SSH tunnel without a key file is password auth even with no password', () => {
     const row = single({ connectionOptions: { connectionString: URI, sshTunnel: { host: 'h', port: 22, username: 'u' } } });
-    expect(row.input.ssh).toEqual({ enabled: true, host: 'h', port: 22, username: 'u' });
+    expect(row.input.ssh).toEqual({ enabled: true, host: 'h', port: 22, username: 'u', authMethod: 'password' });
     expect(row.secrets).toStrictEqual({});
     expect(row.repick).toEqual([]);
+  });
+
+  it('keeps the parser’s re-pick markers ahead of the SSH key, and no file path', () => {
+    const row = single({
+      connectionOptions: {
+        connectionString: 'mongodb://db.example.test/?tls=true&tlsCAFile=%2Ftmp%2Fca.pem',
+        sshTunnel: { host: 'h', identityKeyFile: '/tmp/id_ed25519' },
+      },
+    });
+    expect(row.repick).toEqual(['tlsCa', 'sshKey']);
+    expect(JSON.stringify(row)).not.toMatch(/ca\.pem|id_ed25519/);
   });
 
   it('an entry without a connection string is listed as unusable', () => {

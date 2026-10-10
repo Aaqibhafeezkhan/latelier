@@ -48,7 +48,7 @@ export function decryptCompassSecrets(
     text = Buffer.concat([decipher.update(buf.subarray(HEADER_LENGTH)), decipher.final()]).toString('utf8');
   } catch {
     // GCM cannot tell a wrong passphrase from a tampered blob.
-    throw new BadPassphraseError('Wrong Export Passphrase.');
+    throw new BadPassphraseError('Wrong passphrase for this Compass export.');
   }
   let parsed: z.infer<typeof Plaintext>;
   try {

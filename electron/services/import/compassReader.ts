@@ -83,16 +83,15 @@ function toRow(entry: CompassEntry): CandidateRow {
 
   const tunnel = options!.sshTunnel;
   if (tunnel) {
-    // An encrypted export moves the SSH password into the blob, so a sealed
-    // entry without a key file still authenticates with a password.
+    // A tunnel without a key file is Compass's password tab, whether the
+    // password is inline, sealed in the blob, or left blank.
     const keyAuth = tunnel.identityKeyFile !== undefined;
-    const passwordAuth = !keyAuth && (tunnel.password !== undefined || entry.connectionSecrets !== undefined);
     input.ssh = {
       enabled: true,
       host: tunnel.host,
       port: tunnel.port,
       username: tunnel.username,
-      ...(keyAuth ? { authMethod: 'key' as const } : passwordAuth ? { authMethod: 'password' as const } : {}),
+      authMethod: keyAuth ? 'key' : 'password',
     };
     if (tunnel.password) secrets.sshPassword = tunnel.password;
     if (tunnel.identityKeyPassphrase) secrets.sshPassphrase = tunnel.identityKeyPassphrase;

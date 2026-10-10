@@ -48,7 +48,7 @@ describe('decryptCompassSecrets — real Compass export', () => {
 
   it('a wrong passphrase is BAD_PASSPHRASE', () => {
     expect(codeOf(() => decryptCompassSecrets(blobs[0]!, `${PASS}x`))).toBe('BAD_PASSPHRASE');
-    expect(() => decryptCompassSecrets(blobs[0]!, `${PASS}x`)).toThrow('Wrong Export Passphrase.');
+    expect(() => decryptCompassSecrets(blobs[0]!, `${PASS}x`)).toThrow('Wrong passphrase for this Compass export.');
   });
 
   it('the passphrase is used as given, not trimmed', () => {
