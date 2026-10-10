@@ -134,3 +134,27 @@ describe('parseConnectionUri property: parseIntParam fallback semantics (maxPool
     );
   });
 });
+
+describe('parseConnectionUri property: credential file paths never reach the input', () => {
+  it('whatever path tlsCAFile or tlsCertificateKeyFile carries, only the re-pick marker survives', () => {
+    // A marker prefix keeps the path from colliding with anything else in the input.
+    const pathArb = fc.string({ minLength: 1, maxLength: 40 }).map((s) => `/zz-marker-${encodeURIComponent(s)}`);
+    fc.assert(
+      fc.property(
+        pathArb,
+        pathArb,
+        caseVariant('tlscafile'),
+        caseVariant('tlscertificatekeyfile'),
+        (ca, cert, caKey, certKey) => {
+          const { input, repick, warnings } = parseConnectionUri(
+            `mongodb://h/?tls=true&${caKey}=${ca}&${certKey}=${cert}`,
+          );
+          const out = JSON.stringify({ input, warnings });
+          expect(out).not.toContain('zz-marker-');
+          expect(repick).toEqual(['tlsCa', 'tlsClientCert']);
+        },
+      ),
+      { numRuns: 40 },
+    );
+  });
+});

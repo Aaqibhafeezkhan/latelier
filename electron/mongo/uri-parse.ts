@@ -5,6 +5,7 @@ import type {
   ParsedUri,
   ParsedUriWarning,
   ReadPref,
+  RepickFile,
 } from '@shared/types';
 import { ValidationError } from '../errors.ts';
 
@@ -23,6 +24,8 @@ const READ_PREFS: ReadPref[] = [
   'secondaryPreferred',
   'nearest',
 ];
+
+const PROXY_PARAMS = ['proxyhost', 'proxyport', 'proxyusername', 'proxypassword'];
 
 const DROPPED_OPTIONS = new Set([
   'retrywrites',
@@ -169,6 +172,9 @@ export function parseConnectionUri(raw: string): ParsedUri {
   let authMech: AuthMech;
   if (mechParam) {
     const mapped = AUTH_MECH_MAP[mechParam.toUpperCase()];
+    if (mechParam.toUpperCase() === 'MONGODB-OIDC') {
+      throw new ValidationError("OIDC sign-in isn't supported yet.");
+    }
     if (!mapped) {
       throw new ValidationError(
         `unsupported authMechanism: ${mechParam}`,
@@ -218,6 +224,19 @@ export function parseConnectionUri(raw: string): ParsedUri {
 
   const authDatabase = params.get('authsource') ?? undefined;
 
+  // Credential files: the path is machine-local, so only the marker survives.
+  const repick: RepickFile[] = [];
+  if (params.get('tlscafile')) repick.push('tlsCa');
+  if (params.get('tlscertificatekeyfile') || authMech === 'x509') repick.push('tlsClientCert');
+
+  // proxyPassword is a secret, so the sentence names no value.
+  if (PROXY_PARAMS.some((k) => params.has(k))) {
+    warnings.push({
+      code: 'PROXY_DROPPED',
+      detail: 'Proxy options in the string were not imported; the connection goes direct.',
+    });
+  }
+
   // Warn on dropped options
   for (const [k] of params.entries()) {
     if (DROPPED_OPTIONS.has(k)) {
@@ -249,7 +268,13 @@ export function parseConnectionUri(raw: string): ParsedUri {
     },
   };
 
-  return { input, warnings };
+  return {
+    input,
+    warnings,
+    repick,
+    // SRV lines never get direct connection, so their params are not read.
+    directConnectionExplicit: !isSrv && params.has('directconnection'),
+  };
 }
 
 function parseIntParam(raw: string | undefined, fallback: number): number {
