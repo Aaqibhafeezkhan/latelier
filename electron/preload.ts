@@ -53,6 +53,10 @@ const api: IpcApi = {
     importCommit: (input) => call(IPC_CHANNELS.connImportCommit, input),
     previewUris: (uris) => call(IPC_CHANNELS.connPreviewUris, { uris }),
     createFromUris: (input) => call(IPC_CHANNELS.connCreateFromUris, input),
+    importOpen: () => call(IPC_CHANNELS.connImportOpen, {}),
+    importMap: (input) => call(IPC_CHANNELS.connImportMap, input),
+    importUris: (uris) => call(IPC_CHANNELS.connImportUris, { uris }),
+    importCommitV2: (input) => call(IPC_CHANNELS.connImportCommitV2, input),
   },
 
   app: {

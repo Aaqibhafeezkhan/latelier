@@ -20,6 +20,12 @@ import type {
   ConnectionExportResult,
   ConnectionInput,
   ImportCommitInput,
+  ImportCommitInput2,
+  ImportCommitResult2,
+  ImportMapInput,
+  ImportMapResult,
+  ImportOpenResult,
+  ImportUrisResult,
   ImportCommitResult,
   UriCommitInput,
   UriPreview,
@@ -182,6 +188,12 @@ export interface IpcApi {
     /** Parses pasted connection strings and plans their names; passwords never come back. */
     previewUris: (uris: string[]) => Promise<UriPreview>;
     createFromUris: (input: UriCommitInput) => Promise<ImportCommitResult>;
+    /** C14 wizard: main shows the open dialog, detects the format and returns a token plus a review (or mapping candidates). */
+    importOpen: () => Promise<ImportOpenResult>;
+    importMap: (input: ImportMapInput) => Promise<ImportMapResult>;
+    importUris: (uris: string[]) => Promise<ImportUrisResult>;
+    /** Temporary name; renamed to importCommit when the old commit is retired. */
+    importCommitV2: (input: ImportCommitInput2) => Promise<ImportCommitResult2>;
   };
 
   app: {
@@ -462,6 +474,10 @@ export const IPC_CHANNELS = {
   connImportCommit:  'conn:importCommit',  // SECRET_INPUT
   connPreviewUris:    'conn:previewUris',    // SECRET_INPUT
   connCreateFromUris: 'conn:createFromUris', // SECRET_INPUT
+  connImportOpen:     'conn:importOpen',
+  connImportMap:      'conn:importMap',
+  connImportUris:     'conn:importUris',     // SECRET_INPUT
+  connImportCommitV2: 'conn:importCommit2',  // SECRET_INPUT
 
   // App-level utilities -----------------------------------------
   appMenuCommandEvent: 'app:menu-command-event',

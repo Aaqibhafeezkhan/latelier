@@ -38,6 +38,10 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
       importCommit: unused('conn.importCommit') as IpcApi['conn']['importCommit'],
       previewUris: unused('conn.previewUris') as IpcApi['conn']['previewUris'],
       createFromUris: unused('conn.createFromUris') as IpcApi['conn']['createFromUris'],
+      importOpen: unused('conn.importOpen') as IpcApi['conn']['importOpen'],
+      importMap: unused('conn.importMap') as IpcApi['conn']['importMap'],
+      importUris: unused('conn.importUris') as IpcApi['conn']['importUris'],
+      importCommitV2: unused('conn.importCommitV2') as IpcApi['conn']['importCommitV2'],
     },
     app: {
       pickFile: async () => ({ path: null }),
@@ -360,6 +364,10 @@ function makePermissiveStub(): IpcApi {
       importCommit: noopAsync as IpcApi['conn']['importCommit'],
       previewUris: okAsync({ entries: [] }) as IpcApi['conn']['previewUris'],
       createFromUris: noopAsync as IpcApi['conn']['createFromUris'],
+      importOpen: okAsync({ cancelled: true as const }) as IpcApi['conn']['importOpen'],
+      importMap: noopAsync as IpcApi['conn']['importMap'],
+      importUris: noopAsync as IpcApi['conn']['importUris'],
+      importCommitV2: noopAsync as IpcApi['conn']['importCommitV2'],
     },
     app: {
       pickFile: async () => ({ path: null }),
