@@ -126,9 +126,13 @@ describe('NewConnection (create mode)', () => {
     });
   });
 
-  async function pasteWith(input: Record<string, unknown>, warnings: Array<{ code: string; detail?: string }>) {
+  async function pasteWith(
+    input: Record<string, unknown>,
+    warnings: Array<{ code: string; detail?: string }>,
+    repick?: string[],
+  ) {
     installAtelierMock({
-      conn: { parseUri: (async () => ({ input, warnings })) as never },
+      conn: { parseUri: (async () => ({ input, warnings, repick })) as never },
     });
     renderNew();
     await userEvent.click(await screen.findByText(/Paste URI/i));
@@ -152,6 +156,31 @@ describe('NewConnection (create mode)', () => {
       [{ code: 'OPTION_DROPPED', detail: 'tlsinsecure' }],
     );
     expect((await screen.findByRole('status')).textContent).toMatch(/1 warning: tlsinsecure/);
+  });
+
+  it('pasting a URI that names credential files tells the user to pick them again and leaves the fields empty', async () => {
+    await pasteWith(
+      { host: 'db.example.com', tls: { enabled: true, verify: true } },
+      [],
+      ['tlsCa', 'tlsClientCert'],
+    );
+    const text = (await screen.findByRole('status')).textContent;
+    expect(text).toMatch(/URI applied\./);
+    expect(text).toMatch(/re-pick CA file, re-pick client certificate/);
+    await userEvent.click(screen.getByRole('tab', { name: 'TLS' }));
+    for (const box of screen.getAllByRole('textbox')) expect((box as HTMLInputElement).value).not.toMatch(/\.pem/);
+  });
+
+  it('adds the re-pick note after the warnings, and nothing when no file is named', async () => {
+    await pasteWith({ host: 'h' }, [{ code: 'PROXY_DROPPED', detail: 'Proxy options in the string were not imported.' }], ['tlsCa']);
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'URI applied. 1 warning: Proxy options in the string were not imported. Still to do: re-pick CA file.',
+    );
+  });
+
+  it('a plain paste keeps the plain toast', async () => {
+    await pasteWith({ host: 'h' }, [], []);
+    expect((await screen.findByRole('status')).textContent).toBe('URI applied.');
   });
 
   it('Test button calls api.conn.test and shows ok state', async () => {
