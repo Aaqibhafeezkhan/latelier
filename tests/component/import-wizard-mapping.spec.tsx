@@ -1,0 +1,145 @@
+import { describe, it, expect, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import type { MapTarget, MappingCollection } from '@shared/types';
+import { render, screen } from '../helpers/render';
+import { MappingStep } from '../../src/features/connections/importWizard/MappingStep';
+
+const servers: MappingCollection = {
+  at: 'servers',
+  rows: 3,
+  fields: [
+    { path: 'label', sample: 'Prod', masked: false, suggested: 'name' },
+    { path: 'uri', sample: 'mongodb://h', masked: false, suggested: 'connectionString' },
+    { path: 'secret', sample: '••••', masked: true, suggested: 'password' },
+    { path: 'hostname', sample: 'h1', masked: false },
+  ],
+};
+const other: MappingCollection = {
+  at: 'data.items',
+  rows: 1,
+  fields: [{ path: 'server', sample: 'h2', masked: false, suggested: 'host' }],
+};
+
+function setup(collections: MappingCollection[] = [servers]) {
+  const onBack = vi.fn();
+  const onNext = vi.fn();
+  render(<MappingStep collections={collections} onBack={onBack} onNext={onNext} />);
+  return { onBack, onNext };
+}
+const select = (path: string) => screen.getByRole('combobox', { name: `Use ${path} as` }) as HTMLSelectElement;
+const next = () => screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement;
+const pick = (path: string, target: MapTarget | '') => userEvent.selectOptions(select(path), target);
+
+describe('MappingStep', () => {
+  it('lists targets in the C14 order, with a clear option first', () => {
+    setup();
+    expect(Array.from(select('label').options).map((o) => o.textContent)).toEqual([
+      '—', 'Name', 'Connection string', 'Host', 'Port', 'Username', 'Password',
+      'Auth database', 'Default database', 'TLS',
+    ]);
+  });
+
+  it('pre-fills each select from the suggestions', () => {
+    setup();
+    expect(select('label').value).toBe('name');
+    expect(select('uri').value).toBe('connectionString');
+    expect(select('secret').value).toBe('password');
+    expect(select('hostname').value).toBe('');
+  });
+
+  it('masks a secret sample with the hint, and shows others as they are', () => {
+    setup();
+    expect(screen.getByText('Taken from the file — not shown')).toBeTruthy();
+    expect(screen.getAllByText('••••')).toHaveLength(1);
+    expect(screen.getByText('Prod')).toBeTruthy();
+  });
+
+  it('moves a target that another field already holds', async () => {
+    setup();
+    await pick('hostname', 'name');
+    expect(select('hostname').value).toBe('name');
+    expect(select('label').value).toBe('');
+  });
+
+  it('clears a mapping with the dash option', async () => {
+    setup();
+    await pick('uri', '');
+    expect(select('uri').value).toBe('');
+    expect(next().disabled).toBe(true);
+  });
+
+  it('enables Next for a connection string, for a host, and not for neither', async () => {
+    setup();
+    expect(next().disabled).toBe(false);
+    await pick('uri', '');
+    expect(next().disabled).toBe(true);
+    await pick('label', 'host');
+    expect(next().disabled).toBe(false);
+  });
+
+  it('sends the collection path and the target-to-path mapping', async () => {
+    const { onNext } = setup();
+    await pick('hostname', 'host');
+    await userEvent.click(next());
+    expect(onNext).toHaveBeenCalledWith('servers', {
+      name: 'label',
+      connectionString: 'uri',
+      password: 'secret',
+      host: 'hostname',
+    });
+  });
+
+  it('calls onBack', async () => {
+    const { onBack } = setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the collection picker when there is one collection', () => {
+    setup();
+    expect(screen.queryByRole('combobox', { name: 'Connections are listed in' })).toBeNull();
+  });
+
+  it('switching collection resets to that collection\'s suggestions', async () => {
+    const { onNext } = setup([servers, other]);
+    const picker = screen.getByRole('combobox', { name: 'Connections are listed in' }) as HTMLSelectElement;
+    expect(picker.value).toBe('servers');
+    await pick('hostname', 'host');
+    await userEvent.selectOptions(picker, 'data.items');
+    expect(screen.queryByRole('combobox', { name: 'Use hostname as' })).toBeNull();
+    expect(select('server').value).toBe('host');
+    await userEvent.selectOptions(picker, 'servers');
+    expect(select('hostname').value).toBe('');
+    expect(select('uri').value).toBe('connectionString');
+    await userEvent.click(next());
+    expect(onNext).toHaveBeenCalledWith('servers', { name: 'label', connectionString: 'uri', password: 'secret' });
+  });
+
+  it('reports how many rows were left out', () => {
+    setup([{ ...servers, truncatedRows: 120 }]);
+    expect(screen.getByText(/Only the first 500 rows are read/)).toBeTruthy();
+  });
+
+  it('gives a target to only the first of two fields suggesting it', () => {
+    setup([{ ...servers, fields: [
+      { path: 'a.host', sample: 'x', masked: false, suggested: 'host' },
+      { path: 'b.host', sample: 'y', masked: false, suggested: 'host' },
+    ] }]);
+    expect(select('a.host').value).toBe('host');
+    expect(select('b.host').value).toBe('');
+  });
+
+  it('is operable from the keyboard', async () => {
+    const user = userEvent.setup();
+    const { onNext } = setup();
+    await user.click(select('secret'));
+    await user.tab();
+    expect(document.activeElement).toBe(select('hostname'));
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Back' }));
+    await user.tab();
+    expect(document.activeElement).toBe(next());
+    await user.keyboard('{Enter}');
+    expect(onNext).toHaveBeenCalledTimes(1);
+  });
+});
