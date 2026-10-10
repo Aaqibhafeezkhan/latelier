@@ -252,6 +252,11 @@ describe('readCompass — refusals', () => {
     expect(() => readCompass(null)).toThrow("This Compass export version isn't supported.");
   });
 
+  it('needs EJSON.parse: plain JSON.parse leaves the version as {$numberInt}', () => {
+    const text = readFileSync(path.join(DIR, 'plain.json'), 'utf8');
+    expect(() => readCompass(JSON.parse(text))).toThrow("This Compass export version isn't supported.");
+  });
+
   it('refuses a version 1 file whose shape is not a Compass export', () => {
     for (const bad of [
       { version: 1 },
