@@ -120,19 +120,19 @@ export function parseConnectionUri(raw: string): ParsedUri {
   }
   const firstHost = hosts[0]!;
   // host:port split (SRV always has no port)
-  let host = firstHost;
+  const split = isSrv ? { host: firstHost, port: undefined } : splitHostPort(firstHost);
+  const host = split.host;
+  if (!HOST_CHARS.test(host) && !IPV6_LITERAL.test(host)) {
+    throw new ValidationError("The host has characters a host name can't contain.");
+  }
   let port = 27017;
-  // Stryker disable next-line ConditionalExpression: forcing this guard true only runs the port split against an SRV host, which is always a bare DNS name with no ':' (the mongodb+srv scheme forbids a port — ConnectionString itself throws "cannot have port number" otherwise, verified with node), so lastIndexOf(':') is always -1 and the inner `if (idx >= 0)` never fires either way.
-  if (!isSrv) {
-    const idx = firstHost.lastIndexOf(':');
-    // Stryker disable next-line EqualityOperator: idx === 0 would require an empty hostname before the colon (e.g. ':1234'), which ConnectionString itself rejects as "Invalid connection string" (verified with node), so `idx > 0` and `idx >= 0` are indistinguishable for any host that reaches this line.
-    if (idx >= 0) {
-      const p = Number(firstHost.slice(idx + 1));
-      if (Number.isFinite(p) && p > 0) {
-        port = p;
-        host = firstHost.slice(0, idx);
-      }
+  if (split.port !== undefined) {
+    // Digits only: Number() would also accept '1e3', '0x10', ' 5' and ''.
+    const p = /^\d{1,5}$/.test(split.port) ? Number(split.port) : 0;
+    if (p < 1 || p > 65535) {
+      throw new ValidationError('Port must be a number from 1 to 65535.');
     }
+    port = p;
   }
 
   // Path → default_db ---------------------------------------------------
@@ -275,6 +275,22 @@ export function parseConnectionUri(raw: string): ParsedUri {
     // SRV lines never get direct connection, so their params are not read.
     directConnectionExplicit: !isSrv && params.has('directconnection'),
   };
+}
+
+// Letters, digits and . - _ plus % for percent-encoded bytes (unix sockets).
+const HOST_CHARS = /^[A-Za-z0-9._%-]+$/;
+const IPV6_LITERAL = /^\[[0-9A-Fa-f:.]+\]$/;
+
+/** Split `host[:port]`, treating a bracketed IPv6 literal as one unit. */
+function splitHostPort(authority: string): { host: string; port: string | undefined } {
+  let idx = authority.lastIndexOf(':');
+  if (authority.startsWith('[')) {
+    const close = authority.indexOf(']');
+    idx = authority.charAt(close + 1) === ':' ? close + 1 : -1;
+    if (idx < 0) return { host: authority, port: undefined };
+  }
+  if (idx < 0) return { host: authority, port: undefined };
+  return { host: authority.slice(0, idx), port: authority.slice(idx + 1) };
 }
 
 function parseIntParam(raw: string | undefined, fallback: number): number {

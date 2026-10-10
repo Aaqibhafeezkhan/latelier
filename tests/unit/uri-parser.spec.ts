@@ -248,13 +248,6 @@ describe('parseConnectionUri', () => {
     expect(input.port).toBe(27017);
   });
 
-  it('a port of exactly 0 is rejected as invalid, keeping the default', () => {
-    // `p > 0` — a URI with `:0` is syntactically a port but not a usable one.
-    const { input } = parseConnectionUri('mongodb://localhost:0/');
-    expect(input.host).toBe('localhost:0');
-    expect(input.port).toBe(27017);
-  });
-
   it('rejects malformed database path with a message naming it as such', () => {
     expect(() => parseConnectionUri('mongodb://host/db%zzname')).toThrow(
       /malformed database path/,
@@ -445,5 +438,44 @@ describe('parseConnectionUri: C14 import markers', () => {
       expect(warnings.map((w) => w.code), p).toEqual(['PROXY_DROPPED']);
     }
     expect(parseConnectionUri('mongodb://h/?appName=x').warnings).toEqual([]);
+  });
+});
+
+describe('parseConnectionUri: host and port validation', () => {
+  const PORT_MSG = 'Port must be a number from 1 to 65535.';
+  const HOST_MSG = "The host has characters a host name can't contain.";
+
+  it.each([
+    ['mongodb://h:abc', PORT_MSG],
+    ['mongodb://u:p@h:abc/db', PORT_MSG],
+    ['mongodb://h:0', PORT_MSG],
+    ['mongodb://h:65536', PORT_MSG],
+    ['mongodb://h:1e3', PORT_MSG],
+    ['mongodb://h:', PORT_MSG],
+    ['mongodb://[::1]:abc', PORT_MSG],
+    ['mongodb://h&tls=true', HOST_MSG],
+    ['mongodb://h$x:27017', HOST_MSG],
+    ['mongodb://a:b:27017', HOST_MSG],
+    ['mongodb+srv://h&tls=true', HOST_MSG],
+  ])('refuses %s', (uri, message) => {
+    expect(() => parseConnectionUri(uri)).toThrow(new ValidationError(message));
+  });
+
+  it.each([
+    ['mongodb://localhost', 'localhost', 27017],
+    ['mongodb://127.0.0.1:27017', '127.0.0.1', 27017],
+    ['mongodb://[::1]:27018', '[::1]', 27018],
+    ['mongodb://[::1]', '[::1]', 27017],
+    ['mongodb://my_host-1.example.com:27017', 'my_host-1.example.com', 27017],
+    ['mongodb://h:1', 'h', 1],
+    ['mongodb://h:65535', 'h', 65535],
+  ])('accepts %s', (uri, host, port) => {
+    const { input } = parseConnectionUri(uri);
+    expect({ host: input.host, port: input.port }).toEqual({ host, port });
+  });
+
+  it('keeps stripping a port from an SRV host', () => {
+    const { input } = parseConnectionUri('mongodb+srv://cluster0.abc.mongodb.net:27017/db');
+    expect(input.host).toBe('cluster0.abc.mongodb.net');
   });
 });

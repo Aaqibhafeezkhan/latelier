@@ -158,3 +158,22 @@ describe('parseConnectionUri property: credential file paths never reach the inp
     );
   });
 });
+
+describe('parseConnectionUri property: refusals never echo the password', () => {
+  it('a bad port or host error message omits the password', () => {
+    const pwArb = fc.stringMatching(/^[A-Za-z0-9]{8,16}$/);
+    fc.assert(
+      fc.property(pwArb, fc.constantFrom(':abc', ':0', ':65536', '&tls=true'), (pw, bad) => {
+        try {
+          parseConnectionUri(`mongodb://u:${pw}@h${bad}/db`);
+        } catch (err) {
+          expect(err).toBeInstanceOf(ValidationError);
+          expect((err as Error).message).not.toContain(pw);
+          return;
+        }
+        expect.unreachable('bad host/port should be refused');
+      }),
+      { numRuns: 40 },
+    );
+  });
+});
