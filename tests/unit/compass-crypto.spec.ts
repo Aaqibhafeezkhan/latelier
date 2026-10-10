@@ -14,9 +14,9 @@ const encrypted = EJSON.parse(readFileSync(path.join(DIR, 'encrypted.json'), 'ut
 };
 const blobs = encrypted.connections.map((c) => c.connectionSecrets);
 
-function codeOf(fn: () => unknown): string {
+async function codeOf(promise: Promise<unknown>): Promise<string> {
   try {
-    fn();
+    await promise;
   } catch (err) {
     expect(err).toBeInstanceOf(AppError);
     return (err as AppError).code;
@@ -37,8 +37,8 @@ function syntheticBlob(plaintext: string, opts: { version?: number; pass?: strin
 }
 
 describe('decryptCompassSecrets — real Compass export', () => {
-  it('opens every entry of encrypted.json with the fixture passphrase', () => {
-    expect(blobs.map((b) => decryptCompassSecrets(b, PASS))).toEqual([
+  it('opens every entry of encrypted.json with the fixture passphrase', async () => {
+    expect(await Promise.all(blobs.map((b) => decryptCompassSecrets(b, PASS)))).toEqual([
       { secrets: { password: 'fixture-pw-1' }, dropped: [] },
       { secrets: { password: 'fixture-pw-2', sshPassword: 'fixture-ssh-pw' }, dropped: [] },
       { secrets: { password: 'fixture-pw-3', sshPassphrase: 'fixture-key-pass' }, dropped: [] },
@@ -46,67 +46,67 @@ describe('decryptCompassSecrets — real Compass export', () => {
     ]);
   });
 
-  it('a wrong passphrase is BAD_PASSPHRASE', () => {
-    expect(codeOf(() => decryptCompassSecrets(blobs[0]!, `${PASS}x`))).toBe('BAD_PASSPHRASE');
-    expect(() => decryptCompassSecrets(blobs[0]!, `${PASS}x`)).toThrow('Wrong passphrase for this Compass export.');
+  it('a wrong passphrase is BAD_PASSPHRASE', async () => {
+    expect(await codeOf(decryptCompassSecrets(blobs[0]!, `${PASS}x`))).toBe('BAD_PASSPHRASE');
+    await expect(decryptCompassSecrets(blobs[0]!, `${PASS}x`)).rejects.toThrow('Wrong passphrase for this Compass export.');
   });
 
-  it('the passphrase is used as given, not trimmed', () => {
-    expect(codeOf(() => decryptCompassSecrets(blobs[0]!, `${PASS}\n`))).toBe('BAD_PASSPHRASE');
+  it('the passphrase is used as given, not trimmed', async () => {
+    expect(await codeOf(decryptCompassSecrets(blobs[0]!, `${PASS}\n`))).toBe('BAD_PASSPHRASE');
   });
 
-  it('a tampered tag is BAD_PASSPHRASE', () => {
+  it('a tampered tag is BAD_PASSPHRASE', async () => {
     const buf = Buffer.from(blobs[1]!, 'base64');
     buf[40]! ^= 0x01;
-    expect(codeOf(() => decryptCompassSecrets(buf.toString('base64'), PASS))).toBe('BAD_PASSPHRASE');
+    expect(await codeOf(decryptCompassSecrets(buf.toString('base64'), PASS))).toBe('BAD_PASSPHRASE');
   });
 
-  it('a tampered ciphertext is BAD_PASSPHRASE', () => {
+  it('a tampered ciphertext is BAD_PASSPHRASE', async () => {
     const buf = Buffer.from(blobs[1]!, 'base64');
     buf[buf.length - 1]! ^= 0x01;
-    expect(codeOf(() => decryptCompassSecrets(buf.toString('base64'), PASS))).toBe('BAD_PASSPHRASE');
+    expect(await codeOf(decryptCompassSecrets(buf.toString('base64'), PASS))).toBe('BAD_PASSPHRASE');
   });
 
-  it('a version other than 1 is refused before any key is derived', () => {
+  it('a version other than 1 is refused before any key is derived', async () => {
     const buf = Buffer.from(blobs[0]!, 'base64');
     buf.writeUInt16BE(2, 0);
-    expect(() => decryptCompassSecrets(buf.toString('base64'), PASS)).toThrow(
+    await expect(decryptCompassSecrets(buf.toString('base64'), PASS)).rejects.toThrow(
       "This Compass export's secrets use an unsupported format.",
     );
   });
 });
 
 describe('decryptCompassSecrets — malformed blobs', () => {
-  it('rejects text that is not base64', () => {
-    expect(() => decryptCompassSecrets(`${blobs[0]!.slice(0, 20)}!${blobs[0]!.slice(21)}`, PASS)).toThrow(
+  it('rejects text that is not base64', async () => {
+    await expect(decryptCompassSecrets(`${blobs[0]!.slice(0, 20)}!${blobs[0]!.slice(21)}`, PASS)).rejects.toThrow(
       "This Compass export's secrets are damaged.",
     );
   });
 
-  it('rejects a blob shorter than its 50-byte header', () => {
+  it('rejects a blob shorter than its 50-byte header', async () => {
     const header = Buffer.from(blobs[3]!, 'base64').subarray(0, 49).toString('base64');
-    expect(() => decryptCompassSecrets(header, PASS)).toThrow("This Compass export's secrets are damaged.");
+    await expect(decryptCompassSecrets(header, PASS)).rejects.toThrow("This Compass export's secrets are damaged.");
   });
 
-  it('a header with no ciphertext reaches the cipher (and fails authentication)', () => {
+  it('a header with no ciphertext reaches the cipher (and fails authentication)', async () => {
     const header = Buffer.from(blobs[3]!, 'base64').subarray(0, 50).toString('base64');
-    expect(codeOf(() => decryptCompassSecrets(header, PASS))).toBe('BAD_PASSPHRASE');
+    expect(await codeOf(decryptCompassSecrets(header, PASS))).toBe('BAD_PASSPHRASE');
   });
 
-  it('synthetic: authenticated plaintext that is not JSON is damaged, not a wrong passphrase', () => {
-    expect(() => decryptCompassSecrets(syntheticBlob('not json'), PASS)).toThrow(
+  it('synthetic: authenticated plaintext that is not JSON is damaged, not a wrong passphrase', async () => {
+    await expect(decryptCompassSecrets(syntheticBlob('not json'), PASS)).rejects.toThrow(
       "This Compass export's secrets are damaged.",
     );
   });
 
-  it('synthetic: plaintext without a secrets object is damaged', () => {
-    expect(codeOf(() => decryptCompassSecrets(syntheticBlob('{"password":"x"}'), PASS))).toBe('VALIDATION');
-    expect(codeOf(() => decryptCompassSecrets(syntheticBlob('{"secrets":"x"}'), PASS))).toBe('VALIDATION');
+  it('synthetic: plaintext without a secrets object is damaged', async () => {
+    expect(await codeOf(decryptCompassSecrets(syntheticBlob('{"password":"x"}'), PASS))).toBe('VALIDATION');
+    expect(await codeOf(decryptCompassSecrets(syntheticBlob('{"secrets":"x"}'), PASS))).toBe('VALIDATION');
   });
 });
 
 describe('decryptCompassSecrets — secrets L’Atelier has no place for', () => {
-  it('synthetic: names other secrets in dropped, never their values, and skips empty ones', () => {
+  it('synthetic: names other secrets in dropped, never their values, and skips empty ones', async () => {
     const blob = syntheticBlob(
       JSON.stringify({
         secrets: {
@@ -120,7 +120,7 @@ describe('decryptCompassSecrets — secrets L’Atelier has no place for', () =>
         },
       }),
     );
-    const out = decryptCompassSecrets(blob, PASS);
+    const out = await decryptCompassSecrets(blob, PASS);
     expect(out).toEqual({
       secrets: { password: 'pw-value' },
       dropped: ['awsSessionToken', 'proxyPassword', 'autoEncryption'],
@@ -128,13 +128,13 @@ describe('decryptCompassSecrets — secrets L’Atelier has no place for', () =>
     expect(JSON.stringify(out.dropped)).not.toMatch(/aws-value|proxy-value/);
   });
 
-  it('synthetic: a kept name holding a non-string is dropped, not stored', () => {
+  it('synthetic: a kept name holding a non-string is dropped, not stored', async () => {
     const blob = syntheticBlob(JSON.stringify({ secrets: { sshTunnelPassword: 42, constructor: 'c' } }));
-    expect(decryptCompassSecrets(blob, PASS)).toEqual({ secrets: {}, dropped: ['sshTunnelPassword', 'constructor'] });
+    expect(await decryptCompassSecrets(blob, PASS)).toEqual({ secrets: {}, dropped: ['sshTunnelPassword', 'constructor'] });
   });
 
-  it('synthetic: a different passphrase than the one sealed with is BAD_PASSPHRASE', () => {
-    expect(codeOf(() => decryptCompassSecrets(syntheticBlob('{"secrets":{}}', { pass: 'other' }), PASS))).toBe(
+  it('synthetic: a different passphrase than the one sealed with is BAD_PASSPHRASE', async () => {
+    expect(await codeOf(decryptCompassSecrets(syntheticBlob('{"secrets":{}}', { pass: 'other' }), PASS))).toBe(
       'BAD_PASSPHRASE',
     );
   });

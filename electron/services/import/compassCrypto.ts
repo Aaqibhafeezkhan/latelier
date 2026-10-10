@@ -1,4 +1,5 @@
-import { createDecipheriv, pbkdf2Sync } from 'node:crypto';
+import { createDecipheriv, pbkdf2 } from 'node:crypto';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import { BadPassphraseError, ValidationError } from '../../errors.ts';
 import type { SecretValues } from '../connectionExportFormat.ts';
@@ -24,23 +25,26 @@ const KEPT = new Map<string, keyof SecretValues>([
 
 const Plaintext = z.object({ secrets: z.record(z.string(), z.unknown()) });
 
+// Async so 100,000 SHA-512 rounds per sealed entry never block the main process.
+const pbkdf2Async = promisify(pbkdf2);
+
 const DAMAGED = "This Compass export's secrets are damaged.";
 
 /**
  * Opens one entry's `connectionSecrets`. `dropped` names the secrets Compass
  * stored that a Connection has no place for (never their values).
  */
-export function decryptCompassSecrets(
+export async function decryptCompassSecrets(
   blob: string,
   passphrase: string,
-): { secrets: SecretValues; dropped: string[] } {
+): Promise<{ secrets: SecretValues; dropped: string[] }> {
   const buf = Buffer.from(blob, 'base64');
   // Buffer.from skips characters that aren't base64 instead of failing.
   if (buf.toString('base64') !== blob || buf.length < HEADER_LENGTH) throw new ValidationError(DAMAGED);
   if (buf.readUInt16BE(0) !== VERSION) {
     throw new ValidationError("This Compass export's secrets use an unsupported format.");
   }
-  const key = pbkdf2Sync(passphrase, buf.subarray(2, SALT_END), 100_000, 32, 'sha512');
+  const key = await pbkdf2Async(passphrase, buf.subarray(2, SALT_END), 100_000, 32, 'sha512');
   const decipher = createDecipheriv('aes-256-gcm', key, buf.subarray(SALT_END, IV_END));
   decipher.setAuthTag(buf.subarray(IV_END, HEADER_LENGTH));
   let text: string;
