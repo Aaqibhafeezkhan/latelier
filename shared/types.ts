@@ -255,13 +255,118 @@ export type ConnectionUpdate = Partial<ConnectionInput> & {
  * dropped).
  */
 export interface ParsedUriWarning {
-  code: 'MULTI_HOST_TRUNCATED' | 'OPTION_DROPPED' | 'TLS_VERIFY_DISABLED';
+  code: 'MULTI_HOST_TRUNCATED' | 'OPTION_DROPPED' | 'TLS_VERIFY_DISABLED' | 'PROXY_DROPPED';
   detail?: string;
 }
 
 export interface ParsedUri {
   input: Partial<ConnectionInput>;
   warnings: ParsedUriWarning[];
+  /** tlsCAFile -> 'tlsCa', tlsCertificateKeyFile -> 'tlsClientCert'; never a path. */
+  repick?: RepickFile[];
+  /** The string set directConnection itself (any value). */
+  directConnectionExplicit?: boolean;
+}
+
+// ─── Import wizard (C14) ────────────────────────────────────────────────────
+
+// shared/ is types-only: the runtime target list lives in unknownJson.ts (main) and mapTargets.ts (renderer).
+export type MapTarget =
+  | 'name' | 'connectionString' | 'host' | 'port' | 'username'
+  | 'password' | 'authDatabase' | 'defaultDb' | 'tls';
+
+export type ImportSource = 'latelier' | 'compass' | 'uris' | 'unknown';
+
+export type ReviewRow =
+  | {
+      index: number;
+      ok: true;
+      savedAs: string;
+      host: string;
+      /** Absent on SRV. */
+      port?: number;
+      srv: boolean;
+      authUsername?: string;
+      /** A password exists, plaintext or sealed. */
+      hasPassword: boolean;
+      /** The password only exists sealed (needs the passphrase). */
+      passwordSealed: boolean;
+      /** Password-auth row with no password at all; false for x509/awsiam/none. */
+      needsCredentials: boolean;
+      /** Null on SRV. */
+      directConnection: boolean | null;
+      defaultTicked: boolean;
+      repick: RepickFile[];
+      warnings: string[];
+      tls: boolean;
+      defaultDb?: string;
+      ssh: boolean;
+    }
+  | { index: number; ok: false; reason: string };
+
+export interface Review {
+  hasEncryptedSecrets: boolean;
+  rows: ReviewRow[];
+}
+
+export interface MappingField {
+  path: string;
+  sample: string;
+  masked: boolean;
+  suggested?: MapTarget;
+}
+
+export interface MappingCollection {
+  at: string;
+  rows: number;
+  fields: MappingField[];
+  truncatedRows?: number;
+}
+
+export type ImportOpenResult =
+  | { cancelled: true }
+  | { token: string; source: 'latelier' | 'compass'; review: Review }
+  | { token: string; source: 'unknown'; collections: MappingCollection[] };
+
+export interface ImportMapInput {
+  token: string;
+  at: string;
+  mapping: Partial<Record<MapTarget, string>>;
+}
+export interface ImportMapResult {
+  review: Review;
+}
+
+export interface ImportUrisInput {
+  uris: string[];
+}
+export interface ImportUrisResult {
+  token: string;
+  review: Review;
+}
+
+/** Named ImportCommitInput once the old commit channel is retired. */
+export interface ImportCommitInput2 {
+  token: string;
+  indices: number[];
+  passphrase?: string;
+  withoutSecrets?: boolean;
+  readOnly: boolean;
+  credentials: { index: number; username?: string; password?: string }[];
+  /** One per ticked non-SRV row. */
+  directConnection: { index: number; value: boolean }[];
+}
+
+/** Named ImportCommitResult once the old commit channel is retired. */
+export interface ImportCommitResult2 {
+  created: { index: number; id: string; name: string }[];
+  renamed: { index: number; from: string; to: string }[];
+  /** Validation/create failures. */
+  skipped: { index: number; name: string; reason: string }[];
+  repick: { name: string; files: RepickFile[] }[];
+  secretsNotStored: { name: string; reason: string }[];
+  /** e.g. Compass secret fields dropped after decryption. */
+  warnings: { name: string; message: string }[];
 }
 
 // ─── Workspace tabs (W01) ───────────────────────────────────────────────────
