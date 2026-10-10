@@ -376,3 +376,74 @@ describe('parseConnectionUri', () => {
     expect(input.port).toBe(27017);
   });
 });
+
+describe('parseConnectionUri: C14 import markers', () => {
+  it('tlsCAFile and tlsCertificateKeyFile become re-pick markers, in any casing, and no path is kept', () => {
+    for (const q of [
+      'tlsCAFile=/etc/ca.pem&tlsCertificateKeyFile=/etc/client.pem',
+      'TLSCAFILE=/etc/ca.pem&TlsCertificateKeyFile=/etc/client.pem',
+    ]) {
+      const { input, repick } = parseConnectionUri(`mongodb://h/?tls=true&${q}`);
+      expect(repick).toEqual(['tlsCa', 'tlsClientCert']);
+      expect(JSON.stringify(input)).not.toContain('/etc/');
+      expect(input.tls).toEqual({ enabled: true, verify: true });
+    }
+  });
+
+  it('marks only the file the string names', () => {
+    expect(parseConnectionUri('mongodb://h/?tlsCAFile=/a.pem').repick).toEqual(['tlsCa']);
+    expect(parseConnectionUri('mongodb://h/?tlsCertificateKeyFile=/a.pem').repick).toEqual(['tlsClientCert']);
+    expect(parseConnectionUri('mongodb://h/').repick).toEqual([]);
+  });
+
+  it('ignores a file param with no value', () => {
+    expect(parseConnectionUri('mongodb://h/?tlsCAFile=&tlsCertificateKeyFile=').repick).toEqual([]);
+  });
+
+  it('X.509 needs the client certificate re-picked once, even when the string names the file too', () => {
+    expect(parseConnectionUri('mongodb://h/?authMechanism=MONGODB-X509&tls=true').repick).toEqual(['tlsClientCert']);
+    expect(
+      parseConnectionUri('mongodb://h/?authMechanism=MONGODB-X509&tlsCertificateKeyFile=/c.pem&tlsCAFile=/a.pem').repick,
+    ).toEqual(['tlsCa', 'tlsClientCert']);
+  });
+
+  it('reports directConnectionExplicit for any value and casing, never for SRV or an absent param', () => {
+    expect(parseConnectionUri('mongodb://h/?directConnection=true').directConnectionExplicit).toBe(true);
+    expect(parseConnectionUri('mongodb://h/?DirectConnection=false').directConnectionExplicit).toBe(true);
+    expect(parseConnectionUri('mongodb://h/?appName=x').directConnectionExplicit).toBe(false);
+    expect(parseConnectionUri('mongodb+srv://c.example.net/?directConnection=true').directConnectionExplicit).toBe(false);
+  });
+
+  it('leaves input.advanced.directConnection as it was: false unless the string says true', () => {
+    const adv = (u: string) => parseConnectionUri(u).input.advanced?.directConnection;
+    expect(adv('mongodb://h/?directConnection=false')).toBe(false);
+    expect(adv('mongodb://h/?directConnection=true')).toBe(true);
+    expect(adv('mongodb://h/')).toBe(false);
+  });
+
+  it('refuses MONGODB-OIDC with its own message, in any casing, without echoing the string', () => {
+    for (const mech of ['MONGODB-OIDC', 'mongodb-oidc']) {
+      expect(() => parseConnectionUri(`mongodb://u:s3cret@h/?authMechanism=${mech}`)).toThrow(
+        new ValidationError("OIDC sign-in isn't supported yet."),
+      );
+    }
+  });
+
+  it('warns once when the string carries proxy options, without any of their values', () => {
+    const { warnings } = parseConnectionUri(
+      'mongodb://h/?proxyHost=socks.corp&proxyPort=1080&proxyUsername=bob&PROXYPASSWORD=hunter2',
+    );
+    const proxy = warnings.filter((w) => w.code === 'PROXY_DROPPED');
+    expect(proxy).toHaveLength(1);
+    expect(proxy[0]!.detail).toMatch(/^Proxy options/);
+    for (const v of ['socks.corp', '1080', 'bob', 'hunter2']) expect(JSON.stringify(warnings)).not.toContain(v);
+  });
+
+  it('warns for each single proxy param on its own, and not when there are none', () => {
+    for (const p of ['proxyHost=h', 'proxyPort=1', 'proxyUsername=u', 'proxyPassword=p']) {
+      const { warnings } = parseConnectionUri(`mongodb://h/?${p}`);
+      expect(warnings.map((w) => w.code), p).toEqual(['PROXY_DROPPED']);
+    }
+    expect(parseConnectionUri('mongodb://h/?appName=x').warnings).toEqual([]);
+  });
+});

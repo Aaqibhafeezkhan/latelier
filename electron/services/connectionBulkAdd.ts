@@ -1,4 +1,3 @@
-import ConnectionString from 'mongodb-connection-string-url';
 import { z } from 'zod';
 import type {
   ConnectionInput,
@@ -35,29 +34,21 @@ export type Line = ParsedLine | { ok: false; reason: string };
 
 export function parseLine(uri: string): Line {
   try {
-    const { input, warnings, repick } = parseConnectionUri(uri);
+    const { input, warnings, repick, directConnectionExplicit } = parseConnectionUri(uri);
     return {
       ok: true,
       input,
-      // SRV lines never get direct connection, so their params are not read
-      // (an SRV string with a port, which the parser tolerates, would not reparse).
-      explicitDirect: input.connectionType !== 'srv' && hasParam(uri, 'directconnection'),
+      explicitDirect: directConnectionExplicit === true,
       multiHost: warnings.some((w) => w.code === 'MULTI_HOST_TRUNCATED'),
+      // Stryker disable next-line ArrayDeclaration: parseConnectionUri sets `repick` on every return path (optional only in the shared type), so the fallback is never taken and its contents cannot be observed.
       repick: repick ?? [],
       // Stryker disable next-line LogicalOperator: every warning the parser pushes sets `detail` (verified by reading each `warnings.push` in uri-parse.ts); the code is a fallback for one that someday doesn't.
       warnings: warnings.map((w) => w.detail ?? w.code),
     };
   } catch (err) {
-    // Stryker disable next-line StringLiteral: unreachable in practice — parseConnectionUri wraps every failure in a ValidationError (its own throws, the ConnectionString constructor's, and the path decode), and hasParam re-reads a string that same constructor just accepted. Kept so a library change cannot surface a raw error message.
+    // Stryker disable next-line StringLiteral: unreachable in practice — parseConnectionUri wraps every failure in a ValidationError (its own throws, the ConnectionString constructor's, and the path decode). Kept so a library change cannot surface a raw error message.
     return { ok: false, reason: err instanceof AppError ? err.message : 'Not a connection string' };
   }
-}
-
-function hasParam(uri: string, lowerName: string): boolean {
-  for (const key of new ConnectionString(uri.trim()).searchParams.keys()) {
-    if (key.toLowerCase() === lowerName) return true;
-  }
-  return false;
 }
 
 /**
@@ -94,8 +85,11 @@ export function needsCredentials(input: Partial<ConnectionInput>): boolean {
   return !input.authUsername || !input.password;
 }
 
-export function repickFor(input: Partial<ConnectionInput>): RepickFile[] {
-  return input.authMech === 'x509' ? ['tlsClientCert'] : [];
+/** What the user picks again: the auth-derived marker plus any the parser read off the string. */
+export function repickFor(input: Partial<ConnectionInput>, found: readonly RepickFile[] = []): RepickFile[] {
+  const files = new Set(found);
+  if (input.authMech === 'x509') files.add('tlsClientCert');
+  return [...files];
 }
 
 export function previewEntry(line: Line, index: number, savedAs: string): UriPreviewEntry {
@@ -111,7 +105,7 @@ export function previewEntry(line: Line, index: number, savedAs: string): UriPre
     ...(input.authUsername ? { authUsername: input.authUsername } : {}),
     hasPassword: Boolean(input.password),
     needsCredentials: needsCredentials(input),
-    repick: repickFor(input),
+    repick: repickFor(input, line.repick),
     warnings: line.warnings,
   };
 }
