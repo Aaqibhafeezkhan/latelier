@@ -59,6 +59,14 @@ _Avoid_: selected (that is the open row), marked
 The passphrase that protects the secrets inside a Connection Export. A Connection Export without secrets has none.
 _Avoid_: password (that word belongs to the Connection's own credentials)
 
+**Import Source**:
+What the Import Wizard was given: a Connection Export, a MongoDB Compass export, Pasted URIs, or Unknown JSON. Detected by the wizard, never chosen by the user.
+_Avoid_: format (a Connection Export has a `format` field; an Import Source is wider), provider
+
+**Field Mapping**:
+The user's assignment of an Unknown JSON file's field paths (e.g. `servers.0.host`) to Connection fields such as Connection string, Host or Password. Only Unknown JSON has one; known Import Sources map themselves. Never remembered between imports.
+_Avoid_: schema, template
+
 ### Query language and surfaces
 
 **Shell Syntax**:

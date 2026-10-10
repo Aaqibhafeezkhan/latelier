@@ -15,7 +15,7 @@ This is a standalone feature. It is **not** the safety net for the app-identity 
   - Anything that belongs to a Connection rather than being part of it: saved queries, recent queries, workspace tabs, reference rules, the Audit Log, recent field values.
   - App preferences (`app_state`).
   - Credential file paths (TLS CA file, TLS client certificate, SSH private key). See §4.3.
-  - Importing other tools' formats, such as MongoDB Compass connection exports. Tracked separately.
+  - Importing other tools' formats, such as MongoDB Compass connection exports. See [C14](./C14-import-wizard.md).
   - Updating an existing Connection from a file. Import only ever adds.
 
 ## Dependencies
@@ -85,6 +85,8 @@ Only the three secret fields (`password`, `sshPassword`, `sshPassphrase`) are ev
 
 ### 4.1 Flow
 
+> [C14](./C14-import-wizard.md) §1 replaces this flow when it ships: every Import Source runs through one wizard. §4.2–§4.4 keep applying.
+
 1. The user opens Import and picks a file. Main reads and validates it (§1). Any validation failure ends the flow with that error, and nothing is written.
 2. **Preview:** a checklist of the file's Connections, all ticked. Each row shows, before anything is written:
    - the name it will be saved under (§4.2), with renames highlighted;
@@ -138,6 +140,8 @@ Import is a way of adding, so the Connections table's footer has the three ways 
 - **Import**: the §4 file flow, unchanged.
 
 ### 7.1 Connection strings
+
+> [C14](./C14-import-wizard.md) replaces this screen when it ships: Pasted URIs become an Import Source in the wizard, and the per-row Direct connection choice (C14 §6) replaces the batch default below. The limits, naming and credential rules here keep applying.
 
 1. **Paste.** Each non-empty line is one `mongodb://` or `mongodb+srv://` string, parsed in main by the same parser as the form's URI paste. Up to 100 lines of up to 4096 characters each. A preview lists every line before anything is written: the name it will be saved under, the host, whether it carries credentials, and the reason for any line that cannot be parsed. Bad lines never block the good ones; they are skipped and listed.
 2. **Defaults** apply to every line. All three are maintainer-overridable choices:
