@@ -191,9 +191,30 @@ describe('buildCollections — masking', () => {
     expect(field({ notes: 'see mongodb://alice:x@h' }, 'notes')).toMatchObject({ sample: 'see mongodb://alice:x@h', masked: false });
   });
 
+  it.each([
+    ['mixed-case duplicates', 'mongodb://h/?proxyPassword=hunter2&PROXYPASSWORD=hunter3&TLSCertificateKeyFilePassword=hunter4&tlscertificatekeyfilepassword=hunter5'],
+    ['a lower-case token key', 'mongodb://h/?authMechanismProperties=aws_session_token:hunter2'],
+    ['an upper-case properties name', 'mongodb://h/?AUTHMECHANISMPROPERTIES=AWS_SESSION_TOKEN:hunter2'],
+    ['repeated properties', 'mongodb://h/?authMechanismProperties=SERVICE_NAME:x&authMechanismProperties=AWS_SESSION_TOKEN:hunter2'],
+  ])('strips every copy of a secret parameter (%s)', (_label, uri) => {
+    const f = field({ conn: uri }, 'conn')!;
+    expect(f.masked).toBe(true);
+    expect(f.sample).not.toMatch(/hunter/);
+  });
+
+  it('keeps the non-secret parts of a stripped connection string', () => {
+    const uri = 'mongodb://alice:pw@h1,h2/app?authMechanismProperties=SERVICE_NAME:x&proxyPassword=p&appName=a';
+    expect(field({ conn: uri }, 'conn')!.sample).toBe(
+      'mongodb://alice@h1,h2/app?authMechanismProperties=SERVICE_NAME%3Ax&appName=a',
+    );
+  });
+
   it('shows a connection string without secrets as it is', () => {
     const uri = 'mongodb://alice@h:27017/?authSource=admin';
     expect(field({ conn: uri }, 'conn')).toMatchObject({ sample: uri, masked: false });
+    // Only authMechanismProperties can carry the token.
+    const named = 'mongodb://h/?appName=AWS_SESSION_TOKEN';
+    expect(field({ conn: named }, 'conn')).toMatchObject({ sample: named, masked: false });
   });
 
   it('hides a connection string it cannot parse', () => {

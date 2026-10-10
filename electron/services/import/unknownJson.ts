@@ -43,8 +43,9 @@ export function findCollections(value: unknown): FoundCollection[] {
     if (Array.isArray(node) && node.length > 0 && node.every(isObject)) {
       found.push({ at: path.join('.'), rows: node });
     }
+    if (path.length === MAX_DEPTH || node === null) return;
     // Stryker disable next-line ConditionalExpression: walking a string instead of skipping it is unobservable — its entries are single characters, which hold no array, so no collection is ever found under one; the check only saves the work.
-    if (path.length === MAX_DEPTH || typeof node !== 'object' || node === null) return;
+    if (typeof node !== 'object') return;
     for (const [key, child] of Object.entries(node)) walk(child, [...path, key]);
   };
   walk(value, []);
@@ -105,11 +106,26 @@ function sampleFor(path: string, value: Scalar): { sample: string; masked: boole
     // Fail closed: an unparseable string may still hold a password we cannot locate.
     return { sample: MASK, masked: true };
   }
-  // The same secrets Compass redacts: userinfo password, tlsCertificateKeyFilePassword,
-  // proxyPassword and AWS_SESSION_TOKEN in authMechanismProperties.
-  const stripped = cs.redact({ redactUsernames: false, replacementString: '' }).toString();
-  return stripped === cs.toString() ? { sample: text, masked: false } : { sample: stripped, masked: true };
+  // The secrets Compass treats as such: the userinfo password,
+  // tlsCertificateKeyFilePassword, proxyPassword and AWS_SESSION_TOKEN inside
+  // authMechanismProperties. Every parameter is checked whatever its case and
+  // however often it repeats, and a properties value holding the token goes
+  // whole, so nothing of the token can survive a malformed list.
+  let masked = cs.password !== '';
+  const kept = new URLSearchParams();
+  for (const [key, value] of cs.searchParams) {
+    const k = key.toLowerCase();
+    const secret = SECRET_PARAMS.has(k) || (k === 'authmechanismproperties' && /aws_session_token/i.test(value));
+    if (secret) masked = true;
+    else kept.append(key, value);
+  }
+  if (!masked) return { sample: text, masked: false };
+  cs.password = '';
+  cs.search = kept.toString();
+  return { sample: cs.toString(), masked: true };
 }
+
+const SECRET_PARAMS = new Set(['tlscertificatekeyfilepassword', 'proxypassword']);
 
 const SYNONYMS: Record<MapTarget, readonly string[]> = {
   connectionString: ['uri', 'url', 'connectionstring', 'connection_string', 'mongouri', 'mongourl'],

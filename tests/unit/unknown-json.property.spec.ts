@@ -37,7 +37,11 @@ const uriSecret = marker.chain((m) => fc.oneof(
     .map(([h, k, p]) => `mongodb://${h}/?${k}=${m}${p}`),
   fc.tuple(host, anyCase('proxyPassword'), fc.boolean())
     .map(([h, k, twice]) => `mongodb://${h}/?proxyHost=p&${k}=${m}${twice ? `&${k}=${m}` : ''}`),
-  fc.tuple(host, props(m)).map(([h, v]) => `mongodb://${h}/?authMechanism=MONGODB-AWS&authMechanismProperties=${v}`),
+  fc.tuple(host, anyCase('tlsCertificateKeyFilePassword'), anyCase('proxyPassword'), anyCase('proxyPassword'))
+    .map(([h, k, p1, p2]) => `mongodb://${h}/?${p1}=${m}&${k}=${m}&${p2}=${m}`),
+  fc.tuple(host, anyCase('authMechanismProperties'), anyCase('AWS_SESSION_TOKEN'), props(m), fc.boolean())
+    .map(([h, k, t, v, twice]) =>
+      `mongodb://${h}/?authMechanism=MONGODB-AWS&${k}=${v.replace('AWS_SESSION_TOKEN', t)}${twice ? `&${k}=${t}:${m}` : ''}`),
   // Unencoded characters make the string unparseable; it must be hidden, not shown.
   fc.constantFrom('/', ':', '@', '?').map((c) => `mongodb://alice:${m}${c}x@h/app`),
   fc.constant(`mongodb+srv://alice:${m}@cluster.example.com:27017/app`),
