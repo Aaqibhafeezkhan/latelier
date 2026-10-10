@@ -27,8 +27,9 @@ function expectNoLeaks(rows: CandidateRow[]): void {
     expect(row.input).not.toHaveProperty('password');
     expect(row.input).not.toHaveProperty('sshPassword');
     expect(row.input).not.toHaveProperty('sshPassphrase');
-    const input = JSON.stringify(row.input);
-    for (const secret of SECRET_VALUES) expect(input).not.toContain(secret);
+    // Everything but `secrets` (input, warnings, unusable, repick, nameHint, sealed) is free of secret values.
+    const outside = JSON.stringify({ ...row, secrets: undefined });
+    for (const secret of SECRET_VALUES) expect(outside).not.toContain(secret);
     expect(JSON.stringify(row)).not.toContain(KEY_PATH);
   }
 }
