@@ -25,19 +25,25 @@ export interface ParsedLine {
   input: Partial<ConnectionInput>;
   /** The string set `directConnection` itself, so the batch default must not override it. */
   explicitDirect: boolean;
+  /** The string named several hosts and only the first was kept. */
+  multiHost: boolean;
+  /** Credential files the string referenced; the user picks them again. */
+  repick: RepickFile[];
   warnings: string[];
 }
 export type Line = ParsedLine | { ok: false; reason: string };
 
 export function parseLine(uri: string): Line {
   try {
-    const { input, warnings } = parseConnectionUri(uri);
+    const { input, warnings, repick } = parseConnectionUri(uri);
     return {
       ok: true,
       input,
       // SRV lines never get direct connection, so their params are not read
       // (an SRV string with a port, which the parser tolerates, would not reparse).
       explicitDirect: input.connectionType !== 'srv' && hasParam(uri, 'directconnection'),
+      multiHost: warnings.some((w) => w.code === 'MULTI_HOST_TRUNCATED'),
+      repick: repick ?? [],
       // Stryker disable next-line LogicalOperator: every warning the parser pushes sets `detail` (verified by reading each `warnings.push` in uri-parse.ts); the code is a fallback for one that someday doesn't.
       warnings: warnings.map((w) => w.detail ?? w.code),
     };
