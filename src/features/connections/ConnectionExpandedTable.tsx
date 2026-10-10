@@ -8,7 +8,7 @@ import { relativeTime } from '../../utils/relativeTime';
 import { useRovingHighlight } from '../../hooks/useRovingHighlight';
 import { STATUS_PRESENTATION, matchesConnectionQuery } from './connectionStatus';
 import { RowActionIcon } from './RowActionIcon';
-import { ConnectionAddDialog } from './ConnectionAddDialog';
+import { ImportWizard } from './importWizard/ImportWizard';
 import { ConnectionExportDialog } from './ConnectionExportDialog';
 import { ConnectionDeleteDialog } from './ConnectionDeleteDialog';
 import type { Connection, ConnectionSummary } from '@shared/types';
@@ -53,7 +53,7 @@ export interface ConnectionExpandedTableProps {
   onDelete: (id: string) => void;
   /** The full single-Connection form, from "+ New". Closes the table. */
   onAdd: () => void;
-  /** The file Import dialog, from "Import". Closes the table. */
+  /** The Import Wizard at its file source, from "Import". Closes the table. */
   onImport: () => void;
   /** Open tabs across these Connections, for the batch delete's copy; `null` while unknown. */
   tabCountFor: (ids: string[]) => number | null;
@@ -62,7 +62,7 @@ export interface ConnectionExpandedTableProps {
 }
 
 /** What is stacked on the table; the table keeps its own Escape only when nothing is. */
-type Stacked = 'add' | 'export' | { deleting: string[]; tabCount: number } | null;
+type Stacked = 'paste' | 'export' | { deleting: string[]; tabCount: number } | null;
 
 function formatConnectionType(t: ConnectionSummary['connectionType']): string {
   return t === 'srv' ? 'SRV' : 'Standard';
@@ -638,7 +638,7 @@ export function ConnectionExpandedTable({
             <Button size="compact-xs" variant="light" onClick={onAdd}>
               + New
             </Button>
-            <Button size="compact-xs" variant="subtle" onClick={() => setStacked('add')}>
+            <Button size="compact-xs" variant="subtle" onClick={() => setStacked('paste')}>
               Paste URIs
             </Button>
             <Button size="compact-xs" variant="subtle" onClick={onImport}>
@@ -647,9 +647,7 @@ export function ConnectionExpandedTable({
           </Group>
         </div>
       </div>
-      {stacked === 'add' && (
-        <ConnectionAddDialog onClose={() => setStacked(null)} />
-      )}
+      {stacked === 'paste' && <ImportWizard initial="paste" onClose={() => setStacked(null)} />}
       {stacked === 'export' && <ConnectionExportDialog ids={checkedIds} onClose={() => setStacked(null)} />}
       {stacked !== null && typeof stacked === 'object' && (
         <ConnectionDeleteDialog
