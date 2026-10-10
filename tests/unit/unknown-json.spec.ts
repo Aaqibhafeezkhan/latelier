@@ -41,9 +41,17 @@ describe('findCollections', () => {
     ]);
   });
 
-  it('finds collections inside array elements and inside rows', () => {
+  it('finds collections inside array elements and objects that are not collections', () => {
     const value = [[{ a: 1 }], { list: [{ b: 1 }, { b: 2 }] }];
     expect(findCollections(value).map((c) => c.at)).toEqual(['1.list', '0']);
+  });
+
+  it("does not search a collection's rows for more collections", () => {
+    const value = {
+      servers: [{ replicas: [{ h: 1 }, { h: 2 }, { h: 3 }] }, { replicas: [{ h: 4 }] }],
+      meta: { owners: [{ n: 1 }] },
+    };
+    expect(findCollections(value).map((c) => c.at)).toEqual(['servers', 'meta.owners']);
   });
 
   it('ignores empty arrays and arrays that mix objects with anything else', () => {
@@ -94,8 +102,8 @@ describe('buildCollections — fields', () => {
       { name: 'a', servers: [{ host: 'h1' }], opts: { tls: true, n: null, empty: {} } },
       { name: 'b', port: 27018 },
     ];
-    // `0.servers` is a collection of its own, listed after the larger one.
-    expect(buildCollections(value).map((c) => c.at)).toEqual(['', '0.servers']);
+    // A row's own array of objects is a field of the row, not another collection.
+    expect(buildCollections(value).map((c) => c.at)).toEqual(['']);
     expect(buildCollections(value)[0]).toEqual({
       at: '',
       rows: 2,
@@ -126,6 +134,21 @@ describe('buildCollections — fields', () => {
     expect(fs).toHaveLength(200);
     expect(fs[149]!.path).toBe('f149');
     expect(fs[199]!.path).toBe('g49');
+  });
+
+  it('offers leaves up to 20 levels below the row and skips deeper ones', () => {
+    const deep = (levels: number): Record<string, unknown> =>
+      levels === 0 ? { leaf: 'x' } : { n: deep(levels - 1) };
+    // Under `a`, deep(n)'s leaf is segment n + 2.
+    const [, last] = fields([{ host: 'h', a: deep(18) }]);
+    expect(last!.path.split('.')).toHaveLength(20);
+    expect(last!.path.endsWith('.n.leaf')).toBe(true);
+    expect(fields([{ host: 'h', a: deep(19) }]).map((f) => f.path)).toEqual(['host']);
+    // Far past the cap, flattening still returns instead of overflowing the stack.
+    let huge: Record<string, unknown> = { leaf: 'x' };
+    for (let i = 0; i < 100_000; i++) huge = { n: huge };
+    expect(fields([{ host: 'h', a: huge }]).map((f) => f.path)).toEqual(['host']);
+    expect(combineRow({ host: 'h', a: huge }, { host: 'host' }).input.host).toBe('h');
   });
 
   it('keeps a "__proto__" key as data', () => {
@@ -419,6 +442,39 @@ describe('combineRow', () => {
     const row = combineRow({ host: 5 }, { host: 'host' });
     expect(row.warnings).toEqual(["host was ignored: it isn't text."]);
     expect(row.unusable).toBe('No connection string or host in this row.');
+  });
+
+  it.each([
+    ['name', 'secret'], ['host', 'dbPassword'], ['username', 'apiKey'], ['authDatabase', 'token'],
+    ['defaultDb', 'credentials.0'], ['port', 'pwd'], ['tls', 'secretTls'],
+  ] as const)('ignores %s mapped to the secret-named path %s', (target, path) => {
+    const row = combineRow(
+      { host: 'h', secret: 'hunter2', dbPassword: 'hunter2', apiKey: 'hunter2', token: 'hunter2', credentials: ['hunter2'], pwd: 27018, secretTls: true },
+      { ...(target === 'host' ? {} : { host: 'host' }), [target]: path },
+    );
+    expect(row.warnings).toEqual([`${path} was ignored: it holds a secret; map it to Password.`]);
+    expect(JSON.stringify(row)).not.toContain('hunter2');
+    // The secret took no effect: the host row is unusable, the others keep every default.
+    if (target === 'host') expect(row.unusable).toBe('No connection string or host in this row.');
+    else expect(row.input).toEqual(ok('mongodb://h').input);
+  });
+
+  it('ignores a connection string carrying a secret mapped to a shown target', () => {
+    const row = combineRow(
+      { host: 'h', backup: 'mongodb://h/?proxyPassword=hunter2', plain: 'mongodb://a@h' },
+      { host: 'host', name: 'backup', username: 'plain' },
+    );
+    expect(row.warnings).toEqual(['backup was ignored: it holds a secret; map it to Password.']);
+    expect(row.nameHint).toBe('');
+    // A string without a secret is shown on the mapping screen, so it may feed any target.
+    expect(row.input.authUsername).toBe('mongodb://a@h');
+  });
+
+  it('lets a secret path feed Password and Connection string', () => {
+    const row = combineRow({ secret: 'hunter2', mongoPassword: 'mongodb://a@h' }, { password: 'secret', connectionString: 'mongoPassword' });
+    expect(row.warnings).toEqual([]);
+    expect(row.secrets).toEqual({ password: 'hunter2' });
+    expect(row.input.host).toBe('h');
   });
 
   it('treats a missing, empty or non-scalar mapped value as absent, without a warning', () => {

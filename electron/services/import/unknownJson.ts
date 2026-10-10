@@ -12,6 +12,8 @@ export const MAP_TARGETS: readonly MapTarget[] = [
 ];
 
 const MAX_DEPTH = 5;
+/** Leaves deeper than this below the row are not offered; it also bounds the recursion. */
+const MAX_ROW_DEPTH = 20;
 const MAX_ROWS = 500;
 const MAX_FIELDS = 200;
 const MASK = '••••';
@@ -34,14 +36,16 @@ function isObject(v: unknown): v is Row {
 
 /**
  * Every non-empty array of objects within five levels of the top, largest
- * first (ties keep document order). With none, a top-level object is the one
- * row. Throws `ValidationError` when there is nothing to map.
+ * first (ties keep document order). A collection's own rows are not searched
+ * for more: their arrays are fields of the row. With none, a top-level object
+ * is the one row. Throws `ValidationError` when there is nothing to map.
  */
 export function findCollections(value: unknown): FoundCollection[] {
   const found: { at: string; rows: Row[] }[] = [];
   const walk = (node: unknown, path: string[]): void => {
     if (Array.isArray(node) && node.length > 0 && node.every(isObject)) {
       found.push({ at: path.join('.'), rows: node });
+      return;
     }
     if (path.length === MAX_DEPTH || node === null) return;
     // Stryker disable next-line ConditionalExpression: walking a string instead of skipping it is unobservable — its entries are single characters, which hold no array, so no collection is ever found under one; the check only saves the work.
@@ -59,18 +63,23 @@ export function findCollections(value: unknown): FoundCollection[] {
   );
 }
 
-/** Dot path → scalar leaf, in document order. A `Map`, so a `__proto__` key stays data. */
+/**
+ * Dot path → scalar leaf, in document order, at most 20 segments deep. A `Map`,
+ * so a `__proto__` key stays data.
+ */
 function flattenRow(row: Row): Map<string, Scalar> {
   const out = new Map<string, Scalar>();
-  // ponytail: recursive, so a row nested thousands of levels deep overflows the stack; make it iterative if real files ever do that.
-  const walk = (node: unknown, prefix: string): void => {
-    for (const [key, child] of Object.entries(node as object)) {
+  const walk = (node: object, prefix: string, depth: number): void => {
+    for (const [key, child] of Object.entries(node)) {
       const path = prefix ? `${prefix}.${key}` : key;
-      if (typeof child === 'object' && child !== null) walk(child, path);
-      else if (typeof child === 'string' || typeof child === 'number' || typeof child === 'boolean') out.set(path, child);
+      if (typeof child === 'object' && child !== null) {
+        if (depth < MAX_ROW_DEPTH) walk(child, path, depth + 1);
+      } else if (typeof child === 'string' || typeof child === 'number' || typeof child === 'boolean') {
+        out.set(path, child);
+      }
     }
   };
-  walk(row, '');
+  walk(row, '', 1);
   return out;
 }
 
@@ -183,6 +192,9 @@ export function buildCollections(value: unknown): MappingCollection[] {
   }));
 }
 
+/** The only targets whose value stays out of the renderer: secrets go to `secrets`, a string's to the parser. */
+const SECRET_TARGETS: ReadonlySet<MapTarget> = new Set(['password', 'connectionString']);
+
 const asText = (v: Scalar): string | undefined => (typeof v === 'string' ? v : undefined);
 
 /** Digits only, so a number or numeric string that is a whole port; 1.5, -1, '0x10' and '1e3' are not. */
@@ -221,6 +233,11 @@ export function combineRow(row: Row, mapping: Partial<Record<MapTarget, string>>
     const path = mapping[target];
     const raw = values.get(path);
     if (raw === undefined || raw === '') return undefined;
+    // What the mapping screen hides must not come back through a field that is shown.
+    if (!SECRET_TARGETS.has(target) && sampleFor(path!, raw).masked) {
+      warnings.push(`${path} was ignored: it holds a secret; map it to Password.`);
+      return undefined;
+    }
     const v = accept(raw);
     if (v === undefined) warnings.push(`${path} was ignored: it isn't ${what}.`);
     return v;

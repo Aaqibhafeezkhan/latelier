@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { buildCollections } from '../../electron/services/import/unknownJson';
+import type { MapTarget } from '@shared/types';
+import { buildCollections, combineRow, MAP_TARGETS } from '../../electron/services/import/unknownJson';
 
 // Every planted secret starts with this prefix and is otherwise alphanumeric,
 // so percent-encoding cannot disguise a leak and a plain substring search over
@@ -85,5 +86,31 @@ describe('buildCollections — masking properties', () => {
         }
       }
     }), { numRuns: 300 });
+  });
+});
+
+/** Every dot path in a row, leaves and containers alike, so mappings can also miss. */
+function allPaths(node: unknown, prefix = ''): string[] {
+  if (typeof node !== 'object' || node === null) return [];
+  return Object.entries(node).flatMap(([k, v]) => {
+    const path = prefix ? `${prefix}.${k}` : k;
+    return [path, ...allPaths(v, path)];
+  });
+}
+
+const rowWithMapping = row.chain((r) => {
+  const paths = ['absent', ...allPaths(r)];
+  const target = fc.constantFrom(...paths);
+  const shape = Object.fromEntries(MAP_TARGETS.map((t) => [t, target])) as Record<MapTarget, fc.Arbitrary<string>>;
+  return fc.tuple(fc.constant(r), fc.record(shape, { requiredKeys: [] }));
+});
+
+describe('combineRow — secret properties', () => {
+  it('keeps every planted secret out of the row, whatever the mapping, except in `secrets`', () => {
+    fc.assert(fc.property(rowWithMapping, ([r, mapping]) => {
+      const shown: Partial<ReturnType<typeof combineRow>> = combineRow(r, mapping);
+      delete shown.secrets;
+      expect(JSON.stringify(shown)).not.toContain(PREFIX);
+    }), { numRuns: 1000 });
   });
 });
