@@ -1,5 +1,13 @@
-import type { ConnectionInput, RepickFile } from '@shared/types';
+import type { ConnectionInput, ExportSecretField, RepickFile } from '@shared/types';
 import type { SecretValues } from '../connectionExportFormat.ts';
+
+/**
+ * Secrets that stay encrypted until commit. A L'Atelier export names its sealed
+ * fields in clear; a Compass blob is opaque until the passphrase opens it.
+ */
+export type SealedSecrets =
+  | { kind: 'latelier'; fields: ExportSecretField[] }
+  | { kind: 'compass'; blob: string };
 
 /** One importable connection, whatever file it came from. Main process only. */
 export interface CandidateRow {
@@ -7,8 +15,7 @@ export interface CandidateRow {
   input: Partial<ConnectionInput>;
   /** Plaintext, main only. */
   secrets: SecretValues;
-  /** Opaque to the service; decrypted at commit. */
-  sealed?: { kind: 'latelier' | 'compass' };
+  sealed?: SealedSecrets;
   /** Raw name before cut/dedupe; '' derives from the host. */
   nameHint: string;
   explicitDirect: boolean;
