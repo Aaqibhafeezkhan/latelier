@@ -92,6 +92,8 @@
     "electron/script-runner/rpcSurface.ts",
     "electron/script-runner/rpcCodec.ts",
     "electron/script-runner/rpcHost.ts",
-    "electron/services/runner/spawner.ts"
+    "electron/services/runner/spawner.ts",
+    "electron/services/import/compassCrypto.ts",
+    "electron/services/import/compassReader.ts"
   ]
 }
