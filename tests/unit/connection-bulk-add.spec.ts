@@ -111,6 +111,44 @@ describe('baseNames / planLineNames', () => {
   });
 });
 
+describe('parseLine: multiHost and repick', () => {
+  it('flags a string that named several hosts, and only that', () => {
+    expect(ok('mongodb://a:1,b:2/').multiHost).toBe(true);
+    expect(ok('mongodb://a:1/').multiHost).toBe(false);
+    expect(ok('mongodb://a:1/?w=1').multiHost).toBe(false);
+  });
+
+  it('carries the files the parser says to pick again, with no path in the line', () => {
+    const l = ok('mongodb://h/?tls=true&tlsCAFile=/etc/ca.pem&tlsCertificateKeyFile=/etc/c.pem');
+    expect(l.repick).toEqual(['tlsCa', 'tlsClientCert']);
+    expect(JSON.stringify(l)).not.toContain('/etc/');
+    expect(ok('mongodb://h/').repick).toEqual([]);
+  });
+
+  it('takes explicitDirect from the parser: an explicit false counts, an absent param does not', () => {
+    expect(ok('mongodb://h/?directConnection=false').explicitDirect).toBe(true);
+    expect(ok('mongodb://h/').explicitDirect).toBe(false);
+  });
+
+  it('shows the parser markers in the preview, once, next to the X.509 one', () => {
+    const e = previewEntry(ok('mongodb://h/?authMechanism=MONGODB-X509&tls=true&tlsCAFile=/a.pem&tlsCertificateKeyFile=/c.pem'), 0, 'h');
+    expect(e).toMatchObject({ ok: true, repick: ['tlsCa', 'tlsClientCert'] });
+  });
+
+  it('reports a proxy drop as words without the proxy password', () => {
+    const l = ok('mongodb://h/?proxyHost=p&proxyPassword=hunter2');
+    expect(l.warnings).toHaveLength(1);
+    expect(JSON.stringify(l)).not.toContain('hunter2');
+  });
+
+  it('turns an OIDC string into a refusal reason', () => {
+    expect(parseLine('mongodb://h/?authMechanism=MONGODB-OIDC')).toEqual({
+      ok: false,
+      reason: "OIDC sign-in isn't supported yet.",
+    });
+  });
+});
+
 describe('needsCredentials / repickFor', () => {
   it('asks for credentials unless the string has both a username and a password', () => {
     expect(needsCredentials(ok('mongodb://u:p@h').input)).toBe(false);
@@ -123,6 +161,12 @@ describe('needsCredentials / repickFor', () => {
     expect(needsCredentials(x509)).toBe(false);
     expect(repickFor(x509)).toEqual(['tlsClientCert']);
     expect(repickFor(ok('mongodb://h').input)).toEqual([]);
+  });
+
+  it('adds the files it is handed without repeating the X.509 one', () => {
+    const x509 = ok('mongodb://h/?authMechanism=MONGODB-X509&tls=true').input;
+    expect(repickFor(x509, ['tlsClientCert', 'tlsCa'])).toEqual(['tlsClientCert', 'tlsCa']);
+    expect(repickFor(ok('mongodb://h').input, ['tlsCa'])).toEqual(['tlsCa']);
   });
 });
 

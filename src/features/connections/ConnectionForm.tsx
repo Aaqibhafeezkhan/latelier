@@ -16,6 +16,7 @@ import type {
   ProbeResult,
 } from '@shared/types';
 import type { IpcError, PickFilePurpose } from '@shared/ipc';
+import { REPICK_LABEL } from './transferCopy';
 import { useTroubleshooting } from '../../troubleshooting/TroubleshootingContext';
 import {
   TLS_INLINE_EXPLAINER,
@@ -1055,7 +1056,7 @@ function ConnectionFormImpl({
 
   const handlePasteUri = async (uri: string) => {
     try {
-      const { input, warnings } = await api.conn.parseUri(uri);
+      const { input, warnings, repick } = await api.conn.parseUri(uri);
       formApi.setValues((f) => ({
         ...f,
         type: input.connectionType ?? f.type,
@@ -1080,14 +1081,17 @@ function ConnectionFormImpl({
         directConnection: input.advanced?.directConnection ?? f.directConnection,
         appName: input.advanced?.appName ?? f.appName,
       }));
+      // The paths are machine-local, so the fields stay empty and the user picks the files again.
+      const files = (repick ?? []).map((f) => REPICK_LABEL[f]);
+      const repickNote = files.length > 0 ? ` Still to do: ${files.join(', ')}.` : '';
       if (warnings.length > 0) {
         setToast(
           `URI applied. ${warnings.length} warning${warnings.length > 1 ? 's' : ''}: ${
             warnings.map((w) => w.detail ?? w.code).join(', ')
-          }`,
+          }${repickNote}`,
         );
       } else {
-        setToast('URI applied.');
+        setToast(`URI applied.${repickNote}`);
       }
     } catch (err) {
       notify.error(isIpcError(err) ? err.message : 'Could not parse URI', { title: 'URI parse failed' });
