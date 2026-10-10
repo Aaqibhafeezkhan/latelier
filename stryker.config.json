@@ -19,6 +19,7 @@
     "electron/services/UpdateService.ts",
     "electron/services/connectionExportFormat.ts",
     "electron/services/connectionBulkAdd.ts",
+    "electron/services/import/unknownJson.ts",
     "src/utils/ejson.ts",
     "src/utils/bigIntJson.ts",
     "electron/mongo/uri-parse.ts",
