@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { act, render, screen } from '../helpers/render';
+import { act, render, screen, waitFor, within } from '../helpers/render';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import {
   ConnectionTransferProvider,
@@ -50,14 +50,17 @@ describe('ConnectionTransferProvider', () => {
     expect(screen.queryByRole('dialog', { name: 'Export Connections' })).toBeNull();
   });
 
-  it('opens the dialogs from the context API and closes them on Cancel', async () => {
+  it('opens Export and the Import Wizard from the context API and closes on Cancel', async () => {
     setup();
     await userEvent.click(screen.getByText('open export'));
     expect(await screen.findByRole('dialog', { name: 'Export Connections' })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     await userEvent.click(screen.getByText('open import'));
-    expect(await screen.findByRole('dialog', { name: 'Import Connections' })).toBeTruthy();
+    const wizard = await screen.findByRole('dialog', { name: 'Import Connections' });
+    // The Import Wizard, opened at its file source.
+    await waitFor(() => expect(document.activeElement).toBe(within(wizard).getByRole('button', { name: 'Choose file…' })));
+    expect(within(wizard).getByRole('textbox', { name: /paste connection strings/i })).toBeTruthy();
   });
 
   it('stops listening to the menu when unmounted', () => {

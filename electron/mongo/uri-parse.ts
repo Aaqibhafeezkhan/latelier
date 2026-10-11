@@ -25,6 +25,9 @@ const READ_PREFS: ReadPref[] = [
   'nearest',
 ];
 
+const SRV_SCHEME = 'mongodb+srv://';
+const INVALID_URI = "This isn't a valid connection string.";
+
 const PROXY_PARAMS = ['proxyhost', 'proxyport', 'proxyusername', 'proxypassword'];
 
 const DROPPED_OPTIONS = new Set([
@@ -64,34 +67,37 @@ export function parseConnectionUri(raw: string): ParsedUri {
   // surface a warning at the end.
   const srvPortStripped: string[] = [];
   let normalized = trimmed;
-  // Stryker disable next-line ConditionalExpression,StringLiteral: forcing this guard true only widens which strings reach the replace() below; the replacement regex is itself anchored to the literal 'mongodb+srv://' prefix, so it never matches a non-SRV string regardless of the guard. Verified with node: 'mongodb://...'.replace(/^(mongodb\+srv:\/\/...)/, ...) returns the input unchanged.
-  if (normalized.startsWith('mongodb+srv://')) {
-    normalized = normalized.replace(
-      // Stryker disable next-line Regex: removing the leading `^` is unobservable here — this branch only runs when `normalized` already starts with the literal at index 0 (see the startsWith guard above), and String#replace tries the leftmost position first, so the match is found at index 0 whether or not it is anchored. Verified with node across strings that also contain the literal again later.
-      /^(mongodb\+srv:\/\/(?:[^@/]*@)?)([^/?]+)/,
-      (_full, prefix: string, hostSegment: string) => {
-        const cleaned = hostSegment
-          .split(',')
-          .map((h) => {
-            const m = h.match(/^(.*?):(\d+)$/);
-            if (m) {
-              srvPortStripped.push(m[0]!);
-              return m[1]!;
-            }
-            return h;
-          })
-          .join(',');
-        return prefix + cleaned;
-      },
-    );
+  if (normalized.startsWith(SRV_SCHEME)) {
+    // The host list starts after the last '@' before the query, so a userinfo
+    // holding '/' or ':digits' is never read as a host and never reaches the
+    // warning below.
+    const rest = normalized.slice(SRV_SCHEME.length);
+    const queryAt = rest.indexOf('?');
+    const hostStart = rest.lastIndexOf('@', queryAt === -1 ? rest.length : queryAt) + 1;
+    const fromHost = rest.slice(hostStart);
+    const hostEnd = fromHost.search(/[/?]/);
+    const hostSegment = hostEnd === -1 ? fromHost : fromHost.slice(0, hostEnd);
+    const cleaned = hostSegment
+      .split(',')
+      .map((h) => {
+        // Stryker disable next-line Regex: dropping the `^` is unobservable — `.*?` can match from index 0 and match() takes the leftmost match, so the match always starts at 0 anyway.
+        const m = h.match(/^(.*?):(\d+)$/);
+        if (m) {
+          srvPortStripped.push(m[0]!);
+          return m[1]!;
+        }
+        return h;
+      })
+      .join(',');
+    normalized = SRV_SCHEME + rest.slice(0, hostStart) + cleaned + fromHost.slice(hostSegment.length);
   }
 
   let cs: ConnectionString;
   try {
     cs = new ConnectionString(normalized);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new ValidationError(`could not parse URI: ${msg}`);
+  } catch {
+    // Never the library's message: it quotes the userinfo, password included.
+    throw new ValidationError(INVALID_URI);
   }
 
   const warnings: ParsedUriWarning[] = [];
@@ -100,6 +106,7 @@ export function parseConnectionUri(raw: string): ParsedUri {
   if (srvPortStripped.length > 0) {
     warnings.push({
       code: 'OPTION_DROPPED',
+      // Stryker disable next-line StringLiteral: the separator is never seen — two stripped ports need two SRV hosts, which ConnectionString refuses before this warning is built (the multi-host SRV test).
       detail: `SRV URIs cannot include a port; stripped: ${srvPortStripped.join(', ')}`,
     });
   }
@@ -120,20 +127,10 @@ export function parseConnectionUri(raw: string): ParsedUri {
   }
   const firstHost = hosts[0]!;
   // host:port split (SRV always has no port)
-  const split = isSrv ? { host: firstHost, port: undefined } : splitHostPort(firstHost);
-  const host = split.host;
-  if (!HOST_CHARS.test(host) && !IPV6_LITERAL.test(host)) {
-    throw new ValidationError("The host has characters a host name can't contain.");
-  }
-  let port = 27017;
-  if (split.port !== undefined) {
-    // Digits only: Number() would also accept '1e3', '0x10', ' 5' and ''.
-    const p = /^\d{1,5}$/.test(split.port) ? Number(split.port) : 0;
-    if (p < 1 || p > 65535) {
-      throw new ValidationError('Port must be a number from 1 to 65535.');
-    }
-    port = p;
-  }
+  const authority = parseHostPort(firstHost, !isSrv);
+  if ('problem' in authority) throw new ValidationError(authority.problem);
+  const host = authority.host;
+  const port = authority.port ?? 27017;
 
   // Path → default_db ---------------------------------------------------
   // decodeURIComponent throws a raw URIError on malformed percent-encoding
@@ -281,14 +278,35 @@ export function parseConnectionUri(raw: string): ParsedUri {
 const HOST_CHARS = /^[A-Za-z0-9._%-]+$/;
 const IPV6_LITERAL = /^\[[0-9A-Fa-f:.]+\]$/;
 
+/**
+ * One `host[:port]` as a connection string's host is read: the host may hold
+ * only host-name characters (or be a bracketed IPv6 literal), and a port, when
+ * `withPort` allows one, must be 1–65535. The problem comes back in words,
+ * never quoting the input.
+ */
+export function parseHostPort(
+  authority: string,
+  withPort: boolean,
+): { host: string; port?: number } | { problem: string } {
+  const split = withPort ? splitHostPort(authority) : { host: authority, port: undefined };
+  if (!HOST_CHARS.test(split.host) && !IPV6_LITERAL.test(split.host)) {
+    return { problem: "The host has characters a host name can't contain." };
+  }
+  if (split.port === undefined) return { host: split.host };
+  // Digits only: Number() would also accept '1e3', '0x10', ' 5' and ''.
+  const p = /^\d{1,5}$/.test(split.port) ? Number(split.port) : 0;
+  if (p < 1 || p > 65535) return { problem: 'Port must be a number from 1 to 65535.' };
+  return { host: split.host, port: p };
+}
+
 /** Split `host[:port]`, treating a bracketed IPv6 literal as one unit. */
 function splitHostPort(authority: string): { host: string; port: string | undefined } {
   let idx = authority.lastIndexOf(':');
   if (authority.startsWith('[')) {
     const close = authority.indexOf(']');
     idx = authority.charAt(close + 1) === ':' ? close + 1 : -1;
-    if (idx < 0) return { host: authority, port: undefined };
   }
+  // Stryker disable next-line EqualityOperator: at idx 0 the host is '' either way or keeps its leading ':', and parseHostPort refuses both with the same host message.
   if (idx < 0) return { host: authority, port: undefined };
   return { host: authority.slice(0, idx), port: authority.slice(idx + 1) };
 }

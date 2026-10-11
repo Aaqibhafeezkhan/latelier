@@ -1,7 +1,7 @@
 import React from 'react';
 import { api } from '../../api/atelier';
 import { ConnectionExportDialog } from './ConnectionExportDialog';
-import { ConnectionImportDialog } from './ConnectionImportDialog';
+import { ImportWizard } from './importWizard/ImportWizard';
 
 interface ConnectionTransferApi {
   openExport: () => void;
@@ -16,7 +16,7 @@ export function useConnectionTransfer(): ConnectionTransferApi {
 }
 
 /**
- * Mounts the Connection Export / Import dialogs at App level so the command
+ * Mounts the Connection Export dialog and the Import Wizard at App level so the command
  * palette, the native File menu and the empty screen can all open them.
  */
 export function ConnectionTransferProvider({ children }: { children: React.ReactNode }) {
@@ -37,7 +37,7 @@ export function ConnectionTransferProvider({ children }: { children: React.React
     <Ctx.Provider value={value}>
       {children}
       {open === 'export' && <ConnectionExportDialog onClose={() => setOpen(null)} />}
-      {open === 'import' && <ConnectionImportDialog onClose={() => setOpen(null)} />}
+      {open === 'import' && <ImportWizard initial="file" onClose={() => setOpen(null)} />}
     </Ctx.Provider>
   );
 }

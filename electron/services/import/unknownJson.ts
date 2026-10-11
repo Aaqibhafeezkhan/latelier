@@ -1,6 +1,7 @@
 import ConnectionString from 'mongodb-connection-string-url';
 import type { MapTarget, MappingCollection, MappingField } from '@shared/types';
 import { ValidationError } from '../../errors.ts';
+import { parseHostPort } from '../../mongo/uri-parse.ts';
 import { parseLine, type ParsedLine } from '../connectionBulkAdd.ts';
 import type { SecretValues } from '../connectionExportFormat.ts';
 import type { CandidateRow } from './candidateRow.ts';
@@ -30,6 +31,19 @@ export interface FoundCollection {
   truncatedRows?: number;
 }
 
+/** A connection string anywhere in a text, any case. Linear: no nested quantifier. */
+const CONNECTION_STRING = /mongodb(\+srv)?:\/\//i;
+/** Longer keys are skipped: nobody maps them, and hashing them per leaf is a cost a file controls. */
+const MAX_KEY_LENGTH = 256;
+
+/**
+ * A key that may not become part of a path or `at`: it holds a connection
+ * string (and so possibly a password), or it is too long to be a field name.
+ */
+function unsafeKey(key: string): boolean {
+  return key.length > MAX_KEY_LENGTH || CONNECTION_STRING.test(key);
+}
+
 function isObject(v: unknown): v is Row {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -50,7 +64,7 @@ export function findCollections(value: unknown): FoundCollection[] {
     if (path.length === MAX_DEPTH || node === null) return;
     // Stryker disable next-line ConditionalExpression: walking a string instead of skipping it is unobservable — its entries are single characters, which hold no array, so no collection is ever found under one; the check only saves the work.
     if (typeof node !== 'object') return;
-    for (const [key, child] of Object.entries(node)) walk(child, [...path, key]);
+    for (const [key, child] of Object.entries(node)) if (!unsafeKey(key)) walk(child, [...path, key]);
   };
   walk(value, []);
   if (found.length === 0 && isObject(value)) found.push({ at: '', rows: [value] });
@@ -71,6 +85,7 @@ function flattenRow(row: Row): Map<string, Scalar> {
   const out = new Map<string, Scalar>();
   const walk = (node: object, prefix: string, depth: number): void => {
     for (const [key, child] of Object.entries(node)) {
+      if (unsafeKey(key)) continue;
       const path = prefix ? `${prefix}.${key}` : key;
       if (typeof child === 'object' && child !== null) {
         if (depth < MAX_ROW_DEPTH) walk(child, path, depth + 1);
@@ -105,12 +120,18 @@ function sampleFor(path: string, value: Scalar): { sample: string; masked: boole
   const name = lastKey(path);
   if (SECRET_PARTS.some((part) => name.includes(part))) return { sample: MASK, masked: true };
   const text = String(value);
-  // Case-insensitive on purpose: anything shaped like a connection string is
-  // either stripped or hidden, even one the parser would later refuse.
-  if (!/^\s*mongodb(\+srv)?:\/\//i.test(text)) return { sample: text, masked: false };
+  // Case-insensitive and anywhere on purpose: anything holding a connection
+  // string is either stripped or hidden, even one the parser would refuse.
+  if (!CONNECTION_STRING.test(text)) return { sample: text, masked: false };
+  // Spaces and invisible characters around the string are not part of it.
+  const bare = trimInvisible(text);
+  // Text around the string (a note, a second string, one inside a parameter)
+  // is hidden whole: where each string ends inside it cannot be told reliably.
+  // Text before the string fails the parse below; a second one is caught here.
+  if (CONNECTION_STRING.test(bare.slice(1))) return { sample: MASK, masked: true };
   let cs: ConnectionString;
   try {
-    cs = new ConnectionString(text.trim());
+    cs = new ConnectionString(bare);
   } catch {
     // Fail closed: an unparseable string may still hold a password we cannot locate.
     return { sample: MASK, masked: true };
@@ -132,6 +153,23 @@ function sampleFor(path: string, value: Scalar): { sample: string; masked: boole
   cs.password = '';
   cs.search = kept.toString();
   return { sample: cs.toString(), masked: true };
+}
+
+/** Zero-width characters `trim()` leaves in place (it already removes U+FEFF). */
+const ZERO_WIDTH = new Set(['\u200B', '\u200C', '\u200D', '\u2060']);
+
+/**
+ * `trim()` that also drops zero-width characters; a loop, since `\s+$`
+ * backtracks quadratically. Only called on text holding a connection string,
+ * so both loops stop at a visible character without a bounds check.
+ */
+function trimInvisible(text: string): string {
+  const edge = (c: string): boolean => c.trim() === '' || ZERO_WIDTH.has(c);
+  let start = 0;
+  let end = text.length;
+  while (edge(text[start]!)) start++;
+  while (edge(text[end - 1]!)) end--;
+  return text.slice(start, end);
 }
 
 const SECRET_PARAMS = new Set(['tlscertificatekeyfilepassword', 'proxypassword']);
@@ -197,6 +235,12 @@ const SECRET_TARGETS: ReadonlySet<MapTarget> = new Set(['password', 'connectionS
 
 const asText = (v: Scalar): string | undefined => (typeof v === 'string' ? v : undefined);
 
+function asHost(v: Scalar): { host: string; port?: number } | undefined {
+  if (typeof v !== 'string') return undefined;
+  const parsed = parseHostPort(v, true);
+  return 'problem' in parsed ? undefined : parsed;
+}
+
 /** Digits only, so a number or numeric string that is a whole port; 1.5, -1, '0x10' and '1e3' are not. */
 function asPort(v: Scalar): number | undefined {
   const n = /^\d+$/.test(String(v)) ? Number(v) : Number.NaN;
@@ -251,14 +295,19 @@ export function combineRow(row: Row, mapping: Partial<Record<MapTarget, string>>
     if (!parsed.ok) return unusable(nameHint, warnings, parsed.reason);
     line = parsed;
   } else {
-    const host = read('host', asText, 'text');
-    const port = read('port', asPort, 'a port number from 1 to 65535') ?? DEFAULT_PORT;
+    // The parser's own host rules: `host:port` splits, anything else a host
+    // name can't hold is refused.
+    const host = read('host', asHost, 'a valid host');
+    const port = read('port', asPort, 'a port number from 1 to 65535');
     if (host === undefined) return unusable(nameHint, warnings, 'No connection string or host in this row.');
+    if (host.port !== undefined && port !== undefined && port !== host.port) {
+      warnings.push(`${mapping.port} was ignored: the host already sets a different port.`);
+    }
     // The parser's own defaults for a bare standard string, so a mapped Host
     // and Port give the same Connection a pasted mongodb://host:port would.
     line = parseLine('mongodb://localhost') as ParsedLine;
-    line.input.host = host;
-    line.input.port = port;
+    line.input.host = host.host;
+    line.input.port = host.port ?? port ?? DEFAULT_PORT;
   }
 
   const input = line.input;

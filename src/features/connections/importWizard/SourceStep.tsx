@@ -37,7 +37,15 @@ export function SourceStep({ initial, busy, error, onFile, onUris }: SourceStepP
   return (
     <Stack gap="sm">
       <Group gap="xs">
-        <SubmitButton size="compact-xs" submitting={busy} autoFocus={initial === 'file'} onClick={onFile}>
+        {/* `data-autofocus` as well: inside a Modal, Mantine's FocusTrap moves focus after
+            mount to `[data-autofocus]`, else to the header's close button, overriding `autoFocus`. */}
+        <SubmitButton
+          size="compact-xs"
+          submitting={busy}
+          autoFocus={initial === 'file'}
+          data-autofocus={initial === 'file' || undefined}
+          onClick={onFile}
+        >
           Choose file…
         </SubmitButton>
         <Text size="xs" c="dimmed">
@@ -52,6 +60,7 @@ export function SourceStep({ initial, busy, error, onFile, onUris }: SourceStepP
         resize="vertical"
         size="xs"
         autoFocus={initial === 'paste'}
+        data-autofocus={initial === 'paste' || undefined}
         spellCheck={false}
         autoComplete="off"
         styles={{ input: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' } }}
