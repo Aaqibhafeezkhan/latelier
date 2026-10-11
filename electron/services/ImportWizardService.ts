@@ -81,6 +81,8 @@ export class ImportWizardService {
   private readonly dialogs: Pick<ConnectionExportDialogs, 'openPath'>;
   private readonly log?: Logger;
   private readonly pending = new Map<string, Pending>();
+  /** Bumped by every clearPending(), so a commit in flight can tell its token was cleared. */
+  private generation = 0;
 
   constructor(opts: {
     conns: ConnectionService;
@@ -97,13 +99,14 @@ export class ImportWizardService {
   /** Called when the window closes: a token does not outlive it. */
   clearPending(): void {
     this.pending.clear();
+    this.generation++;
   }
 
   /** C14 §2: picks, reads and classifies a file. A refusal throws before a token exists. */
   async importOpen(): Promise<ImportOpenResult> {
     const picked = await this.dialogs.openPath();
     if (picked === null) return { cancelled: true };
-    const found = detect(await readImportFile(picked));
+    const found = detect(await readImportFile(picked, this.log));
     if (found.source === 'unknown') {
       const collections = buildCollections(found.value);
       const token = this.hold({
@@ -160,13 +163,15 @@ export class ImportWizardService {
 
     // Single-use even under concurrent commits: taken out before the first await.
     this.pending.delete(input.token);
+    const generation = this.generation;
     let opened: Map<number, Opened>;
     try {
       opened = input.withoutSecrets
         ? new Map()
         : await this.openSealed(pending, indices, input.passphrase);
     } catch (err) {
-      this.pending.set(input.token, pending);
+      // Not when the window closed meanwhile: its tokens must not outlive it.
+      if (this.generation === generation) this.pending.set(input.token, pending);
       throw err;
     }
 

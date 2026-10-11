@@ -46,10 +46,32 @@ const VAULT_FIELD = {
 const NO_SECURE_STORAGE_REASON =
   'No secure storage on this install, and storing passwords unencrypted is off.';
 
-/** Reads a file the user picked in main's dialog; one over the import limit is refused before it is read. */
-export async function readImportFile(file: string): Promise<string> {
-  checkFileSize((await fs.stat(file)).size);
-  return fs.readFile(file, 'utf8');
+/**
+ * Reads a file the user picked in main's dialog; one over the import limit is
+ * refused before it is read. A file system error names the absolute path in
+ * its message, so it never reaches the renderer: it is logged by its code and
+ * reported in words.
+ */
+export async function readImportFile(file: string, log?: Logger): Promise<string> {
+  let size: number;
+  try {
+    size = (await fs.stat(file)).size;
+  } catch (err) {
+    throw unreadable(err, log);
+  }
+  checkFileSize(size);
+  try {
+    return await fs.readFile(file, 'utf8');
+  } catch (err) {
+    throw unreadable(err, log);
+  }
+}
+
+function unreadable(err: unknown, log: Logger | undefined): ValidationError {
+  log?.warn('conn-import', 'could not read the picked file', {
+    code: (err as NodeJS.ErrnoException).code ?? 'unknown',
+  });
+  return new ValidationError("This file can't be read.");
 }
 
 /**
@@ -189,7 +211,7 @@ export class ConnectionExportService {
     const source = await this.dialogs.openPath();
     if (source === null) return { cancelled: true };
     // A failure here throws before a token exists, so nothing is held or written.
-    const file = parseConnectionExport(await readImportFile(source));
+    const file = parseConnectionExport(await readImportFile(source, this.log));
     const token = randomUUID();
     this.pending.set(token, file);
     const savedAs = planNames(

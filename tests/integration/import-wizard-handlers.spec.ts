@@ -11,6 +11,7 @@ import { ConnectionService, connectionReader } from '../../electron/mongo/Connec
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { SecretsVault } from '../../electron/secrets/SecretsVault';
 import { ImportWizardService } from '../../electron/services/ImportWizardService';
+import { buildConnectionExport } from '../../electron/services/connectionExportFormat';
 import { IPC_CHANNELS, type Envelope } from '../../shared/ipc';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
@@ -151,6 +152,7 @@ describe('conn:import* handlers: payload validation', () => {
 describe('conn:import* handlers: no secret reaches the renderer', () => {
   const COMPASS = path.join(__dirname, '../fixtures/compass');
   const COMPASS_PASS = fs.readFileSync(path.join(COMPASS, 'passphrase.txt'), 'utf8').trim();
+  const LATELIER_PASS = 'latelier-passphrase-marker';
   const MARKERS = [
     // The real Compass fixtures: plain values, and the same values sealed in the encrypted export.
     'fixture-pw-1',
@@ -165,6 +167,10 @@ describe('conn:import* handlers: no secret reaches the renderer', () => {
     'json-secret-marker',
     'json-uri-pw-marker',
     'typed-pw-marker',
+    'latelier-pw-marker',
+    'latelier-ssh-pw-marker',
+    'latelier-ssh-phrase-marker',
+    LATELIER_PASS,
   ];
 
   let shim: ReturnType<typeof createShim>;
@@ -218,6 +224,50 @@ describe('conn:import* handlers: no secret reaches the renderer', () => {
     if (!('token' in opened)) throw new Error('expected a token');
     expect(code(await commit(opened.token, [0, 1, 2], { passphrase: 'wrong passphrase' }))).toBe('BAD_PASSPHRASE');
     expect(data(await commit(opened.token, [0, 1, 2], { passphrase: COMPASS_PASS })).created).toHaveLength(3);
+  });
+
+  it("a L'Atelier export with sealed secrets: open, a wrong passphrase, then the right one", async () => {
+    openFrom = path.join(dir, 'export.json');
+    fs.writeFileSync(
+      openFrom,
+      await buildConnectionExport({
+        items: [
+          {
+            entry: {
+              name: 'Sealed',
+              color: '#1A6835',
+              connectionType: 'standard',
+              readOnly: false,
+              host: 'db.example.com',
+              port: 27017,
+              authMech: 'scram256',
+              authUsername: 'alice',
+              tls: { enabled: false, verify: true },
+              ssh: { enabled: true, host: 'bastion', port: 22, username: 'me', authMethod: 'password' },
+              advanced: {
+                connectTimeoutMs: 10_000,
+                socketTimeoutMs: 30_000,
+                serverSelectionTimeoutMs: 30_000,
+                readPreference: 'primary',
+                maxPoolSize: 100,
+                directConnection: false,
+              },
+            },
+            secrets: {
+              password: 'latelier-pw-marker',
+              sshPassword: 'latelier-ssh-pw-marker',
+              sshPassphrase: 'latelier-ssh-phrase-marker',
+            },
+          },
+        ],
+        passphrase: LATELIER_PASS,
+        scrypt: { N: 1024, r: 8, p: 1 },
+      }),
+    );
+    const opened = data(await call<ImportOpenResult>(IPC_CHANNELS.connImportOpen, {}));
+    if (!('token' in opened)) throw new Error('expected a token');
+    expect(code(await commit(opened.token, [0], { passphrase: 'wrong passphrase' }))).toBe('BAD_PASSPHRASE');
+    expect(data(await commit(opened.token, [0], { passphrase: LATELIER_PASS })).created).toHaveLength(1);
   });
 
   it('unknown JSON: open, map, re-map and commit', async () => {

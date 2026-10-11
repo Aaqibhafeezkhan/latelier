@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionInput, ImportOpenResult, Review, ReviewRow } from '@shared/types';
 import { ConnectionRepo } from '../../electron/db/repositories/ConnectionRepo';
-import type { AppError } from '../../electron/errors';
+import { ConflictError, type AppError } from '../../electron/errors';
 import { ConnectionService, connectionReader } from '../../electron/mongo/ConnectionService';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { SecretsVault } from '../../electron/secrets/SecretsVault';
@@ -89,9 +89,10 @@ describe('ImportWizardService', () => {
     const pool = new MongoPool({ repo: connectionReader(repo, vault), vault });
     const conns = new ConnectionService({ repo, vault, pool });
     const dialogs = { savePath: async () => path.join(dir, 'export.json'), openPath: async () => openFrom };
-    const wizard = new ImportWizardService({ conns, vault, dialogs });
-    const exporter = new ConnectionExportService({ conns, vault, dialogs, scrypt: FAST });
-    return { keychain, vault, repo, conns, wizard, exporter };
+    const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const wizard = new ImportWizardService({ conns, vault, dialogs, log });
+    const exporter = new ConnectionExportService({ conns, vault, dialogs, scrypt: FAST, log });
+    return { keychain, vault, repo, conns, wizard, exporter, log };
   };
 
   const writeFile = (name: string, content: string): string => {
@@ -130,6 +131,35 @@ describe('ImportWizardService', () => {
     it('cancelling the dialog is not an error', async () => {
       const a = install();
       expect(await a.wizard.importOpen()).toEqual({ cancelled: true });
+    });
+
+    it('refuses a file that is gone without naming its path, in either import', async () => {
+      const a = install();
+      openFrom = path.join(dir, 'gone.json');
+      for (const run of [() => a.wizard.importOpen(), () => a.exporter.importPreview()]) {
+        const err = (await run().then(
+          () => null,
+          (e: unknown) => e,
+        )) as AppError;
+        expect(err).toMatchObject({ code: 'VALIDATION', message: "This file can't be read." });
+        expect(JSON.stringify({ message: err.message, details: err.details })).not.toContain(dir);
+      }
+      expect(a.log.warn).toHaveBeenCalledWith('conn-import', 'could not read the picked file', { code: 'ENOENT' });
+      expect(JSON.stringify(a.log.warn.mock.calls)).not.toContain(dir);
+    });
+
+    // Root reads a mode-000 file anyway, so the read error can't be produced there.
+    it.skipIf(process.getuid?.() === 0)('refuses a file it may not read without naming its path', async () => {
+      const a = install();
+      openFrom = writeFile('locked.json', '{"servers":[{"host":"h"}]}');
+      fs.chmodSync(openFrom, 0o000);
+      const err = (await a.wizard.importOpen().then(
+        () => null,
+        (e: unknown) => e,
+      )) as AppError;
+      expect(err).toMatchObject({ code: 'VALIDATION', message: "This file can't be read." });
+      expect(JSON.stringify({ message: err.message, details: err.details })).not.toContain(dir);
+      expect(a.log.warn).toHaveBeenCalledWith('conn-import', 'could not read the picked file', { code: 'EACCES' });
     });
 
     it('refuses a file over the limit without reading it', async () => {
@@ -535,6 +565,54 @@ describe('ImportWizardService', () => {
         { name: 'h', reason: 'No secure storage on this install, and storing passwords unencrypted is off.' },
       ]);
       expect(a.conns.get(result.created[0]!.id).hasPasswordStored).toBe(false);
+    });
+  });
+
+  describe('commit', () => {
+    const commitAll = (w: ImportWizardService, token: string, indices: number[]) =>
+      w.importCommitV2({ token, indices, readOnly: false, credentials: [], directConnection: [] });
+
+    it('lets one of two concurrent commits on a token through, so rows are created once', async () => {
+      const a = install();
+      const { token } = a.wizard.importUris(['mongodb://h', 'mongodb://k']);
+      const outcomes = await Promise.allSettled([commitAll(a.wizard, token, [0, 1]), commitAll(a.wizard, token, [0, 1])]);
+      const refused = outcomes.filter((o) => o.status === 'rejected');
+      expect(refused).toHaveLength(1);
+      expect((refused[0] as PromiseRejectedResult).reason).toMatchObject({ code: 'VALIDATION' });
+      expect(a.conns.list().map((c) => c.name).sort((x, y) => x.localeCompare(y))).toEqual(['h', 'k']);
+    });
+
+    it('skips a row create() refuses and still creates the rows after it', async () => {
+      const a = install();
+      const { token } = a.wizard.importUris(['mongodb://h', 'mongodb://k', 'mongodb://m']);
+      const create = a.conns.create.bind(a.conns);
+      vi.spyOn(a.conns, 'create')
+        .mockRejectedValueOnce(new Error('disk full at /secret/path'))
+        .mockRejectedValueOnce(new ConflictError("connection name 'k' already exists"))
+        .mockImplementation(create);
+      const result = await commitAll(a.wizard, token, [0, 1, 2]);
+      expect(result.skipped).toEqual([
+        { index: 0, name: 'h', reason: 'Unexpected error' },
+        { index: 1, name: 'k', reason: "connection name 'k' already exists" },
+      ]);
+      expect(result.created.map((c) => c.name)).toEqual(['m']);
+      expect(a.log.error).toHaveBeenCalledTimes(2);
+    });
+
+    it('a window closing while a passphrase is checked clears the token for good', async () => {
+      const a = install();
+      const { token } = await openReview(a.wizard, ENCRYPTED);
+      const commit = (passphrase: string) =>
+        a.wizard.importCommitV2({ token, indices: [0], passphrase, readOnly: false, credentials: [], directConnection: [] });
+      const wrong = commit('not the passphrase');
+      // The commit is waiting on the key derivation; the window closes now.
+      a.wizard.clearPending();
+      expect(await codeOf(wrong)).toBe('BAD_PASSPHRASE');
+      await expect(commit(COMPASS_PASS)).rejects.toMatchObject({
+        code: 'VALIDATION',
+        message: 'This import has expired. Choose the file again.',
+      });
+      expect(a.conns.list()).toEqual([]);
     });
   });
 
