@@ -112,7 +112,15 @@ export function ReviewStep({ source, review, busy, error, passphraseError, onBac
                         onChange={(e) => toggle(r.index, e.currentTarget.checked)}
                       />
                     </Table.Td>
-                    <Table.Td fw={600}>{r.savedAs}</Table.Td>
+                    <Table.Td fw={600}>
+                      {r.savedAs}
+                      {r.renamedFrom !== undefined && (
+                        // Text, not colour alone: the saved name differs from the file's after a clash.
+                        <Text size="xs" c="dimmed" fw={400}>
+                          {`renamed from "${r.renamedFrom}"`}
+                        </Text>
+                      )}
+                    </Table.Td>
                     <Table.Td style={{ fontFamily: 'ui-monospace, monospace', overflowWrap: 'anywhere' }}>
                       {r.srv ? r.host : `${r.host}:${r.port}`}
                       {r.srv && (
