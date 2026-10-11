@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
-import type { ImportCommitResult2, ImportOpenResult, ImportUrisResult, Review } from '@shared/types';
+import type { ImportCommitResult, ImportOpenResult, ImportUrisResult, Review } from '@shared/types';
 import { ConnectionRepo } from '../../electron/db/repositories/ConnectionRepo';
 import { registerConnImportChannels } from '../../electron/ipc/handlers/connImport';
 import { createRouter } from '../../electron/ipc/router';
@@ -45,7 +45,7 @@ const COMMIT = { token: 't', indices: [0], readOnly: false, credentials: [], dir
 
 describe('conn:import* handlers: payload validation', () => {
   let shim: ReturnType<typeof createShim>;
-  let svc: Record<'importOpen' | 'importMap' | 'importUris' | 'importCommitV2', ReturnType<typeof vi.fn>>;
+  let svc: Record<'importOpen' | 'importMap' | 'importUris' | 'importCommit', ReturnType<typeof vi.fn>>;
 
   beforeEach(() => {
     shim = createShim();
@@ -53,7 +53,7 @@ describe('conn:import* handlers: payload validation', () => {
       importOpen: vi.fn(async () => ({ cancelled: true as const })),
       importMap: vi.fn(() => ({ review: { hasEncryptedSecrets: false, rows: [] } })),
       importUris: vi.fn(() => ({ token: 't', review: { hasEncryptedSecrets: false, rows: [] } })),
-      importCommitV2: vi.fn(async () => ({ created: [] })),
+      importCommit: vi.fn(async () => ({ created: [] })),
     };
     registerConnImportChannels(createRouter(shim.ipcMain, testSenderCheck), svc as unknown as ImportWizardService);
   });
@@ -110,7 +110,7 @@ describe('conn:import* handlers: payload validation', () => {
     });
   });
 
-  describe('conn:importCommit2', () => {
+  describe('conn:importCommit', () => {
     it('passes a full payload through', async () => {
       const payload = {
         ...COMMIT,
@@ -120,8 +120,8 @@ describe('conn:import* handlers: payload validation', () => {
         credentials: [{ index: 0, username: 'u', password: 'pw' }],
         directConnection: [{ index: 2, value: true }],
       };
-      expect((await shim.invoke(IPC_CHANNELS.connImportCommitV2, payload)).ok).toBe(true);
-      expect(svc.importCommitV2).toHaveBeenCalledWith(payload);
+      expect((await shim.invoke(IPC_CHANNELS.connImportCommit, payload)).ok).toBe(true);
+      expect(svc.importCommit).toHaveBeenCalledWith(payload);
     });
 
     it.each([
@@ -138,8 +138,8 @@ describe('conn:import* handlers: payload validation', () => {
       ['a direct choice that is not a boolean', { ...COMMIT, directConnection: [{ index: 0, value: 'on' }] }],
       ['an unknown key', { ...COMMIT, uris: ['mongodb://h'] }],
     ])('rejects %s', async (_label, payload) => {
-      expect(code(await shim.invoke(IPC_CHANNELS.connImportCommitV2, payload))).toBe('VALIDATION');
-      expect(svc.importCommitV2).not.toHaveBeenCalled();
+      expect(code(await shim.invoke(IPC_CHANNELS.connImportCommit, payload))).toBe('VALIDATION');
+      expect(svc.importCommit).not.toHaveBeenCalled();
     });
   });
 });
@@ -209,7 +209,7 @@ describe('conn:import* handlers: no secret reaches the renderer', () => {
   });
 
   const commit = (token: string, indices: number[], over: object = {}) =>
-    call<ImportCommitResult2>(IPC_CHANNELS.connImportCommitV2, { token, indices, readOnly: false, credentials: [], directConnection: [], ...over });
+    call<ImportCommitResult>(IPC_CHANNELS.connImportCommit, { token, indices, readOnly: false, credentials: [], directConnection: [], ...over });
 
   it('a plain Compass export: open and commit', async () => {
     openFrom = path.join(COMPASS, 'plain.json');

@@ -380,7 +380,6 @@ function createWindow(): void {
   win.on('closed', () => {
     win = null;
     // An import token does not outlive the window that asked for it.
-    connExportSvc?.clearPending();
     importWizardSvc?.clearPending();
   });
 
@@ -626,7 +625,6 @@ app.whenReady().then(() => {
   connExportSvc = new ConnectionExportService({
     conns: connSvc,
     vault,
-    log: log ?? undefined,
     dialogs: transferDialogs,
   });
   importWizardSvc = new ImportWizardService({

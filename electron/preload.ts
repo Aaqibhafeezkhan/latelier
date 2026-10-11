@@ -49,14 +49,10 @@ const api: IpcApi = {
     parseUri: (uri) => call(IPC_CHANNELS.connParseUri, { uri }),
     test: (input) => call(IPC_CHANNELS.connTest, input),
     export: (input) => call(IPC_CHANNELS.connExport, input),
-    importPreview: () => call(IPC_CHANNELS.connImportPreview, {}),
-    importCommit: (input) => call(IPC_CHANNELS.connImportCommit, input),
-    previewUris: (uris) => call(IPC_CHANNELS.connPreviewUris, { uris }),
-    createFromUris: (input) => call(IPC_CHANNELS.connCreateFromUris, input),
     importOpen: () => call(IPC_CHANNELS.connImportOpen, {}),
     importMap: (input) => call(IPC_CHANNELS.connImportMap, input),
     importUris: (uris) => call(IPC_CHANNELS.connImportUris, { uris }),
-    importCommitV2: (input) => call(IPC_CHANNELS.connImportCommitV2, input),
+    importCommit: (input) => call(IPC_CHANNELS.connImportCommit, input),
   },
 
   app: {

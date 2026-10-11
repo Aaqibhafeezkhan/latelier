@@ -5,8 +5,8 @@ import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock
 import { ImportWizard } from '../../src/features/connections/importWizard/ImportWizard';
 import * as connectionsState from '../../src/state/connections';
 import type {
-  ImportCommitInput2,
-  ImportCommitResult2,
+  ImportCommitInput,
+  ImportCommitResult,
   ImportMapInput,
   ImportMapResult,
   ImportOpenResult,
@@ -67,7 +67,7 @@ const COLLECTIONS: MappingCollection[] = [
   },
 ];
 
-const RESULT: ImportCommitResult2 = {
+const RESULT: ImportCommitResult = {
   created: [
     { index: 0, id: 'n1', name: 'Prod (2)' },
     { index: 1, id: 'n2', name: 'Cluster' },
@@ -81,7 +81,7 @@ const RESULT: ImportCommitResult2 = {
 
 function setup(opts: {
   open?: ImportOpenResult | Error;
-  commit?: (i: ImportCommitInput2) => Promise<ImportCommitResult2>;
+  commit?: (i: ImportCommitInput) => Promise<ImportCommitResult>;
   initial?: 'file' | 'paste';
 } = {}) {
   const importOpen = vi.fn(async (): Promise<ImportOpenResult> => {
@@ -90,12 +90,12 @@ function setup(opts: {
   });
   const importMap = vi.fn<(i: ImportMapInput) => Promise<ImportMapResult>>(async () => ({ review: PLAIN }));
   const importUris = vi.fn<(u: string[]) => Promise<ImportUrisResult>>(async () => ({ token: 'tok-u', review: PLAIN }));
-  const importCommitV2 = vi.fn<(i: ImportCommitInput2) => Promise<ImportCommitResult2>>(opts.commit ?? (async () => RESULT));
-  installAtelierMock({ conn: { importOpen, importMap, importUris, importCommitV2 } });
+  const importCommit = vi.fn<(i: ImportCommitInput) => Promise<ImportCommitResult>>(opts.commit ?? (async () => RESULT));
+  installAtelierMock({ conn: { importOpen, importMap, importUris, importCommit } });
   const changed = vi.spyOn(connectionsState, 'notifyConnectionsChanged');
   const onClose = vi.fn();
   render(<ImportWizard initial={opts.initial ?? 'file'} onClose={onClose} />);
-  return { importOpen, importMap, importUris, importCommitV2, changed, onClose };
+  return { importOpen, importMap, importUris, importCommit, changed, onClose };
 }
 
 const chooseFile = () => userEvent.click(screen.getByRole('button', { name: 'Choose file…' }));
@@ -251,7 +251,7 @@ describe('Import Wizard: final approval', () => {
 
 describe('Import Wizard: commit', () => {
   it('sends exactly the ticked rows, every ticked non-SRV Direct connection, typed credentials, Read-only and the passphrase', async () => {
-    const { importCommitV2 } = setup();
+    const { importCommit } = setup();
     await chooseFile();
     await reviewTable();
     await userEvent.click(box('Import Recent'));
@@ -263,8 +263,8 @@ describe('Import Wizard: commit', () => {
     await userEvent.type(screen.getByLabelText('Export Passphrase'), 'secret phrase');
     await userEvent.click(importButton());
 
-    await waitFor(() => expect(importCommitV2).toHaveBeenCalledTimes(1));
-    expect(importCommitV2.mock.calls[0]![0]).toEqual({
+    await waitFor(() => expect(importCommit).toHaveBeenCalledTimes(1));
+    expect(importCommit.mock.calls[0]![0]).toEqual({
       token: 'tok',
       indices: [0, 1, 2],
       readOnly: true,
@@ -278,7 +278,7 @@ describe('Import Wizard: commit', () => {
   });
 
   it('imports without passwords: no passphrase, credentials only for rows typed in and still shown', async () => {
-    const { importCommitV2 } = setup();
+    const { importCommit } = setup();
     await chooseFile();
     await reviewTable();
     await userEvent.click(box('Import without passwords'));
@@ -288,8 +288,8 @@ describe('Import Wizard: commit', () => {
     await userEvent.click(box('Import Cluster'));
     await userEvent.click(importButton());
 
-    await waitFor(() => expect(importCommitV2).toHaveBeenCalledTimes(1));
-    expect(importCommitV2.mock.calls[0]![0]).toEqual({
+    await waitFor(() => expect(importCommit).toHaveBeenCalledTimes(1));
+    expect(importCommit.mock.calls[0]![0]).toEqual({
       token: 'tok',
       indices: [0],
       readOnly: false,
@@ -301,7 +301,7 @@ describe('Import Wizard: commit', () => {
 
   it('keeps the review on a wrong passphrase and retries on the same token', async () => {
     let calls = 0;
-    const { importCommitV2, changed } = setup({
+    const { importCommit, changed } = setup({
       commit: async () => {
         calls += 1;
         if (calls === 1) throw badPassphrase();
@@ -323,7 +323,7 @@ describe('Import Wizard: commit', () => {
     await userEvent.click(importButton());
 
     await screen.findByText('2 Connections imported.');
-    expect(importCommitV2.mock.calls.map((c) => [c[0].token, c[0].passphrase, c[0].indices])).toEqual([
+    expect(importCommit.mock.calls.map((c) => [c[0].token, c[0].passphrase, c[0].indices])).toEqual([
       ['tok', 'wrong', [0, 1, 2]],
       ['tok', 'right', [0, 1, 2]],
     ]);

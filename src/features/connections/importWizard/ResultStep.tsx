@@ -1,9 +1,9 @@
 import { Alert, List, Stack, Text } from '@mantine/core';
-import type { ImportCommitResult2 } from '@shared/types';
+import type { ImportCommitResult } from '@shared/types';
 import { REPICK_LABEL, plural } from '../transferCopy';
 
 /** C14 §7: what the commit actually did, as main reports it. */
-export function ResultStep({ result }: { result: ImportCommitResult2 }) {
+export function ResultStep({ result }: { result: ImportCommitResult }) {
   return (
     <Stack gap="xs">
       <Text size="sm" role="status">

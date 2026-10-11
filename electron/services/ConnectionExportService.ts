@@ -1,15 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
   ConnectionExportInput,
   ConnectionExportResult,
   ExportSecretField,
-  ImportCommitInput,
-  ImportCommitResult,
-  ImportPreview,
-  UriCommitInput,
-  UriPreview,
 } from '@shared/types';
 import { AppError, SystemError, ValidationError } from '../errors.ts';
 import type { ConnectionService } from '../mongo/ConnectionService.ts';
@@ -17,23 +11,11 @@ import type { Logger } from '../log.ts';
 import type { SecretsVault } from '../secrets/SecretsVault.ts';
 import {
   buildConnectionExport,
-  decryptSelected,
-  entryToConnectionInput,
-  parseConnectionExport,
-  planNames,
   toExportEntry,
   type ExportItem,
-  type ParsedExport,
   type ScryptParams,
   type SecretValues,
 } from './connectionExportFormat.ts';
-import {
-  lineInputProblem,
-  lineToInput,
-  parseLine,
-  planLineNames,
-  previewEntry,
-} from './connectionBulkAdd.ts';
 import { checkFileSize } from './import/detect.ts';
 
 /** Vault column for each exported secret field. */
@@ -116,10 +98,9 @@ export interface ConnectionExportDialogs {
 }
 
 /**
- * Connection Export / Import (C13). Owns both dialogs and the file, so neither
- * a path nor a plaintext secret nor the derived key ever reaches the renderer;
- * the only thing carried between preview and commit is a token for the parsed
- * file held here.
+ * Connection Export (C13). Owns the save dialog and the file, so neither a path
+ * nor a plaintext secret nor the derived key ever reaches the renderer. Import
+ * lives in `ImportWizardService`; the dialogs interface is shared with it.
  */
 export class ConnectionExportService {
   private readonly conns: ConnectionService;
@@ -127,8 +108,6 @@ export class ConnectionExportService {
   private readonly dialogs: ConnectionExportDialogs;
   private readonly now: () => Date;
   private readonly scrypt?: ScryptParams;
-  private readonly log?: Logger;
-  private readonly pending = new Map<string, ParsedExport>();
 
   constructor(opts: {
     conns: ConnectionService;
@@ -137,19 +116,12 @@ export class ConnectionExportService {
     now?: () => Date;
     /** Test hook: a cheaper scrypt cost than the default. */
     scrypt?: ScryptParams;
-    log?: Logger;
   }) {
     this.conns = opts.conns;
     this.vault = opts.vault;
     this.dialogs = opts.dialogs;
     this.now = opts.now ?? (() => new Date());
     this.scrypt = opts.scrypt;
-    this.log = opts.log;
-  }
-
-  /** Called when the window closes: a token does not outlive it. */
-  clearPending(): void {
-    this.pending.clear();
   }
 
   async export(input: ConnectionExportInput): Promise<ConnectionExportResult> {
@@ -205,144 +177,5 @@ export class ConnectionExportService {
       );
     }
     return { written: conns.length, omittedSecrets };
-  }
-
-  async importPreview(): Promise<ImportPreview> {
-    const source = await this.dialogs.openPath();
-    if (source === null) return { cancelled: true };
-    // A failure here throws before a token exists, so nothing is held or written.
-    const file = parseConnectionExport(await readImportFile(source, this.log));
-    const token = randomUUID();
-    this.pending.set(token, file);
-    const savedAs = planNames(
-      this.conns.list().map((c) => c.name),
-      file.connections.map((c) => c.name),
-    );
-    return {
-      token,
-      hasSecrets: file.connections.some((c) => c.secrets !== undefined),
-      entries: file.connections.map((c, index) => ({
-        index,
-        name: c.name,
-        savedAs: savedAs[index]!,
-        repick: c.repick ?? [],
-        hasSecrets: c.secrets !== undefined,
-      })),
-    };
-  }
-
-  async importCommit(input: ImportCommitInput): Promise<ImportCommitResult> {
-    const file = this.pending.get(input.token);
-    if (!file) throw new ValidationError('This import has expired. Choose the file again.');
-    const indices = [...input.indices].sort((a, b) => a - b);
-    if (new Set(indices).size !== indices.length) {
-      throw new ValidationError('Each connection can only be imported once.');
-    }
-    if (indices.some((i) => !Number.isInteger(i) || i < 0 || i >= file.connections.length)) {
-      throw new ValidationError('The selection includes a connection that is not in the file.');
-    }
-
-    // Single-use even under concurrent commits: take the file out before the
-    // first await. A failed decrypt (wrong passphrase, damaged file, missing
-    // passphrase) puts it back, so a retry or "without passwords" still works.
-    this.pending.delete(input.token);
-    let secrets: Map<number, SecretValues>;
-    try {
-      secrets = input.withoutSecrets
-        ? new Map<number, SecretValues>()
-        : await decryptSelected(file, input.passphrase, indices);
-    } catch (err) {
-      this.pending.set(input.token, file);
-      throw err;
-    }
-
-    // The preview was a forecast; clashes are resolved against what exists now.
-    // Planned over every entry in the file, as the preview did, so unticking an
-    // entry cannot move another one's name.
-    const names = planNames(
-      this.conns.list().map((c) => c.name),
-      file.connections.map((c) => c.name),
-    );
-    const result: ImportCommitResult = { created: [], failed: [], secretsNotStored: [] };
-    for (const i of indices) {
-      const entry = file.connections[i]!;
-      let created;
-      try {
-        // Secrets never go through create(): it deletes the row again when the
-        // vault refuses them, and §4.4 wants the Connection kept.
-        created = await this.conns.create({ ...entryToConnectionInput(entry), name: names[i]! });
-      } catch (err) {
-        // Carry on: the rows already created stay, so the result must say which did not.
-        this.log?.error('conn-import', 'could not create an imported connection', {
-          index: i,
-          cause: err instanceof Error ? err.message : String(err),
-        });
-        result.failed.push({
-          index: i,
-          name: entry.name,
-          reason: err instanceof AppError ? err.message : 'Unexpected error',
-        });
-        continue;
-      }
-      result.created.push({ index: i, id: created.id, name: created.name });
-      storeImportedSecrets(this.vault, this.log, created, secrets.get(i), result.secretsNotStored);
-    }
-    return result;
-  }
-
-  /** C13 §7.1 — nothing is written; a line's password is reported as present, never returned. */
-  previewUris(uris: readonly string[]): UriPreview {
-    const lines = uris.map(parseLine);
-    const names = planLineNames(this.conns.list().map((c) => c.name), lines);
-    return { entries: lines.map((l, i) => previewEntry(l, i, names[i]!)) };
-  }
-
-  /**
-   * C13 §7.1 — re-parses and re-plans against what exists now, like
-   * `importCommit`, and keeps a Connection whose password the vault refuses.
-   */
-  async createFromUris(input: UriCommitInput): Promise<ImportCommitResult> {
-    const lines = input.uris.map(parseLine);
-    const names = planLineNames(this.conns.list().map((c) => c.name), lines);
-    const creds = new Map(input.credentials.map((c) => [c.index, c]));
-    const result: ImportCommitResult = { created: [], failed: [], secretsNotStored: [] };
-    for (const [i, line] of lines.entries()) {
-      const label = `Line ${i + 1}`;
-      if (!line.ok) {
-        result.failed.push({ index: i, name: label, reason: line.reason });
-        continue;
-      }
-      // A line that sets directConnection itself keeps its own value over the batch default.
-      const direct = line.explicitDirect ? line.input.advanced!.directConnection : input.defaults.directConnection;
-      const { password, ...conn } = lineToInput(
-        line,
-        names[i]!,
-        { readOnly: input.defaults.readOnly, directConnection: direct },
-        creds.get(i),
-      );
-      const problem = lineInputProblem({ ...conn, ...(password ? { password } : {}) });
-      if (problem) {
-        result.failed.push({ index: i, name: names[i]!, reason: problem });
-        continue;
-      }
-      let created;
-      try {
-        created = await this.conns.create(conn);
-      } catch (err) {
-        this.log?.error('conn-add', 'could not create a connection from a connection string', {
-          index: i,
-          cause: err instanceof Error ? err.message : String(err),
-        });
-        result.failed.push({
-          index: i,
-          name: names[i]!,
-          reason: err instanceof AppError ? err.message : 'Unexpected error',
-        });
-        continue;
-      }
-      result.created.push({ index: i, id: created.id, name: created.name });
-      storeImportedSecrets(this.vault, this.log, created, password ? { password } : undefined, result.secretsNotStored);
-    }
-    return result;
   }
 }

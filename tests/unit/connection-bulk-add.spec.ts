@@ -4,12 +4,9 @@ import {
   baseNames,
   lineInputProblem,
   lineToInput,
-  needsCredentials,
   parseLine,
   planLineNames,
-  previewEntry,
   repickFor,
-  type Line,
   type ParsedLine,
 } from '../../electron/services/connectionBulkAdd';
 
@@ -130,11 +127,6 @@ describe('parseLine: multiHost and repick', () => {
     expect(ok('mongodb://h/').explicitDirect).toBe(false);
   });
 
-  it('shows the parser markers in the preview, once, next to the X.509 one', () => {
-    const e = previewEntry(ok('mongodb://h/?authMechanism=MONGODB-X509&tls=true&tlsCAFile=/a.pem&tlsCertificateKeyFile=/c.pem'), 0, 'h');
-    expect(e).toMatchObject({ ok: true, repick: ['tlsCa', 'tlsClientCert'] });
-  });
-
   it('reports a proxy drop as words without the proxy password', () => {
     const l = ok('mongodb://h/?proxyHost=p&proxyPassword=hunter2');
     expect(l.warnings).toHaveLength(1);
@@ -149,16 +141,9 @@ describe('parseLine: multiHost and repick', () => {
   });
 });
 
-describe('needsCredentials / repickFor', () => {
-  it('asks for credentials unless the string has both a username and a password', () => {
-    expect(needsCredentials(ok('mongodb://u:p@h').input)).toBe(false);
-    expect(needsCredentials(ok('mongodb://u@h').input)).toBe(true);
-    expect(needsCredentials(ok('mongodb://h').input)).toBe(true);
-  });
-
-  it('never asks an X.509 line, which instead needs its certificate re-picked', () => {
+describe('repickFor', () => {
+  it('asks an X.509 line to re-pick its certificate', () => {
     const x509 = ok('mongodb://h/?authMechanism=MONGODB-X509&tls=true').input;
-    expect(needsCredentials(x509)).toBe(false);
     expect(repickFor(x509)).toEqual(['tlsClientCert']);
     expect(repickFor(ok('mongodb://h').input)).toEqual([]);
   });
@@ -167,36 +152,6 @@ describe('needsCredentials / repickFor', () => {
     const x509 = ok('mongodb://h/?authMechanism=MONGODB-X509&tls=true').input;
     expect(repickFor(x509, ['tlsClientCert', 'tlsCa'])).toEqual(['tlsClientCert', 'tlsCa']);
     expect(repickFor(ok('mongodb://h').input, ['tlsCa'])).toEqual(['tlsCa']);
-  });
-});
-
-describe('previewEntry', () => {
-  it('says whether a line has a password without ever returning it', () => {
-    const e = previewEntry(ok('mongodb://alice:s3cret@h:2000/?w=1'), 3, 'h');
-    expect(e).toEqual({
-      index: 3,
-      ok: true,
-      savedAs: 'h',
-      host: 'h',
-      port: 2000,
-      srv: false,
-      authUsername: 'alice',
-      hasPassword: true,
-      needsCredentials: false,
-      repick: [],
-      warnings: ['w'],
-    });
-    expect(JSON.stringify(e)).not.toContain('s3cret');
-  });
-
-  it('omits authUsername when the string has none, and marks SRV', () => {
-    const e = previewEntry(ok('mongodb+srv://c.example.net'), 0, 'c.example.net');
-    expect(e).toMatchObject({ srv: true, hasPassword: false, needsCredentials: true });
-    expect(e).not.toHaveProperty('authUsername');
-  });
-
-  it('passes a bad line through as its reason', () => {
-    expect(previewEntry({ ok: false, reason: 'bad' } as Line, 1, '')).toEqual({ index: 1, ok: false, reason: 'bad' });
   });
 });
 
