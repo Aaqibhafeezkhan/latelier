@@ -3,7 +3,6 @@ import type { ConnectionInput, RepickFile, UriCredentials } from '@shared/types'
 import { AppError } from '../errors.ts';
 import { parseConnectionUri } from '../mongo/uri-parse.ts';
 import { applyCrossFieldRules, BaseInputShape } from '../ipc/schemas/connection.ts';
-import { planNames } from './connectionExportFormat.ts';
 
 /** C13 §7.1 — the paste box's limits, also enforced by the channel schema. */
 export const MAX_URI_LINES = 100;
@@ -63,14 +62,6 @@ export function baseNames(lines: readonly Line[]): string[] {
     const host = l.input.host!;
     return ports.get(host)!.size > 1 ? `${host}:${l.input.port}` : host;
   });
-}
-
-/** Final names: `baseNames`, then §4.2's clash rule against `existing` and the batch. */
-export function planLineNames(existing: Iterable<string>, lines: readonly Line[]): string[] {
-  const bases = baseNames(lines);
-  const planned = planNames(existing, bases.filter((_, i) => lines[i]!.ok));
-  let k = 0;
-  return lines.map((l) => (l.ok ? planned[k++]! : ''));
 }
 
 /** What the user picks again: the auth-derived marker plus any the parser read off the string. */

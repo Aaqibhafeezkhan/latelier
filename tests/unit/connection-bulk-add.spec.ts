@@ -5,7 +5,6 @@ import {
   lineInputProblem,
   lineToInput,
   parseLine,
-  planLineNames,
   repickFor,
   type ParsedLine,
 } from '../../electron/services/connectionBulkAdd';
@@ -65,7 +64,7 @@ describe('parseLine', () => {
   });
 });
 
-describe('baseNames / planLineNames', () => {
+describe('baseNames', () => {
   it('names a line by its host, or host:port when the batch has that host on another port', () => {
     const lines = ['mongodb://localhost:27017', 'mongodb://localhost:27018', 'mongodb://db.example.com']
       .map(parseLine);
@@ -75,36 +74,15 @@ describe('baseNames / planLineNames', () => {
   it('keeps the bare host when the same host and port repeat, leaving the clash rule to number them', () => {
     const lines = ['mongodb://h:1', 'mongodb://h:1'].map(parseLine);
     expect(baseNames(lines)).toEqual(['h', 'h']);
-    expect(planLineNames([], lines)).toEqual(['h', 'h (2)']);
   });
 
-  it('numbers clashes with existing names, and leaves bad lines an empty slot', () => {
+  it('leaves a bad line an empty slot', () => {
     const lines = ['mongodb://prod', 'nope', 'mongodb://prod'].map(parseLine);
     expect(baseNames(lines)).toEqual(['prod', '', 'prod']);
-    expect(planLineNames(['prod'], lines)).toEqual(['prod (2)', '', 'prod (3)']);
   });
 
   it('names an SRV line by its cluster host', () => {
-    expect(planLineNames([], [parseLine('mongodb+srv://u:p@c0.ab.mongodb.net/db')])).toEqual([
-      'c0.ab.mongodb.net',
-    ]);
-  });
-
-  it('property: every planned name is unique against existing names and each other', () => {
-    const host = fc.constantFrom('a', 'b', 'db.example.com');
-    const port = fc.integer({ min: 1, max: 4 });
-    fc.assert(
-      fc.property(
-        fc.array(fc.tuple(host, port), { maxLength: 12 }),
-        fc.uniqueArray(fc.constantFrom('a', 'b', 'a:1', 'b (2)', 'db.example.com'), { maxLength: 5 }),
-        (pairs, existing) => {
-          const lines = pairs.map(([h, p]) => parseLine(`mongodb://${h}:${p}`));
-          const names = planLineNames(existing, lines);
-          expect(new Set(names).size).toBe(names.length);
-          for (const n of names) expect(existing).not.toContain(n);
-        },
-      ),
-    );
+    expect(baseNames([parseLine('mongodb+srv://u:p@c0.ab.mongodb.net/db')])).toEqual(['c0.ab.mongodb.net']);
   });
 });
 
@@ -262,22 +240,14 @@ describe('lineInputProblem', () => {
   });
 });
 
-describe('planLineNames: long hostnames', () => {
+describe('long hostnames', () => {
   // A valid hostname runs to 253 characters; a Connection name stops at 64.
   const host = 'production-documentdb-cluster.cluster-abcdefghijkl.us-east-1.docdb.amazonaws.com';
 
-  it('clamps the name, keeps the full host, and still saves', () => {
+  it('keeps the full host under a clamped name, and still saves', () => {
     const line = ok(`mongodb://${host}:27017`);
-    const [name] = planLineNames([], [line]);
-    expect(name).toBe(host.slice(0, 64));
-    const input = lineToInput(line, name!, DEFAULTS, undefined);
+    const input = lineToInput(line, host.slice(0, 64), DEFAULTS, undefined);
     expect(input.host).toBe(host);
     expect(lineInputProblem(input)).toBeNull();
-  });
-
-  it('two such lines still get distinct names within the limit', () => {
-    const names = planLineNames([], [ok(`mongodb://${host}:1`), ok(`mongodb://${host}:1`)]);
-    expect(names[0]).not.toBe(names[1]);
-    for (const n of names) expect(n.length).toBeLessThanOrEqual(64);
   });
 });
