@@ -156,7 +156,7 @@ Two kinds of key are skipped everywhere, in collection paths and field paths ali
 
 Within the chosen collection, each row is flattened to dot paths over its scalar leaves (string, number, boolean). Array indexes inside a row are plain path segments, for example `servers.0.host`. `null`, objects and arrays are never mappable themselves. Leaves more than 20 levels below the row are not offered; the limit also bounds the walk. A `__proto__` key stays data. The screen lists the union of paths across all rows, in document order, up to 200, each with **one sample value**, taken from the first row that has the path.
 
-**Masking.** Masking happens in main, and a raw secret value never reaches the renderer. A field is masked when either rule below applies. The screen then shows `••••` and the hint *"Taken from the file — not shown"* instead of the sample.
+**Masking.** Masking happens in main, and a raw secret value never reaches the renderer. A field is masked when either rule below applies. When main hides the value whole (`••••`), the screen shows `••••` and the hint *"Taken from the file — not shown"*. When main sends a connection string with its secrets stripped, the screen shows that string, so the user can recognise the field.
 
 - **Key rule.** The path's last key is its last segment that isn't an all-digit array index, so a list under `apiKeys` is masked like a single key. When that key contains `pass`, `pwd`, `secret`, `token`, `key` or `credential` (case-insensitive substring), the sample is replaced by `••••`, whatever the value's type. Because it is a substring rule, it also masks harmless names such as `keyboard`. A needless mask only costs the user a sample. A missed one shows a secret.
 - **Value rule.** This rule covers any text that holds `mongodb://` or `mongodb+srv://` anywhere, in any case.
@@ -217,7 +217,7 @@ A target is suggested for one path only: the first in document order. A path who
 
 ### 5.6 Leaving the step
 
-*Back* returns to Source. *Next* sends only the chosen collection's path and the target→path assignments to main (§8). Main applies them to the file it holds and returns the final approval rows. The final approval's *Back* returns to Field Mapping with the choices intact. *Next* can be pressed again on the same token, and each call replaces the previous candidate rows.
+*Back* returns to Source. While main applies the mapping, *Back* and *Next* are disabled. *Next* sends only the chosen collection's path and the target→path assignments to main (§8). Main applies them to the file it holds and returns the final approval rows. The final approval's *Back* returns to Field Mapping with the choices intact. *Next* can be pressed again on the same token, and each call replaces the previous candidate rows.
 
 ## 6. Final approval
 

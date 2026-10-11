@@ -20,10 +20,10 @@ const other: MappingCollection = {
   fields: [{ path: 'server', sample: 'h2', masked: false, suggested: 'host' }],
 };
 
-function setup(collections: MappingCollection[] = [servers]) {
+function setup(collections: MappingCollection[] = [servers], busy = false) {
   const onBack = vi.fn();
   const onNext = vi.fn();
-  render(<MappingStep collections={collections} onBack={onBack} onNext={onNext} />);
+  render(<MappingStep collections={collections} busy={busy} onBack={onBack} onNext={onNext} />);
   return { onBack, onNext };
 }
 const select = (path: string) => screen.getByRole('combobox', { name: `Use ${path} as` }) as HTMLSelectElement;
@@ -52,6 +52,25 @@ describe('MappingStep', () => {
     expect(screen.getByText('Taken from the file — not shown')).toBeTruthy();
     expect(screen.getAllByText('••••')).toHaveLength(1);
     expect(screen.getByText('Prod')).toBeTruthy();
+  });
+
+  it('shows the connection string with its secrets stripped, and hides a field with no such sample', () => {
+    setup([{ ...servers, fields: [
+      { path: 'cs', sample: 'mongodb://alice@h/?tls=true', masked: true, suggested: 'connectionString' },
+      { path: 'secret', sample: '••••', masked: true },
+    ] }]);
+    expect(screen.getByText('mongodb://alice@h/?tls=true')).toBeTruthy();
+    expect(screen.getAllByText('••••')).toHaveLength(1);
+    expect(screen.getAllByText('Taken from the file — not shown')).toHaveLength(1);
+  });
+
+  it('disables Back and Next while busy', async () => {
+    const { onBack, onNext } = setup([servers], true);
+    expect(next().disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(onBack).not.toHaveBeenCalled();
+    expect(onNext).not.toHaveBeenCalled();
   });
 
   it('moves a target that another field already holds', async () => {

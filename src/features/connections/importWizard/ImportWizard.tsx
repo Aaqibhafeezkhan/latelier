@@ -157,6 +157,7 @@ export function ImportWizard({ initial, onClose }: ImportWizardProps) {
               <MappingStep
                 key={token}
                 collections={collections}
+                busy={busy}
                 onBack={() => {
                   setError(undefined);
                   setStep('source');

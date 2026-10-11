@@ -82,13 +82,14 @@ const RESULT: ImportCommitResult = {
 function setup(opts: {
   open?: ImportOpenResult | Error;
   commit?: (i: ImportCommitInput) => Promise<ImportCommitResult>;
+  map?: (i: ImportMapInput) => Promise<ImportMapResult>;
   initial?: 'file' | 'paste';
 } = {}) {
   const importOpen = vi.fn(async (): Promise<ImportOpenResult> => {
     if (opts.open instanceof Error) throw opts.open;
     return opts.open ?? { token: 'tok', source: 'compass', review: REVIEW };
   });
-  const importMap = vi.fn<(i: ImportMapInput) => Promise<ImportMapResult>>(async () => ({ review: PLAIN }));
+  const importMap = vi.fn<(i: ImportMapInput) => Promise<ImportMapResult>>(opts.map ?? (async () => ({ review: PLAIN })));
   const importUris = vi.fn<(u: string[]) => Promise<ImportUrisResult>>(async () => ({ token: 'tok-u', review: PLAIN }));
   const importCommit = vi.fn<(i: ImportCommitInput) => Promise<ImportCommitResult>>(opts.commit ?? (async () => RESULT));
   installAtelierMock({ conn: { importOpen, importMap, importUris, importCommit } });
@@ -118,6 +119,22 @@ describe('Import Wizard: source routing', () => {
     expect(screen.queryByRole('table', { name: 'Fields in the file' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
     expect(importMap).not.toHaveBeenCalled();
+  });
+
+  it('Field Mapping holds Back and Next while the mapping is being applied', async () => {
+    let finish!: (r: ImportMapResult) => void;
+    const { importMap } = setup({
+      open: { token: 'tok-j', source: 'unknown', collections: COLLECTIONS },
+      map: () => new Promise<ImportMapResult>((resolve) => (finish = resolve)),
+    });
+    await chooseFile();
+    await screen.findByRole('table', { name: 'Fields in the file' });
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(importMap).toHaveBeenCalledTimes(1));
+    expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Next' }) as HTMLButtonElement).disabled).toBe(true);
+    finish({ review: PLAIN });
+    await reviewTable();
   });
 
   it('an unknown JSON file goes through Field Mapping, and Back from the review keeps the choices', async () => {
