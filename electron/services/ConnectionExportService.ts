@@ -19,7 +19,6 @@ import {
   buildConnectionExport,
   decryptSelected,
   entryToConnectionInput,
-  MAX_FILE_BYTES,
   parseConnectionExport,
   planNames,
   toExportEntry,
@@ -35,6 +34,7 @@ import {
   planLineNames,
   previewEntry,
 } from './connectionBulkAdd.ts';
+import { checkFileSize } from './import/detect.ts';
 
 /** Vault column for each exported secret field. */
 const VAULT_FIELD = {
@@ -45,6 +45,68 @@ const VAULT_FIELD = {
 
 const NO_SECURE_STORAGE_REASON =
   'No secure storage on this install, and storing passwords unencrypted is off.';
+
+/**
+ * Reads a file the user picked in main's dialog; one over the import limit is
+ * refused before it is read. A file system error names the absolute path in
+ * its message, so it never reaches the renderer: it is logged by its code and
+ * reported in words.
+ */
+export async function readImportFile(file: string, log?: Logger): Promise<string> {
+  let size: number;
+  try {
+    size = (await fs.stat(file)).size;
+  } catch (err) {
+    throw unreadable(err, log);
+  }
+  checkFileSize(size);
+  try {
+    return await fs.readFile(file, 'utf8');
+  } catch (err) {
+    throw unreadable(err, log);
+  }
+}
+
+function unreadable(err: unknown, log: Logger | undefined): ValidationError {
+  log?.warn('conn-import', 'could not read the picked file', {
+    code: (err as NodeJS.ErrnoException).code ?? 'unknown',
+  });
+  return new ValidationError("This file can't be read.");
+}
+
+/**
+ * Stores an imported Connection's secrets after the row exists (C13 §4.4).
+ * Secrets never go through create(): it deletes the row again when the vault
+ * refuses them, and the Connection must be kept. A refusal is reported in
+ * `notStored` once per Connection; it never throws.
+ */
+export function storeImportedSecrets(
+  vault: SecretsVault,
+  log: Logger | undefined,
+  conn: { id: string; name: string },
+  values: SecretValues | undefined,
+  notStored: { name: string; reason: string }[],
+): void {
+  if (!values) return;
+  for (const field of Object.keys(VAULT_FIELD) as ExportSecretField[]) {
+    const value = values[field];
+    if (value === undefined) continue;
+    try {
+      vault.set(conn.id, VAULT_FIELD[field], value);
+    } catch (err) {
+      if (err instanceof AppError && err.code === 'SECRETS_UNAVAILABLE') {
+        notStored.push({ name: conn.name, reason: NO_SECURE_STORAGE_REASON });
+      } else {
+        log?.error('conn-import', 'could not store an imported secret', {
+          cause: err instanceof Error ? err.message : String(err),
+        });
+        notStored.push({ name: conn.name, reason: 'The password could not be stored.' });
+      }
+      // Every remaining secret of this Connection fails the same way; say it once.
+      return;
+    }
+  }
+}
 
 export interface ConnectionExportDialogs {
   /** Shows the save dialog; `null` when the user cancels. */
@@ -148,14 +210,8 @@ export class ConnectionExportService {
   async importPreview(): Promise<ImportPreview> {
     const source = await this.dialogs.openPath();
     if (source === null) return { cancelled: true };
-    const size = (await fs.stat(source)).size;
-    if (size > MAX_FILE_BYTES) {
-      throw new ValidationError(
-        `This file is too large to be a Connection Export (${MAX_FILE_BYTES / 1024 / 1024} MB limit).`,
-      );
-    }
     // A failure here throws before a token exists, so nothing is held or written.
-    const file = parseConnectionExport(await fs.readFile(source, 'utf8'));
+    const file = parseConnectionExport(await readImportFile(source, this.log));
     const token = randomUUID();
     this.pending.set(token, file);
     const savedAs = planNames(
@@ -229,7 +285,7 @@ export class ConnectionExportService {
         continue;
       }
       result.created.push({ index: i, id: created.id, name: created.name });
-      this.storeSecrets(created.id, created.name, secrets.get(i), result);
+      storeImportedSecrets(this.vault, this.log, created, secrets.get(i), result.secretsNotStored);
     }
     return result;
   }
@@ -256,7 +312,14 @@ export class ConnectionExportService {
         result.failed.push({ index: i, name: label, reason: line.reason });
         continue;
       }
-      const { password, ...conn } = lineToInput(line, names[i]!, input.defaults, creds.get(i));
+      // A line that sets directConnection itself keeps its own value over the batch default.
+      const direct = line.explicitDirect ? line.input.advanced!.directConnection : input.defaults.directConnection;
+      const { password, ...conn } = lineToInput(
+        line,
+        names[i]!,
+        { readOnly: input.defaults.readOnly, directConnection: direct },
+        creds.get(i),
+      );
       const problem = lineInputProblem({ ...conn, ...(password ? { password } : {}) });
       if (problem) {
         result.failed.push({ index: i, name: names[i]!, reason: problem });
@@ -278,35 +341,8 @@ export class ConnectionExportService {
         continue;
       }
       result.created.push({ index: i, id: created.id, name: created.name });
-      this.storeSecrets(created.id, created.name, password ? { password } : undefined, result);
+      storeImportedSecrets(this.vault, this.log, created, password ? { password } : undefined, result.secretsNotStored);
     }
     return result;
-  }
-
-  private storeSecrets(
-    id: string,
-    name: string,
-    values: SecretValues | undefined,
-    result: ImportCommitResult,
-  ): void {
-    if (!values) return;
-    for (const field of Object.keys(VAULT_FIELD) as ExportSecretField[]) {
-      const value = values[field];
-      if (value === undefined) continue;
-      try {
-        this.vault.set(id, VAULT_FIELD[field], value);
-      } catch (err) {
-        if (err instanceof AppError && err.code === 'SECRETS_UNAVAILABLE') {
-          result.secretsNotStored.push({ name, reason: NO_SECURE_STORAGE_REASON });
-        } else {
-          this.log?.error('conn-import', 'could not store an imported secret', {
-            cause: err instanceof Error ? err.message : String(err),
-          });
-          result.secretsNotStored.push({ name, reason: 'The password could not be stored.' });
-        }
-        // Every remaining secret of this Connection fails the same way; say it once.
-        return;
-      }
-    }
   }
 }
