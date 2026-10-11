@@ -210,8 +210,48 @@ describe('buildCollections — masking', () => {
     expect(field({ conn: ' mongodb://alice:hunter2@h ' }, 'conn')).toMatchObject({ sample: 'mongodb://alice@h/', masked: true });
   });
 
-  it('shows text that only mentions a connection string as it is', () => {
-    expect(field({ notes: 'see mongodb://alice:x@h' }, 'notes')).toMatchObject({ sample: 'see mongodb://alice:x@h', masked: false });
+  it.each([
+    'see mongodb://alice:hunter2@h',
+    'primary MONGODB+SRV://alice:hunter2@c.example.net, then failover',
+    'mongodb://h and mongodb://alice:hunter2@h2',
+    'mongodb://h/?appName=x mongodb://alice:hunter2@h2',
+    'mongodb://h/?appName=mongodb://alice:hunter2@h2',
+    // Parses as one string with no password, yet carries a second one in a parameter.
+    'mongodb://h/?appName=mongodb://alice:hunter2',
+  ])('hides text that holds a connection string among other words: %s', (notes) => {
+    expect(field({ notes }, 'notes')).toMatchObject({ sample: '••••', masked: true });
+  });
+
+  it.each(['\u200Bmongodb://alice:hunter2@h', '\uFEFF mongodb://alice:hunter2@h\u2060\n', '\u200C\u200Dmongodb://alice:hunter2@h'])(
+    'reads a connection string behind invisible characters: %j',
+    (conn) => {
+      expect(field({ conn }, 'conn')).toMatchObject({ sample: 'mongodb://alice@h/', masked: true });
+    },
+  );
+
+  it('shows a connection string without secrets behind invisible characters as it is', () => {
+    expect(field({ conn: '\u200Bmongodb://alice@h' }, 'conn')).toMatchObject({ sample: '\u200Bmongodb://alice@h', masked: false });
+  });
+
+  it('keeps a key holding a connection string out of every path and collection', () => {
+    const value = {
+      'mongodb://admin:hunter2@prod': { host: 'h' },
+      'x MONGODB+SRV://a:hunter2@c': [{ host: 'h' }],
+      servers: [{ host: 'h', 'mongodb://admin:hunter2@prod': { port: 1 }, ok: 1 }],
+    };
+    const out = JSON.stringify(buildCollections(value));
+    expect(out).not.toContain('hunter2');
+    expect(buildCollections(value).map((c) => c.at)).toEqual(['servers']);
+    expect(fields(value).map((f) => f.path)).toEqual(['host', 'ok']);
+    // With its only array out of reach the object is the lone row, and the key is still no field.
+    expect(buildCollections({ 'mongodb://admin:hunter2@prod': [{ host: 'h' }] })).toEqual([{ at: '', rows: 1, fields: [] }]);
+  });
+
+  it('skips keys longer than 256 characters', () => {
+    const long = 'k'.repeat(257);
+    const fine = 'f'.repeat(256);
+    expect(fields([{ host: 'h', [long]: 1, [fine]: 2 }]).map((f) => f.path)).toEqual(['host', fine]);
+    expect(findCollections({ [long]: [{ a: 1 }], [fine]: [{ b: 1 }] }).map((c) => c.at)).toEqual([fine]);
   });
 
   it.each([
@@ -440,7 +480,7 @@ describe('combineRow', () => {
 
   it('is unusable when the mapped host is not text', () => {
     const row = combineRow({ host: 5 }, { host: 'host' });
-    expect(row.warnings).toEqual(["host was ignored: it isn't text."]);
+    expect(row.warnings).toEqual(["host was ignored: it isn't a valid host."]);
     expect(row.unusable).toBe('No connection string or host in this row.');
   });
 
@@ -475,6 +515,43 @@ describe('combineRow', () => {
     expect(row.warnings).toEqual([]);
     expect(row.secrets).toEqual({ password: 'hunter2' });
     expect(row.input.host).toBe('h');
+  });
+
+  it.each([
+    ['db.example.com:27018', 'db.example.com', 27018],
+    ['[::1]:27019', '[::1]', 27019],
+    ['[::1]', '[::1]', 27017],
+    ['10.0.0.5', '10.0.0.5', 27017],
+  ])('splits a mapped Host %s like the parser does', (value, host, port) => {
+    const row = combineRow({ h: value }, { host: 'h' });
+    expect(row.input).toMatchObject({ host, port });
+    expect(row.warnings).toEqual([]);
+    expect(row.input).toEqual(ok(`mongodb://${value}`).input);
+  });
+
+  it.each(['db.example.com:0', 'db.example.com:99999', 'db.example.com:abc', 'a b', 'u@h', 'h/db', 'a,b', 'h?x=1', ''])(
+    'ignores the invalid mapped Host %j with a warning',
+    (value) => {
+      const row = combineRow({ h: value, label: 'x' }, { host: 'h', name: 'label' });
+      expect(row.unusable).toBe('No connection string or host in this row.');
+      expect(row.warnings).toEqual(value === '' ? [] : ["h was ignored: it isn't a valid host."]);
+    },
+  );
+
+  it("lets the host's own port win over a mapped Port, warning when they differ", () => {
+    const same = combineRow({ h: 'db:27018', p: 27018 }, { host: 'h', port: 'p' });
+    expect(same.input.port).toBe(27018);
+    expect(same.warnings).toEqual([]);
+    const other = combineRow({ h: 'db:27018', p: 27020 }, { host: 'h', port: 'p' });
+    expect(other.input.port).toBe(27018);
+    expect(other.warnings).toEqual(['p was ignored: the host already sets a different port.']);
+    expect(combineRow({ h: 'db', p: 27020 }, { host: 'h', port: 'p' }).input.port).toBe(27020);
+  });
+
+  it('ignores an embedded connection string mapped to Name', () => {
+    const row = combineRow({ host: 'h', notes: 'see mongodb://alice:hunter2@h' }, { host: 'host', name: 'notes' });
+    expect(row.nameHint).toBe('');
+    expect(row.warnings).toEqual(['notes was ignored: it holds a secret; map it to Password.']);
   });
 
   it('treats a missing, empty or non-scalar mapped value as absent, without a warning', () => {

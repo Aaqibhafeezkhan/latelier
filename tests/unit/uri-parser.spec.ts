@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseConnectionUri } from '../../electron/mongo/uri-parse';
+import { parseConnectionUri, parseHostPort } from '../../electron/mongo/uri-parse';
 import { ValidationError } from '../../electron/errors';
 
 describe('parseConnectionUri', () => {
@@ -175,6 +175,32 @@ describe('parseConnectionUri', () => {
     ]) {
       expect(() => parseConnectionUri(uri)).toThrow("This isn't a valid connection string.");
     }
+  });
+
+  it('strips the port from an SRV host with nothing after it', () => {
+    const { input, warnings } = parseConnectionUri('mongodb+srv://u:p@c.example.net:27017');
+    expect(input.host).toBe('c.example.net');
+    expect(warnings.find((w) => w.code === 'OPTION_DROPPED')?.detail).toBe(
+      'SRV URIs cannot include a port; stripped: c.example.net:27017',
+    );
+  });
+
+  it.each([
+    ['db.example.com:27018', { host: 'db.example.com', port: 27018 }],
+    ['[::1]:27019', { host: '[::1]', port: 27019 }],
+    ['[::1]', { host: '[::1]' }],
+    ['[::1]x', { problem: "The host has characters a host name can't contain." }],
+    ['a[1.2]', { problem: "The host has characters a host name can't contain." }],
+    ['[1.2]a', { problem: "The host has characters a host name can't contain." }],
+    ['h:0', { problem: 'Port must be a number from 1 to 65535.' }],
+    ['h:', { problem: 'Port must be a number from 1 to 65535.' }],
+  ])('parseHostPort(%j) follows the host rules', (authority, expected) => {
+    expect(parseHostPort(authority, true)).toEqual(expected);
+  });
+
+  it('parseHostPort keeps a colon in the host when no port is allowed', () => {
+    expect(parseHostPort('h:1', false)).toEqual({ problem: "The host has characters a host name can't contain." });
+    expect(parseHostPort('h', false)).toEqual({ host: 'h' });
   });
 
   it('does not read an SRV userinfo holding "/" and ":digits" as the host', () => {

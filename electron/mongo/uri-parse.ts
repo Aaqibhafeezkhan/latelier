@@ -80,6 +80,7 @@ export function parseConnectionUri(raw: string): ParsedUri {
     const cleaned = hostSegment
       .split(',')
       .map((h) => {
+        // Stryker disable next-line Regex: dropping the `^` is unobservable — `.*?` can match from index 0 and match() takes the leftmost match, so the match always starts at 0 anyway.
         const m = h.match(/^(.*?):(\d+)$/);
         if (m) {
           srvPortStripped.push(m[0]!);
@@ -105,6 +106,7 @@ export function parseConnectionUri(raw: string): ParsedUri {
   if (srvPortStripped.length > 0) {
     warnings.push({
       code: 'OPTION_DROPPED',
+      // Stryker disable next-line StringLiteral: the separator is never seen — two stripped ports need two SRV hosts, which ConnectionString refuses before this warning is built (the multi-host SRV test).
       detail: `SRV URIs cannot include a port; stripped: ${srvPortStripped.join(', ')}`,
     });
   }
@@ -125,20 +127,10 @@ export function parseConnectionUri(raw: string): ParsedUri {
   }
   const firstHost = hosts[0]!;
   // host:port split (SRV always has no port)
-  const split = isSrv ? { host: firstHost, port: undefined } : splitHostPort(firstHost);
-  const host = split.host;
-  if (!HOST_CHARS.test(host) && !IPV6_LITERAL.test(host)) {
-    throw new ValidationError("The host has characters a host name can't contain.");
-  }
-  let port = 27017;
-  if (split.port !== undefined) {
-    // Digits only: Number() would also accept '1e3', '0x10', ' 5' and ''.
-    const p = /^\d{1,5}$/.test(split.port) ? Number(split.port) : 0;
-    if (p < 1 || p > 65535) {
-      throw new ValidationError('Port must be a number from 1 to 65535.');
-    }
-    port = p;
-  }
+  const authority = parseHostPort(firstHost, !isSrv);
+  if ('problem' in authority) throw new ValidationError(authority.problem);
+  const host = authority.host;
+  const port = authority.port ?? 27017;
 
   // Path → default_db ---------------------------------------------------
   // decodeURIComponent throws a raw URIError on malformed percent-encoding
@@ -286,14 +278,35 @@ export function parseConnectionUri(raw: string): ParsedUri {
 const HOST_CHARS = /^[A-Za-z0-9._%-]+$/;
 const IPV6_LITERAL = /^\[[0-9A-Fa-f:.]+\]$/;
 
+/**
+ * One `host[:port]` as a connection string's host is read: the host may hold
+ * only host-name characters (or be a bracketed IPv6 literal), and a port, when
+ * `withPort` allows one, must be 1–65535. The problem comes back in words,
+ * never quoting the input.
+ */
+export function parseHostPort(
+  authority: string,
+  withPort: boolean,
+): { host: string; port?: number } | { problem: string } {
+  const split = withPort ? splitHostPort(authority) : { host: authority, port: undefined };
+  if (!HOST_CHARS.test(split.host) && !IPV6_LITERAL.test(split.host)) {
+    return { problem: "The host has characters a host name can't contain." };
+  }
+  if (split.port === undefined) return { host: split.host };
+  // Digits only: Number() would also accept '1e3', '0x10', ' 5' and ''.
+  const p = /^\d{1,5}$/.test(split.port) ? Number(split.port) : 0;
+  if (p < 1 || p > 65535) return { problem: 'Port must be a number from 1 to 65535.' };
+  return { host: split.host, port: p };
+}
+
 /** Split `host[:port]`, treating a bracketed IPv6 literal as one unit. */
 function splitHostPort(authority: string): { host: string; port: string | undefined } {
   let idx = authority.lastIndexOf(':');
   if (authority.startsWith('[')) {
     const close = authority.indexOf(']');
     idx = authority.charAt(close + 1) === ':' ? close + 1 : -1;
-    if (idx < 0) return { host: authority, port: undefined };
   }
+  // Stryker disable next-line EqualityOperator: at idx 0 the host is '' either way or keeps its leading ':', and parseHostPort refuses both with the same host message.
   if (idx < 0) return { host: authority, port: undefined };
   return { host: authority.slice(0, idx), port: authority.slice(idx + 1) };
 }

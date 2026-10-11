@@ -47,7 +47,28 @@ const uriSecret = marker.chain((m) => fc.oneof(
   fc.constantFrom('/', ':', '@', '?').map((c) => `mongodb://alice:${m}${c}x@h/app`),
   fc.constant(`mongodb+srv://alice:${m}@cluster.example.com:27017/app`),
   fc.constant(`MONGODB://alice:${m}@h`),
+  // A userinfo holding '/' or ':' after a digits-only start once read as an
+  // SRV host and came back in the parser's error and warning.
+  fc.tuple(fc.stringMatching(/^[0-9]{1,5}$/), fc.constantFrom('/', ':'), fc.constantFrom('mongodb://', 'mongodb+srv://'))
+    .map(([digits, sep, scheme]) => `${scheme}alice:${digits}${sep}${m}@cluster.example.net`),
 ));
+
+const invisible = fc.constantFrom('', ' ', '\u200B', '\uFEFF', '\u200C\u200D', '\u2060', '\n');
+/** The string as a value holds it: alone, behind invisible characters, or inside other text. */
+const wrappedUri = fc.oneof(
+  uriSecret,
+  fc.tuple(invisible, uriSecret, invisible).map(([a, u, b]) => `${a}${u}${b}`),
+  fc.tuple(fc.constantFrom('see ', 'primary: ', 'mongodb://h and '), uriSecret, fc.constantFrom('', ' then failover'))
+    .map(([a, u, b]) => `${a}${u}${b}`),
+);
+
+/** Keys that must never become a path or `at`: a connection string, or one past 256 characters. */
+const badKey = fc.oneof(
+  wrappedUri,
+  marker.map((m) => `${'k'.repeat(257)}${m}`),
+);
+const keyedBadKey = fc.tuple(badKey, fc.constantFrom('object', 'collection', 'scalar'))
+  .map(([key, shape]) => ({ [key]: shape === 'object' ? { host: 'h' } : shape === 'collection' ? [{ host: 'h' }, { host: 'i' }] : 1 }));
 
 const uriKey = fc.constantFrom('uri', 'conn', 'notes', 'connectionString', 'primary');
 
@@ -57,8 +78,12 @@ const filler = clean(fc.dictionary(
   { maxKeys: 4 },
 ));
 
-const row = fc.tuple(filler, fc.array(keyedSecret, { maxLength: 2 }), fc.option(fc.tuple(uriKey, uriSecret)))
-  .map(([f, secrets, uri]) => Object.assign({}, f, ...secrets, uri ? { [uri[0]]: uri[1] } : {}));
+const row = fc.tuple(
+  filler,
+  fc.array(keyedSecret, { maxLength: 2 }),
+  fc.option(fc.tuple(uriKey, wrappedUri)),
+  fc.array(keyedBadKey, { maxLength: 2 }),
+).map(([f, secrets, uri, bad]) => Object.assign({}, f, ...secrets, uri ? { [uri[0]]: uri[1] } : {}, ...bad));
 
 const file = fc.tuple(fc.array(row, { minLength: 1, maxLength: 5 }), fc.constantFrom('top', 'nested', 'lone'))
   .map(([rows, shape]) => (shape === 'top' ? rows : shape === 'nested' ? { data: { servers: rows } } : rows[0]!));
@@ -98,7 +123,18 @@ function allPaths(node: unknown, prefix = ''): string[] {
   });
 }
 
-const rowWithMapping = row.chain((r) => {
+/**
+ * Host values the parser refuses, marked with their own prefix: they are not
+ * secrets (the mapping screen shows them, and Name may take one), but none may
+ * become the row's host.
+ */
+const HOST_PREFIX = 'HSTX';
+const badHost = fc.stringMatching(/^[A-Za-z0-9]{4,12}$/).map((s) => `${HOST_PREFIX}${s}`)
+  .chain((m) => fc.constantFrom(`u:${m}@h`, `h:${m}`, `${m} x`, `h/${m}`, `${m},h`, `h:1${m}`));
+const combineRowArb = fc.tuple(row, fc.option(fc.tuple(fc.constantFrom('host', 'server', 'addr'), badHost)))
+  .map(([r, h]) => (h ? { ...r, [h[0]]: h[1] } : r));
+
+const rowWithMapping = combineRowArb.chain((r) => {
   const paths = ['absent', ...allPaths(r)];
   const target = fc.constantFrom(...paths);
   const shape = Object.fromEntries(MAP_TARGETS.map((t) => [t, target])) as Record<MapTarget, fc.Arbitrary<string>>;
@@ -111,6 +147,7 @@ describe('combineRow — secret properties', () => {
       const shown: Partial<ReturnType<typeof combineRow>> = combineRow(r, mapping);
       delete shown.secrets;
       expect(JSON.stringify(shown)).not.toContain(PREFIX);
+      expect(shown.input!.host ?? '').not.toContain(HOST_PREFIX);
     }), { numRuns: 1000 });
   });
 });
