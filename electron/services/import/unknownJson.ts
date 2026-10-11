@@ -109,7 +109,8 @@ function lastKey(path: string): string {
   return segments[i]!.toLowerCase();
 }
 
-const SECRET_PARTS = ['pass', 'pwd', 'secret', 'token', 'key', 'credential'];
+// `pw` is a common short form of password. `auth` is left out on purpose: authSource and authMechanism samples are useful to see.
+const SECRET_PARTS = ['pass', 'pw', 'pwd', 'secret', 'token', 'key', 'credential'];
 
 /**
  * The sample the renderer may see. Masking happens here so a raw secret never
@@ -279,7 +280,7 @@ export function combineRow(row: Row, mapping: Partial<Record<MapTarget, string>>
     if (raw === undefined || raw === '') return undefined;
     // What the mapping screen hides must not come back through a field that is shown.
     if (!SECRET_TARGETS.has(target) && sampleFor(path!, raw).masked) {
-      warnings.push(`${path} was ignored: it holds a secret; map it to Password.`);
+      warnings.push(`${path} was ignored: it holds a secret; map it to Password or Connection string.`);
       return undefined;
     }
     const v = accept(raw);

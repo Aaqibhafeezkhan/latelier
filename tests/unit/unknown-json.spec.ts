@@ -158,12 +158,16 @@ describe('buildCollections — fields', () => {
 });
 
 describe('buildCollections — masking', () => {
-  it.each(['password', 'dbPass', 'PWD', 'clientSecret', 'apiToken', 'sshKey', 'Credentials'])(
+  it.each(['password', 'dbPass', 'PWD', 'pw', 'Pw', 'dbPw', 'clientSecret', 'apiToken', 'sshKey', 'Credentials'])(
     'masks a path ending in %s',
     (key) => {
       expect(field({ [key]: 'hunter2' }, key)).toMatchObject({ sample: '••••', masked: true });
     },
   );
+
+  it.each(['authSource', 'authMechanism'])('shows the sample of %s, which is not a secret', (key) => {
+    expect(field({ [key]: 'admin' }, key)).toMatchObject({ sample: 'admin', masked: false });
+  });
 
   it('masks a non-string value under a secret key', () => {
     expect(field({ pin: 1, auth: { key: 1234 } }, 'auth.key')).toMatchObject({ sample: '••••', masked: true });
@@ -492,7 +496,7 @@ describe('combineRow', () => {
       { host: 'h', secret: 'hunter2', dbPassword: 'hunter2', apiKey: 'hunter2', token: 'hunter2', credentials: ['hunter2'], pwd: 27018, secretTls: true },
       { ...(target === 'host' ? {} : { host: 'host' }), [target]: path },
     );
-    expect(row.warnings).toEqual([`${path} was ignored: it holds a secret; map it to Password.`]);
+    expect(row.warnings).toEqual([`${path} was ignored: it holds a secret; map it to Password or Connection string.`]);
     expect(JSON.stringify(row)).not.toContain('hunter2');
     // The secret took no effect: the host row is unusable, the others keep every default.
     if (target === 'host') expect(row.unusable).toBe('No connection string or host in this row.');
@@ -504,7 +508,7 @@ describe('combineRow', () => {
       { host: 'h', backup: 'mongodb://h/?proxyPassword=hunter2', plain: 'mongodb://a@h' },
       { host: 'host', name: 'backup', username: 'plain' },
     );
-    expect(row.warnings).toEqual(['backup was ignored: it holds a secret; map it to Password.']);
+    expect(row.warnings).toEqual(['backup was ignored: it holds a secret; map it to Password or Connection string.']);
     expect(row.nameHint).toBe('');
     // A string without a secret is shown on the mapping screen, so it may feed any target.
     expect(row.input.authUsername).toBe('mongodb://a@h');
@@ -551,7 +555,7 @@ describe('combineRow', () => {
   it('ignores an embedded connection string mapped to Name', () => {
     const row = combineRow({ host: 'h', notes: 'see mongodb://alice:hunter2@h' }, { host: 'host', name: 'notes' });
     expect(row.nameHint).toBe('');
-    expect(row.warnings).toEqual(['notes was ignored: it holds a secret; map it to Password.']);
+    expect(row.warnings).toEqual(['notes was ignored: it holds a secret; map it to Password or Connection string.']);
   });
 
   it('treats a missing, empty or non-scalar mapped value as absent, without a warning', () => {

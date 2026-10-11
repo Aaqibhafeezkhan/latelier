@@ -158,7 +158,7 @@ Within the chosen collection, each row is flattened to dot paths over its scalar
 
 **Masking.** Masking happens in main, and a raw secret value never reaches the renderer. A field is masked when either rule below applies. When main hides the value whole (`••••`), the screen shows `••••` and the hint *"Taken from the file — not shown"*. When main sends a connection string with its secrets stripped, the screen shows that string, so the user can recognise the field.
 
-- **Key rule.** The path's last key is its last segment that isn't an all-digit array index, so a list under `apiKeys` is masked like a single key. When that key contains `pass`, `pwd`, `secret`, `token`, `key` or `credential` (case-insensitive substring), the sample is replaced by `••••`, whatever the value's type. Because it is a substring rule, it also masks harmless names such as `keyboard`. A needless mask only costs the user a sample. A missed one shows a secret.
+- **Key rule.** The path's last key is its last segment that isn't an all-digit array index, so a list under `apiKeys` is masked like a single key. When that key contains `pass`, `pw`, `pwd`, `secret`, `token`, `key` or `credential` (case-insensitive substring), the sample is replaced by `••••`, whatever the value's type. Because it is a substring rule, it also masks harmless names such as `keyboard`. A needless mask only costs the user a sample. A missed one shows a secret. `auth` is not on the list, so `authSource` and `authMechanism` samples stay visible.
 - **Value rule.** This rule covers any text that holds `mongodb://` or `mongodb+srv://` anywhere, in any case.
   - The text is first trimmed of spaces and zero-width characters.
   - Text that holds a second connection string, or that the connection-string library can't parse (text before the string included), is replaced by `••••`. It fails closed, because where each string ends inside it can't be told reliably.
@@ -187,7 +187,7 @@ Each target takes at most one path, and each path goes to at most one target. On
 
 A value the target doesn't accept is ignored for that row. The row shows a warning naming the path, never the value. A missing or empty value is simply absent, with no warning. Every field that isn't mapped takes the same default as a pasted string.
 
-**Secret paths.** A path the key or value rule masks can only feed Password or Connection string, the two targets whose value never appears in the review. Mapped to any other target, it is ignored with the warning *"<path> was ignored: it holds a secret; map it to Password."* Otherwise a value the mapping screen hid could come back through a field the review shows.
+**Secret paths.** A path the key or value rule masks can only feed Password or Connection string, the two targets whose value never appears in the review. Mapped to any other target, it is ignored with the warning *"<path> was ignored: it holds a secret; map it to Password or Connection string."* Otherwise a value the mapping screen hid could come back through a field the review shows.
 
 ### 5.4 Suggestions
 

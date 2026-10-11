@@ -15,7 +15,7 @@ const anyCase = (word: string) =>
   fc.array(fc.boolean(), { minLength: word.length, maxLength: word.length })
     .map((flips) => [...word].map((c, i) => (flips[i] ? c.toUpperCase() : c.toLowerCase())).join(''));
 
-const secretWord = fc.constantFrom('pass', 'pwd', 'secret', 'token', 'key', 'credential').chain(anyCase);
+const secretWord = fc.constantFrom('pass', 'pw', 'pwd', 'secret', 'token', 'key', 'credential').chain(anyCase);
 const secretKey = fc.tuple(fc.constantFrom('', 'db', 'api', 'ssh_', 'my.'), secretWord, fc.constantFrom('', 's', 'word', 'Value'))
   .map(([a, b, c]) => `${a}${b}${c}`);
 
@@ -88,7 +88,7 @@ const row = fc.tuple(
 const file = fc.tuple(fc.array(row, { minLength: 1, maxLength: 5 }), fc.constantFrom('top', 'nested', 'lone'))
   .map(([rows, shape]) => (shape === 'top' ? rows : shape === 'nested' ? { data: { servers: rows } } : rows[0]!));
 
-const SECRET_PARTS = ['pass', 'pwd', 'secret', 'token', 'key', 'credential'];
+const SECRET_PARTS = ['pass', 'pw', 'pwd', 'secret', 'token', 'key', 'credential'];
 function secretPath(path: string): boolean {
   const segments = path.split('.');
   while (segments.length > 1 && /^\d+$/.test(segments.at(-1)!)) segments.pop();
