@@ -10,7 +10,7 @@ This is a standalone feature. It is **not** the safety net for the app-identity 
 
 ## Scope
 
-- **In**: exporting a chosen set of Connections, optionally with their secrets; importing a Connection Export with a preview; passphrase encryption of secrets; entry points in the command palette, the File menu and the empty first-launch screen.
+- **In**: exporting a chosen set of Connections, optionally with their secrets; importing a Connection Export with a preview (now through the [C14](./C14-import-wizard.md) wizard); passphrase encryption of secrets; entry points in the command palette, the File menu and the empty first-launch screen.
 - **Out**:
   - Anything that belongs to a Connection rather than being part of it: saved queries, recent queries, workspace tabs, reference rules, the Audit Log, recent field values.
   - App preferences (`app_state`).
@@ -85,7 +85,7 @@ Only the three secret fields (`password`, `sshPassword`, `sshPassphrase`) are ev
 
 ### 4.1 Flow
 
-> [C14](./C14-import-wizard.md) §1 replaces this flow when it ships: every Import Source runs through one wizard. §4.2–§4.4 keep applying.
+> Replaced by [C14](./C14-import-wizard.md): every Import Source, a Connection Export included, runs through its one wizard (C14 §1), and the preview below is its final approval (C14 §6). The steps are kept here as the flow C14 started from. §4.2–§4.4 keep applying.
 
 1. The user opens Import and picks a file. Main reads and validates it (§1). Any validation failure ends the flow with that error, and nothing is written.
 2. **Preview:** a checklist of the file's Connections, all ticked. Each row shows, before anything is written:
@@ -116,12 +116,11 @@ Export and import run in main, following the `app:diagnosticBundle` model: main 
 | Channel | Input | Output | SECRET? |
 |---|---|---|---|
 | `conn:export` | `{ ids: string[]; includeSecrets: boolean; passphrase?: string }` | `{ written: number; omittedSecrets: { name: string; field: string }[] } \| { cancelled: true }` | yes (passphrase) |
-| `conn:importPreview` | `{}`; main shows the open dialog | `{ token: string; hasSecrets: boolean; entries: { index: number; name: string; savedAs: string; repick: ('tlsCa' \| 'tlsClientCert' \| 'sshKey')[]; hasSecrets: boolean }[] } \| { cancelled: true }` | no |
-| `conn:importCommit` | `{ token: string; indices: number[]; passphrase?: string; withoutSecrets?: boolean }` | `{ created: { id: string; name: string }[]; secretsNotStored: { name: string; reason: string }[] }` | yes (passphrase) |
 
-- The `token` refers to the parsed file held in main between preview and commit. It is single-use and expires when the window closes. The renderer never sends the file contents back.
-- A wrong passphrase on `conn:importCommit` fails with a stable code, e.g. `BAD_PASSPHRASE`, and writes nothing, so the user can retry.
-- Both secret-carrying channels are added to `scripts/ipc-secret-allowlist.txt` and tagged `SECRET_INPUT`.
+- **Import channels: replaced by [C14](./C14-import-wizard.md) §8.** `conn:importPreview` was replaced by `conn:importOpen`. `conn:importCommit` keeps its name but now takes and returns C14's shape, for every Import Source. The token rules are C14 §8's.
+- The `token` refers to the parsed file held in main between preview and commit. The renderer never sends the file contents back.
+- A wrong passphrase on `conn:importCommit` fails with the stable code `BAD_PASSPHRASE` and writes nothing, so the user can retry.
+- `conn:export` and `conn:importCommit` carry secrets, so both are listed in `scripts/ipc-secret-allowlist.txt` and tagged `SECRET_INPUT`.
 - Names are illustrative. Follow the existing `conn:*` naming and the full 5-file IPC contract.
 
 ## 6. Entry points
@@ -133,15 +132,15 @@ Export and import run in main, following the `app:diagnosticBundle` model: main 
 
 ## 7. Add connections (connection strings, file import, form)
 
-Import is a way of adding, so the Connections table's footer has the three ways side by side, each opening its own screen directly, with no chooser in between:
+Import is a way of adding, so the Connections table's footer has the three ways side by side, each one click away, with no chooser in between:
 
 - **+ New**: the existing full form, first because it is the common case, and still the only way to set up SSH or TLS certificate files.
-- **Paste URIs**: connection strings, one per line (§7.1).
-- **Import**: the §4 file flow, unchanged.
+- **Paste URIs**: connection strings, one per line. It opens the [C14](./C14-import-wizard.md) wizard with the paste box focused.
+- **Import**: opens the C14 wizard with the file picker focused.
 
 ### 7.1 Connection strings
 
-> [C14](./C14-import-wizard.md) replaces this screen when it ships: Pasted URIs become an Import Source in the wizard, and the per-row Direct connection choice (C14 §6) replaces the batch default below. The limits, naming and credential rules here keep applying.
+> Replaced by [C14](./C14-import-wizard.md): Pasted URIs are an Import Source in its wizard, and its per-row Direct connection choice (C14 §6) replaces the batch default in step 2. The limits, naming and credential rules here keep applying.
 
 1. **Paste.** Each non-empty line is one `mongodb://` or `mongodb+srv://` string, parsed in main by the same parser as the form's URI paste. Up to 100 lines of up to 4096 characters each. A preview lists every line before anything is written: the name it will be saved under, the host, whether it carries credentials, and the reason for any line that cannot be parsed. Bad lines never block the good ones; they are skipped and listed.
 2. **Defaults** apply to every line. All three are maintainer-overridable choices:
@@ -153,10 +152,7 @@ Import is a way of adding, so the Connections table's footer has the three ways 
 
 Passwords never travel back to the renderer: the preview reports only whether a line has one.
 
-| Channel | Input | Output | SECRET? |
-|---|---|---|---|
-| `conn:previewUris` | `{ uris: string[] }` | `{ entries: ({ index; ok: true; savedAs; host; port; srv; authUsername?; hasPassword; needsCredentials; repick; warnings } \| { index; ok: false; reason })[] }` | yes |
-| `conn:createFromUris` | `{ uris: string[]; defaults: { readOnly; directConnection }; credentials: { index; username?; password? }[] }` | same as `conn:importCommit` | yes |
+The channels this screen used are **replaced by [C14](./C14-import-wizard.md) §8**: `conn:previewUris` by `conn:importUris`, and `conn:createFromUris` by `conn:importCommit`.
 
 ## 8. Checked rows and batch actions
 
@@ -178,7 +174,7 @@ The table's footer holds only the three ways to add (§7). Export of every Conne
 - The Export Passphrase must be at least 12 characters and entered twice.
 - A secret that can't be decrypted is left out of the export and reported. The export still succeeds.
 - Import validates `format`/`version`, refuses a newer version with an "update" message, and rejects unknown fields.
-- The import preview shows the final names (with clash renames), the files that need re-picking, and secrets, before anything is written.
+- The import preview shows the final names (with clash renames), the files that need re-picking, and secrets, before anything is written. This is now C14's final approval.
 - Import always creates new Connections and never modifies existing ones.
 - Credential paths are never imported; affected Connections are listed.
 - A wrong passphrase can be retried; "Import without passwords" imports everything else.
@@ -186,7 +182,7 @@ The table's footer holds only the three ways to add (§7). Export of every Conne
 - Export and Import are reachable from the command palette, the File menu and the empty first-launch screen.
 - Plaintext secrets and the derived key never cross into the renderer.
 - Pasting several connection strings previews each line's saved name, credentials and errors before anything is written; bad lines are skipped and listed.
-- Defaults (read-only, direct connection) apply to every line; a line's own `directConnection` wins; SRV lines never get direct connection.
+- Read-only is a batch default for every pasted line, and SRV lines never get direct connection. The batch Direct connection default is replaced by C14 §6's per-row choice.
 - Lines missing a username or password are listed one per row for credentials; blanks are accepted.
 - The preview never returns a password to the renderer.
 - The Connections table checks rows (with check-all over the visible rows) and exports or deletes the checked set without closing.
