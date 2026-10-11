@@ -654,6 +654,30 @@ describe('ImportWizardService', () => {
   });
 
   describe('tokens', () => {
+    it.each(['importOpen', 'importUris'] as const)('%s drops the token of an earlier, abandoned import', async (next) => {
+      const a = install();
+      const first = a.wizard.importUris(['mongodb://alice:hunter2@h']);
+      if (next === 'importOpen') await open(a.wizard, writeFile('b.json', '{"servers":[{"host":"h"}]}'));
+      else a.wizard.importUris(['mongodb://k']);
+      await expect(
+        a.wizard.importCommit({ token: first.token, indices: [0], readOnly: false, credentials: [], directConnection: [] }),
+      ).rejects.toMatchObject({
+        code: 'VALIDATION',
+        message: 'This import has expired. Choose the file again.',
+      });
+      expect(a.conns.list()).toEqual([]);
+    });
+
+    it('keeps the token of the newest import usable', async () => {
+      const a = install();
+      a.wizard.importUris(['mongodb://h']);
+      const second = a.wizard.importUris(['mongodb://k']);
+      const result = await a.wizard.importCommit({
+        token: second.token, indices: [0], readOnly: false, credentials: [], directConnection: [],
+      });
+      expect(result.created.map((c) => c.name)).toEqual(['k']);
+    });
+
     it('clearPending invalidates every token, whatever its source', async () => {
       const a = install();
       const uris = a.wizard.importUris(['mongodb://h']);

@@ -358,6 +358,7 @@ interface ImportCommitResult {
   - The commit then takes the token before opening secrets. A failure while opening them, such as `BAD_PASSPHRASE` or a missing passphrase, puts it back for the retry. The exception is a window that closed meanwhile: its tokens must not outlive it.
   - A commit that gets past that point spends the token, even if every row ends up skipped.
   - Two concurrent commits on one token create the rows once.
+  - Starting a new import (`conn:importOpen` or `conn:importUris`) drops every token already held, since one wizard runs at a time. A cancelled import's pasted passwords and file secrets don't stay in memory.
   - Every token expires when the window closes. Using a spent or expired token fails with *"This import has expired. Choose the file again."*
 - `conn:importMap` works only on an Unknown JSON token, and only with a collection path the file has. It can be called again on the same token, and each call replaces the previous candidate rows. It carries no secret: the renderer sends paths, never values.
 - `conn:importUris` and `conn:importCommit` are tagged `SECRET_INPUT` and listed in `scripts/ipc-secret-allowlist.txt`, beside C13's `conn:export`.
