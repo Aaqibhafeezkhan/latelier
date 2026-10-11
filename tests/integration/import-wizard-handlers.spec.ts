@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
-import type { ImportOpenResult, ImportUrisResult, Review } from '@shared/types';
+import type { ImportCommitResult2, ImportOpenResult, ImportUrisResult, Review } from '@shared/types';
 import { ConnectionRepo } from '../../electron/db/repositories/ConnectionRepo';
 import { registerConnImportChannels } from '../../electron/ipc/handlers/connImport';
 import { createRouter } from '../../electron/ipc/router';
@@ -203,7 +203,7 @@ describe('conn:import* handlers: no secret reaches the renderer', () => {
   });
 
   const commit = (token: string, indices: number[], over: object = {}) =>
-    call(IPC_CHANNELS.connImportCommitV2, { token, indices, readOnly: false, credentials: [], directConnection: [], ...over });
+    call<ImportCommitResult2>(IPC_CHANNELS.connImportCommitV2, { token, indices, readOnly: false, credentials: [], directConnection: [], ...over });
 
   it('a plain Compass export: open and commit', async () => {
     openFrom = path.join(COMPASS, 'plain.json');
