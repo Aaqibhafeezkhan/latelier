@@ -496,6 +496,15 @@ describe('parseConnectionUri: C14 import markers', () => {
   });
 });
 
+describe('parseConnectionUri: SRV port strip', () => {
+  it('finds userinfo only inside the authority, so an @ in the path is not one', () => {
+    const { input, warnings } = parseConnectionUri('mongodb+srv://u@good.example.net/db@x:1');
+    expect(input.host).toBe('good.example.net');
+    expect(input.defaultDb).toBe('db@x:1');
+    expect(warnings.find((w) => w.code === 'OPTION_DROPPED')).toBeUndefined();
+  });
+});
+
 describe('parseConnectionUri: host and port validation', () => {
   const PORT_MSG = 'Port must be a number from 1 to 65535.';
   const HOST_MSG = "The host has characters a host name can't contain.";
@@ -517,6 +526,10 @@ describe('parseConnectionUri: host and port validation', () => {
     ['mongodb://m\u00fcnchen\u00a0.example', HOST_MSG],
     ['mongodb://m\u00fcnchen\u3000.example', HOST_MSG],
     ['mongodb://m\u00fcnchen$.example', HOST_MSG],
+    ['mongodb://good%2eexample', HOST_MSG],
+    ['mongodb://good%40evil', HOST_MSG],
+    ['mongodb://100%', HOST_MSG],
+    ['mongodb://%2Ftmp%2Fsock.sock.evil', HOST_MSG],
   ])('refuses %s', (uri, message) => {
     expect(() => parseConnectionUri(uri)).toThrow(new ValidationError(message));
   });
@@ -534,9 +547,38 @@ describe('parseConnectionUri: host and port validation', () => {
     ['mongodb://\u65e5\u672c.example', '\u65e5\u672c.example', 27017],
     ['mongodb://\ud83d\ude00.example', '\ud83d\ude00.example', 27017],
     ['mongodb+srv://m\u00fcnchen.example', 'm\u00fcnchen.example', 27017],
+    ['mongodb://M\u00dcNCHEN.example', 'M\u00dcNCHEN.example', 27017],
+    ['mongodb://\u0430pple.example', '\u0430pple.example', 27017],
+    ['mongodb://%2Ftmp%2Fmongodb-27017.sock', '%2Ftmp%2Fmongodb-27017.sock', 27017],
   ])('accepts %s', (uri, host, port) => {
     const { input } = parseConnectionUri(uri);
     expect({ host: input.host, port: input.port }).toEqual({ host, port });
+  });
+
+  // Host names whose DNS form (UTS46) is a different name than the one shown.
+  it.each([
+    ['an ideographic full stop', 'good.example\u3002evil.com'],
+    ['a fullwidth full stop', 'good.example\uFF0Eevil.com'],
+    ['a halfwidth ideographic full stop', 'good.example\uFF61evil.com'],
+    ['a zero-width space', 'go\u200Bod.example'],
+    ['a zero-width joiner', 'go\u200Dod.example'],
+    ['a soft hyphen', 'go\u00ADod.example'],
+    ['a fullwidth slash', 'good\uFF0Fevil.com'],
+    ['a fullwidth at sign', 'good\uFF20evil.com'],
+    ['a fullwidth question mark', 'good\uFF1Fevil.com'],
+    ['a fullwidth number sign', 'good\uFF03evil.com'],
+    ['a fullwidth colon', 'good\uFF1A1.com'],
+    ['a fullwidth comma', 'good\uFF0Cevil.com'],
+    ['a small commercial at', 'good\uFE6Bevil.com'],
+    ['a small number sign', 'good\uFE5Fevil.com'],
+    ['a right-to-left override', 'good\u202Eevil.com'],
+    ['a lone surrogate', 'good\uD800.example'],
+  ])('refuses a host with %s', (_name, host) => {
+    expect(parseHostPort(host, true)).toEqual({ problem: "The host has characters a host name can't contain." });
+  });
+
+  it('keeps an uppercase international host as typed, lower-casing only for the check', () => {
+    expect(parseHostPort('M\u00dcNCHEN.example', true)).toEqual({ host: 'M\u00dcNCHEN.example' });
   });
 
   it('keeps stripping a port from an SRV host', () => {

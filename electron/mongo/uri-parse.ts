@@ -1,3 +1,4 @@
+import { domainToASCII, domainToUnicode } from 'node:url';
 import ConnectionString from 'mongodb-connection-string-url';
 import type {
   AuthMech,
@@ -68,15 +69,14 @@ export function parseConnectionUri(raw: string): ParsedUri {
   const srvPortStripped: string[] = [];
   let normalized = trimmed;
   if (normalized.startsWith(SRV_SCHEME)) {
-    // The host list starts after the last '@' before the query, so a userinfo
-    // holding '/' or ':digits' is never read as a host and never reaches the
-    // warning below.
+    // The host list starts after the last '@' inside the authority (up to the
+    // first '/', '?' or '#'), so a userinfo holding ':digits' is never read as
+    // a host and an '@' in the path or query is never read as userinfo.
     const rest = normalized.slice(SRV_SCHEME.length);
-    const queryAt = rest.indexOf('?');
-    const hostStart = rest.lastIndexOf('@', queryAt === -1 ? rest.length : queryAt) + 1;
-    const fromHost = rest.slice(hostStart);
-    const hostEnd = fromHost.search(/[/?]/);
-    const hostSegment = hostEnd === -1 ? fromHost : fromHost.slice(0, hostEnd);
+    const authorityEnd = rest.search(/[/?#]/);
+    const authority = authorityEnd === -1 ? rest : rest.slice(0, authorityEnd);
+    const hostStart = authority.lastIndexOf('@') + 1;
+    const hostSegment = authority.slice(hostStart);
     const cleaned = hostSegment
       .split(',')
       .map((h) => {
@@ -89,7 +89,7 @@ export function parseConnectionUri(raw: string): ParsedUri {
         return h;
       })
       .join(',');
-    normalized = SRV_SCHEME + rest.slice(0, hostStart) + cleaned + fromHost.slice(hostSegment.length);
+    normalized = SRV_SCHEME + rest.slice(0, hostStart) + cleaned + rest.slice(authority.length);
   }
 
   let cs: ConnectionString;
@@ -274,12 +274,27 @@ export function parseConnectionUri(raw: string): ParsedUri {
   };
 }
 
-// Letters, digits and . - _ plus % for percent-encoded bytes (unix sockets),
-// and any non-ASCII character: the driver accepts an internationalised name
-// such as münchen.example, as this parser always has. Non-ASCII spaces are not
-// host-name characters, same as the ASCII one.
+// Letters, digits and . - _, plus % for the driver's percent-encoded Unix-socket
+// form (see SOCKET_HOST), and any non-ASCII character: the driver accepts an
+// internationalised name such as münchen.example, as this parser always has.
+// Non-ASCII spaces are not host-name characters, same as the ASCII one.
 const HOST_CHARS = /^[A-Za-z0-9._%\u0080-\uFFFF-]+$/;
 const ANY_SPACE = /\s/;
+const NON_ASCII = /[\u0080-\uFFFF]/;
+// A percent escape is a host character only in a Unix-socket path (`%2Ftmp%2Fmongodb-27017.sock`).
+// Anywhere else it would let a name decode to something other than what is shown.
+const SOCKET_HOST = /\.sock$/;
+
+/**
+ * A non-ASCII host is resolved after UTS46 processing, which can turn it into a
+ * different name than the one shown (an ideographic full stop becomes a dot,
+ * zero-width characters vanish). It is accepted only when it survives the round
+ * trip to its punycode form unchanged, bar case.
+ */
+function survivesDns(host: string): boolean {
+  // A name DNS refuses converts to '', which never converts back to the (non-empty) host.
+  return domainToUnicode(domainToASCII(host)) === host.toLowerCase();
+}
 const IPV6_LITERAL = /^\[[0-9A-Fa-f:.]+\]$/;
 
 /**
@@ -293,7 +308,7 @@ export function parseHostPort(
   withPort: boolean,
 ): { host: string; port?: number } | { problem: string } {
   const split = withPort ? splitHostPort(authority) : { host: authority, port: undefined };
-  if ((!HOST_CHARS.test(split.host) || ANY_SPACE.test(split.host)) && !IPV6_LITERAL.test(split.host)) {
+  if (!IPV6_LITERAL.test(split.host) && !hostNameOk(split.host)) {
     return { problem: "The host has characters a host name can't contain." };
   }
   if (split.port === undefined) return { host: split.host };
@@ -301,6 +316,12 @@ export function parseHostPort(
   const p = /^\d{1,5}$/.test(split.port) ? Number(split.port) : 0;
   if (p < 1 || p > 65535) return { problem: 'Port must be a number from 1 to 65535.' };
   return { host: split.host, port: p };
+}
+
+function hostNameOk(host: string): boolean {
+  if (!HOST_CHARS.test(host) || ANY_SPACE.test(host)) return false;
+  if (host.includes('%') && !SOCKET_HOST.test(host)) return false;
+  return !NON_ASCII.test(host) || survivesDns(host);
 }
 
 /** Split `host[:port]`, treating a bracketed IPv6 literal as one unit. */
