@@ -394,9 +394,17 @@ describe('redactSecrets: connection-string query secrets', () => {
     ['mongodb://h/?a=1&proxypassword=one&proxyPassword=two', 'mongodb://h/?a=1&proxypassword=***&proxyPassword=***'],
     ['mongodb://h/?authMechanism=MONGODB-AWS&authMechanismProperties=AWS_SESSION_TOKEN:s3cret&x=1', 'mongodb://h/?authMechanism=MONGODB-AWS&authMechanismProperties=***&x=1'],
     ['mongodb://u:p@h/?proxyPassword=s3cret', 'mongodb://***@h/?proxyPassword=***'],
+    ['mongodb://h/?%70roxyPassword=s3cret', 'mongodb://h/?%70roxyPassword=***'],
+    ['mongodb://h/?proxy%50assword=s3cret&tls=true', 'mongodb://h/?proxy%50assword=***&tls=true'],
+    ['mongodb://h/?%61uthMechanismProperties=AWS_SESSION_TOKEN:s3cret', 'mongodb://h/?%61uthMechanismProperties=***'],
     ['failed on mongodb://h/?proxyPassword=s3cret retrying', 'failed on mongodb://h/?proxyPassword=*** retrying'],
   ])('masks %s', (input, expected) => {
     expect(redactSecrets(input)).toBe(expected);
+  });
+
+  it('keeps a parameter whose name has a malformed escape, without throwing', () => {
+    const uri = 'mongodb://h/?%E0%A4%A=1&proxyPassword=s3cret&%zz=2';
+    expect(redactSecrets(uri)).toBe('mongodb://h/?%E0%A4%A=1&proxyPassword=***&%zz=2');
   });
 
   it('keeps non-secret parameters and other authMechanismProperties', () => {
