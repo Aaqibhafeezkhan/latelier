@@ -143,23 +143,25 @@ test('export two of three Connections with passwords, import into a fresh profil
     }
 
     await winB.getByRole('button', { name: 'Import connections' }).click();
-    const importDialog = winB.getByRole('dialog', { name: 'Import Connections' });
-    await importDialog.getByRole('button', { name: 'Choose file…' }).click();
-    const table = importDialog.getByRole('table', { name: 'Connections in the file' });
-    await expect(table.getByRole('checkbox', { name: 'Import Alpha' })).toBeChecked();
-    await expect(table.getByRole('checkbox', { name: 'Import Beta' })).toBeChecked();
-    await expect(table.getByRole('checkbox', { name: 'Import Gamma' })).toHaveCount(0);
+    const wizard = winB.getByRole('dialog', { name: 'Import Connections', exact: true });
+    await wizard.getByRole('button', { name: 'Choose file…' }).click();
 
-    await importDialog.getByLabel('Export Passphrase').fill('not the passphrase');
-    await importDialog.getByRole('button', { name: 'Import', exact: true }).click();
-    await expect(importDialog.getByText('Wrong Export Passphrase.', { exact: true })).toBeVisible();
-    // An inline field error, not the dialog-level failure banner.
-    await expect(importDialog.getByRole('alert')).toHaveCount(0);
+    // A Connection Export goes straight to the final approval, with no Field Mapping.
+    const review = wizard.getByRole('table', { name: 'Connections to import' });
+    await expect(review.getByRole('checkbox', { name: 'Import Alpha' })).toBeChecked();
+    await expect(review.getByRole('checkbox', { name: 'Import Beta' })).toBeChecked();
+    await expect(review.getByRole('checkbox', { name: 'Import Gamma' })).toHaveCount(0);
 
-    await importDialog.getByLabel('Export Passphrase').fill(PASSPHRASE);
-    await importDialog.getByRole('button', { name: 'Import', exact: true }).click();
-    await expect(importDialog.getByRole('status')).toHaveText('2 Connections imported.');
-    await expect(importDialog.getByLabel('Secrets not stored')).toHaveCount(0);
+    await wizard.getByLabel('Export Passphrase').fill('not the passphrase');
+    await wizard.getByRole('button', { name: 'Import 2 Connections' }).click();
+    await expect(wizard.getByText('Wrong Export Passphrase.', { exact: true })).toBeVisible();
+    // An inline field error, not the wizard-level failure banner.
+    await expect(wizard.getByRole('alert')).toHaveCount(0);
+
+    await wizard.getByLabel('Export Passphrase').fill(PASSPHRASE);
+    await wizard.getByRole('button', { name: 'Import 2 Connections' }).click();
+    await expect(wizard.getByRole('status')).toHaveText('2 Connections imported.');
+    await expect(wizard.getByLabel('Secrets not stored')).toHaveCount(0);
 
     const status = await winB.evaluate(async () => {
       const api = (window as unknown as { atelier: Atelier }).atelier;
