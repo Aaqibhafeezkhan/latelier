@@ -282,6 +282,8 @@ export type ReviewRow =
       index: number;
       ok: true;
       savedAs: string;
+      /** The name the row asked for, when a clash renamed it to savedAs. */
+      renamedFrom?: string;
       host: string;
       /** Absent on SRV. */
       port?: number;
