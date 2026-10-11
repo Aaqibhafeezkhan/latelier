@@ -293,7 +293,7 @@ export type ReviewRow =
       hasPassword: boolean;
       /** The password only exists sealed (needs the passphrase). */
       passwordSealed: boolean;
-      /** Password-auth row with no password at all; false for x509/awsiam/none. */
+      /** Missing a username or a password (plaintext or sealed), so the review asks for both; never X.509 or AWS. */
       needsCredentials: boolean;
       /** Null on SRV. */
       directConnection: boolean | null;

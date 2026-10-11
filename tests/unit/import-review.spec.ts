@@ -189,7 +189,8 @@ describe('buildReview: passwords and credentials (L4)', () => {
     ['a username alone', row('mongodb://u@h'), { ...none, needsCredentials: true }],
     ['SCRAM with nothing', row('mongodb://h/?authMechanism=SCRAM-SHA-256'), { ...none, needsCredentials: true }],
     ['SCRAM-SHA-1 with a username alone', row('mongodb://u@h/?authMechanism=SCRAM-SHA-1'), { ...none, needsCredentials: true }],
-    ['no authentication', row('mongodb://h'), none],
+    ['no authentication', row('mongodb://h'), { ...none, needsCredentials: true }],
+    ['a password with no username', row('mongodb://h/?authMechanism=SCRAM-SHA-256', { secrets: { password: 'p' } }), { hasPassword: true, passwordSealed: false, needsCredentials: true }],
     ['X.509', row('mongodb://h/?authMechanism=MONGODB-X509&tls=true'), none],
     ['AWS with a key id alone', row('mongodb://k@h/?authMechanism=MONGODB-AWS'), none],
   ])('%s', (_label, r, expected) => {
@@ -210,7 +211,7 @@ describe('buildReview: passwords and credentials (L4)', () => {
       needsCredentials: false,
     });
     expect(flags(row('mongodb://u@h/?authMechanism=SCRAM-SHA-256', { sealed: compass })).passwordSealed).toBe(true);
-    expect(flags(row('mongodb://h', { sealed: compass }))).toEqual(none);
+    expect(flags(row('mongodb://h', { sealed: compass }))).toEqual({ ...none, needsCredentials: true });
     expect(flags(row('mongodb://u@h/?authMechanism=MONGODB-X509&tls=true', { sealed: compass }))).toEqual(none);
     expect(flags(row('mongodb://u@h/?authMechanism=MONGODB-AWS', { sealed: compass }))).toEqual(none);
   });

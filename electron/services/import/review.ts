@@ -7,6 +7,13 @@ import type { CandidateRow } from './candidateRow.ts';
 /** The mechanisms that sign in with a username and password. */
 const PASSWORD_MECHS = new Set(['default', 'scram256', 'scram1']);
 
+/**
+ * The rows the review asks for a username and password (C13 §7.1 step 4):
+ * password sign-in, or none yet, which a typed username turns on. X.509
+ * and AWS are never asked.
+ */
+const CRED_MECHS = new Set([...PASSWORD_MECHS, 'none']);
+
 const normalName = (name: string): string => normalizeConnectionInput({ name }).name;
 
 /** Each usable row's planned name, and the name it asked for; `null` for an unusable row. */
@@ -85,7 +92,7 @@ export function buildReview(rows: readonly CandidateRow[], existing: Iterable<st
         ...(input.authUsername ? { authUsername: input.authUsername } : {}),
         hasPassword,
         passwordSealed: sealed,
-        needsCredentials: PASSWORD_MECHS.has(input.authMech!) && !hasPassword,
+        needsCredentials: CRED_MECHS.has(input.authMech!) && (!input.authUsername || !hasPassword),
         directConnection: directDefault(row),
         defaultTicked: row.defaultTicked,
         repick: repickFor(input, row.repick),
