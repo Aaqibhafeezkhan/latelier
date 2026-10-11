@@ -85,6 +85,8 @@ describe('conn:import* handlers: payload validation', () => {
       ['an empty token', { token: '', at: '', mapping: {} }],
       ['an unknown key', { token: 't', at: '', mapping: {}, values: ['x'] }],
       ['a missing at', { token: 't', mapping: {} }],
+      ['an at of 4097 characters', { token: 't', at: 'a'.repeat(4097), mapping: {} }],
+      ['a mapping path of 4097 characters', { token: 't', at: '', mapping: { host: 'a'.repeat(4097) } }],
     ])('rejects %s', async (_label, payload) => {
       expect(code(await shim.invoke(IPC_CHANNELS.connImportMap, payload))).toBe('VALIDATION');
       expect(svc.importMap).not.toHaveBeenCalled();
@@ -134,6 +136,7 @@ describe('conn:import* handlers: payload validation', () => {
       ['more than 1000 direct choices', { ...COMMIT, directConnection: Array.from({ length: 1001 }, (_, index) => ({ index, value: true })) }],
       ['an empty passphrase', { ...COMMIT, passphrase: '' }],
       ['a missing readOnly', { token: 't', indices: [0], credentials: [], directConnection: [] }],
+      ['a username of 129 characters', { ...COMMIT, credentials: [{ index: 0, username: 'u'.repeat(129) }] }],
       ['a credential with an unknown key', { ...COMMIT, credentials: [{ index: 0, sshPassword: 'x' }] }],
       ['a direct choice that is not a boolean', { ...COMMIT, directConnection: [{ index: 0, value: 'on' }] }],
       ['an unknown key', { ...COMMIT, uris: ['mongodb://h'] }],

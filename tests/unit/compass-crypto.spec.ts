@@ -1,10 +1,17 @@
-import { createCipheriv, pbkdf2Sync, randomBytes } from 'node:crypto';
+import { createCipheriv, pbkdf2, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { EJSON } from 'bson';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { decryptCompassSecrets } from '../../electron/services/import/compassCrypto';
 import { AppError } from '../../electron/errors';
+
+// Wraps the real pbkdf2 so a test can see whether a key was derived; every
+// other test still runs the real thing through the wrapper.
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return { ...actual, pbkdf2: vi.fn(actual.pbkdf2) };
+});
 
 // Fixtures exported by MongoDB Compass 1.49.7 (see docs/agents/c14-plan.md §9 L1).
 const DIR = path.join(__dirname, '../fixtures/compass');
@@ -70,9 +77,11 @@ describe('decryptCompassSecrets — real Compass export', () => {
   it('a version other than 1 is refused before any key is derived', async () => {
     const buf = Buffer.from(blobs[0]!, 'base64');
     buf.writeUInt16BE(2, 0);
+    vi.mocked(pbkdf2).mockClear();
     await expect(decryptCompassSecrets(buf.toString('base64'), PASS)).rejects.toThrow(
       "This Compass export's secrets use an unsupported format.",
     );
+    expect(pbkdf2).not.toHaveBeenCalled();
   });
 });
 

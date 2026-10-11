@@ -93,7 +93,7 @@ The rules below are pinned by real exports from MongoDB Compass 1.49.7, committe
 
 ### 4.1 Mapping
 
-The file is canonical EJSON: `version` is `{"$numberInt":"1"}`, and ports are `$numberInt` too. Main reads it with `EJSON.parse`. A plain `JSON.parse` would leave the version as an object and refuse every real export. Each element of `connections` becomes one row. Keys this reader doesn't use are ignored.
+The file is canonical EJSON: `version` is `{"$numberInt":"1"}`, and ports are `$numberInt` too. Main reads it with `EJSON.parse`. A plain `JSON.parse` would leave the version as an object and refuse every real export. Each element of `connections` becomes one row. Keys this reader doesn't use are ignored, but a key it does read that holds the wrong type in any entry (a port that isn't a number, say) makes the whole file refused with *"This Compass export can't be read."*
 
 | Compass | Connection |
 |---|---|
@@ -118,7 +118,7 @@ Decryption runs in main, at commit, for the ticked rows only:
 2. The key is PBKDF2-SHA512 over the passphrase and salt, with 100,000 iterations and 32 bytes of output. It is derived with the asynchronous `pbkdf2`, because 100,000 rounds for each sealed entry would otherwise block the main process.
 3. The cipher is AES-256-GCM, with no additional authenticated data.
 4. The plaintext is JSON: `{ "secrets": { "password", "sshTunnelPassword" or "sshTunnelPassphrase", … } }`.
-5. `password` becomes the row's password. `sshTunnelPassword` and `sshTunnelPassphrase` become its SSH secrets. Empty values are skipped. Any other secret, or a kept name that doesn't hold text, is dropped. The result names it in a warning, never with its value: *"The "<name>" secret was not imported."*
+5. `password` becomes the row's password. `sshTunnelPassword` and `sshTunnelPassphrase` become its SSH secrets. An empty or null secret is skipped silently, with no warning. Any other secret, or a kept name that doesn't hold text, is dropped. The result names it in a warning, never with its value: *"The "<name>" secret was not imported."*
 
 Before the passphrase is given, a blob is opaque. So the review assumes a sealed password whenever the string carries a username and signs in with a password (default negotiation or SCRAM), and reports it with `passwordSealed`.
 
@@ -204,7 +204,7 @@ The screen opens with assignments pre-filled. The user can change or clear any o
   - Default database: `db`, `database`, `dbName`
   - Name: `name`, `label`, `title`
   - TLS: `tls`, `ssl`
-- **values.** The only value rule: a path whose sample starts with `mongodb://` or `mongodb+srv://` is suggested as Connection string, ahead of its key name.
+- **values.** The only value rule: a path whose value, trimmed, starts with `mongodb://` or `mongodb+srv://` is suggested as Connection string, ahead of its key name. The rule reads the value, not the sample the screen shows, so it also applies under a secret-looking key whose sample is hidden.
 
 A target is suggested for one path only: the first in document order. A path whose value rule lost its target to an earlier path gets no suggestion, rather than falling back to its key name.
 
@@ -375,7 +375,7 @@ interface ImportCommitResult {
 - Compass OIDC rows are listed as not importable with the OIDC message. Rows with configured FLE, an application-level proxy or proxy options in the string import with a warning.
 - Compass favourites are ticked by default; recent connections are not.
 - Field Mapping offers every array of objects within 5 levels, largest first, without searching a collection's rows. It treats a lone top-level object as one row and caps a collection at 500 rows.
-- Field paths are flattened to dot paths over scalar leaves, at most 20 levels below the row. Secret-looking paths and connection strings that carry secrets are masked in main, with the "taken from the file" hint.
+- Field paths are flattened to dot paths over scalar leaves, at most 20 levels below the row. Secret-looking paths and connection strings that carry secrets are masked in main. A fully hidden sample (`••••`) carries the "Taken from the file — not shown" hint; a connection string with its secrets stripped shows that stripped form, with no hint.
 - A path holding a secret can only feed Password or Connection string.
 - Suggestions pre-fill from the key-name list and the `mongodb://` value rule, one path per target; the user can change or clear each one.
 - Next is disabled until Connection string or Host is mapped.
@@ -410,7 +410,8 @@ interface ImportCommitResult {
   - concurrent commits;
   - a window closing during a passphrase check;
   - `clearPending`.
-- **Integration** (`import-wizard-handlers.spec.ts`): every channel's payload bounds, and no secret in any result for each of the four sources.
+- **Integration** (`import-wizard-handlers.spec.ts`): every channel's payload bounds (counts, string lengths including `at`, mapping paths and the credentials username, empty and unknown keys), and no secret in any result for each of the four sources.
+- **Component** (`connection-transfer-palette.spec.tsx`): the command-palette entries for Export Connections… and Import Connections… each open their dialog.
 - **Component** (`import-wizard-entry`, `-source`, `-mapping`, `-review`): entry points and dismissal, the paste limits, the mapping screen (suggestions, one path per target, masked samples, Next), and the final approval (routing per source, ticks, credentials, Direct connection, Read-only, passphrase retry with main's message, renames, result).
 - **E2E** (`tests/e2e/c13-add-connections.e2e.ts`): add Connections from pasted strings with typed credentials, then batch-delete them.
 - **E2E** (`tests/e2e/c13-connection-export-import.e2e.ts`): export two of three Connections with passwords, import them into a fresh profile, and connect without re-entering the password.
