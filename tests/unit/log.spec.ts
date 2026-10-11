@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createLogger, isLogFile } from '../../electron/log';
+import { createLogger, isLogFile, redactSecrets } from '../../electron/log';
 import { useUmask022 } from '../helpers/umask';
 
 describe('createLogger', () => {
@@ -382,5 +382,34 @@ describe('createLogger', () => {
       expect(lines[0].data.message).toContain('EPERM: not the owner');
       expect(lines[1]).toMatchObject({ msg: 'after' });
     });
+  });
+});
+
+describe('redactSecrets: connection-string query secrets', () => {
+  it.each([
+    ['mongodb://h/?proxyPassword=s3cret', 'mongodb://h/?proxyPassword=***'],
+    ['mongodb+srv://h/?tlsCertificateKeyFilePassword=s3cret&tls=true', 'mongodb+srv://h/?tlsCertificateKeyFilePassword=***&tls=true'],
+    ['mongodb://h/?sslPEMKeyPassword=s3cret', 'mongodb://h/?sslPEMKeyPassword=***'],
+    ['mongodb://h/?PASSWORD=s3cret', 'mongodb://h/?PASSWORD=***'],
+    ['mongodb://h/?a=1&proxypassword=one&proxyPassword=two', 'mongodb://h/?a=1&proxypassword=***&proxyPassword=***'],
+    ['mongodb://h/?authMechanism=MONGODB-AWS&authMechanismProperties=AWS_SESSION_TOKEN:s3cret&x=1', 'mongodb://h/?authMechanism=MONGODB-AWS&authMechanismProperties=***&x=1'],
+    ['mongodb://u:p@h/?proxyPassword=s3cret', 'mongodb://***@h/?proxyPassword=***'],
+    ['failed on mongodb://h/?proxyPassword=s3cret retrying', 'failed on mongodb://h/?proxyPassword=*** retrying'],
+  ])('masks %s', (input, expected) => {
+    expect(redactSecrets(input)).toBe(expected);
+  });
+
+  it('keeps non-secret parameters and other authMechanismProperties', () => {
+    const uri = 'mongodb://h/?authSource=admin&authMechanismProperties=SERVICE_NAME:mongodb&passwordless=1';
+    expect(redactSecrets(uri)).toBe(uri);
+  });
+
+  it('masks only authMechanismProperties for the session-token rule', () => {
+    const uri = 'mongodb://h/?appName=AWS_SESSION_TOKEN:x';
+    expect(redactSecrets(uri)).toBe(uri);
+  });
+
+  it('leaves a secret-named parameter outside a connection string alone', () => {
+    expect(redactSecrets('https://h/?password=x')).toBe('https://h/?password=x');
   });
 });

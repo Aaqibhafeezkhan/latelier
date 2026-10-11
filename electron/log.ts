@@ -34,7 +34,30 @@ const REDACTED_KEYS = new Set([
  * malformed at that point and no pattern can tell where the userinfo ends.
  */
 const URI_USERINFO = /(mongodb(?:\+srv)?:\/\/)[^/\s]*@/gi;
-const scrubString = (s: string): string => s.replace(URI_USERINFO, '$1***@');
+
+/**
+ * Query parameters of a connection string that carry a secret, lower-cased.
+ * Matches the set the import wizard masks, plus the legacy PEM-key alias.
+ */
+const SECRET_URI_PARAMS = new Set([
+  'password', 'proxypassword', 'tlscertificatekeyfilepassword', 'sslpemkeypassword',
+]);
+const URI_STRING = /mongodb(?:\+srv)?:\/\/\S*/gi;
+// Name and value are disjoint character classes, so the scan stays linear.
+const URI_QUERY_PARAM = /([?&])([^=&]*)=([^&]*)/g;
+
+// An authMechanismProperties value holding the AWS session token is masked
+// whole: splitting a malformed list to find the token's end cannot be trusted.
+function scrubQueryParam(match: string, sep: string, name: string, value: string): string {
+  const key = name.toLowerCase();
+  const secret = SECRET_URI_PARAMS.has(key)
+    || (key === 'authmechanismproperties' && /aws_session_token/i.test(value));
+  return secret ? `${sep}${name}=***` : match;
+}
+
+const scrubString = (s: string): string =>
+  s.replace(URI_USERINFO, '$1***@')
+    .replace(URI_STRING, (uri) => uri.replace(URI_QUERY_PARAM, scrubQueryParam));
 
 /**
  * True when a dotted field path (e.g. `user.password`) has any segment that
