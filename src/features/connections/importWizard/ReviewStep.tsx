@@ -1,6 +1,6 @@
 import React from 'react';
 import { Badge, Button, Checkbox, Group, PasswordInput, Stack, Table, Text, TextInput } from '@mantine/core';
-import type { ImportCommitInput2, ImportSource, Review, ReviewRow } from '@shared/types';
+import type { ImportCommitInput, ImportSource, Review, ReviewRow } from '@shared/types';
 import { SubmitButton } from '../../../components/SubmitButton';
 import { REPICK_LABEL, plural } from '../transferCopy';
 
@@ -19,7 +19,7 @@ export interface ReviewStepProps {
   /** Present only when there is a step to go back to (Field Mapping). */
   onBack?(): void;
   onCancel(): void;
-  onCommit(input: Omit<ImportCommitInput2, 'token'>): void;
+  onCommit(input: Omit<ImportCommitInput, 'token'>): void;
 }
 
 const DIRECT_HINT =

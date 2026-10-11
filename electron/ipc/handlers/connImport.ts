@@ -69,8 +69,8 @@ export function registerConnImportChannels(router: Router, svc: ImportWizardServ
     svc.importUris(uris),
   );
 
-  // SECRET_INPUT: 'conn:importCommit2' payload carries the export passphrase and typed passwords.
-  router.register(IPC_CHANNELS.connImportCommitV2, zodValidator(CommitInput), (input) =>
-    svc.importCommitV2(input),
+  // SECRET_INPUT: 'conn:importCommit' payload carries the export passphrase and typed passwords.
+  router.register(IPC_CHANNELS.connImportCommit, zodValidator(CommitInput), (input) =>
+    svc.importCommit(input),
   );
 }

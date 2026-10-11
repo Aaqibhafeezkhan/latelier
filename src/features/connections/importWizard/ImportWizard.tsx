@@ -1,8 +1,8 @@
 import React from 'react';
 import { Alert, Button, Group, Modal, Stack } from '@mantine/core';
 import type {
-  ImportCommitInput2,
-  ImportCommitResult2,
+  ImportCommitInput,
+  ImportCommitResult,
   ImportSource,
   MapTarget,
   MappingCollection,
@@ -39,7 +39,7 @@ export function ImportWizard({ initial, onClose }: ImportWizardProps) {
   // Bumped on every new review so the approval step's ticks and fields never
   // carry over to rows they were not chosen for; `importMap` keeps the token.
   const [reviewKey, setReviewKey] = React.useState(0);
-  const [result, setResult] = React.useState<ImportCommitResult2 | null>(null);
+  const [result, setResult] = React.useState<ImportCommitResult | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | undefined>();
   const [passphraseError, setPassphraseError] = React.useState<string | undefined>();
@@ -98,12 +98,12 @@ export function ImportWizard({ initial, onClose }: ImportWizardProps) {
       showReview('unknown', tok, res.review);
     });
 
-  const commit = async (input: Omit<ImportCommitInput2, 'token'>) => {
+  const commit = async (input: Omit<ImportCommitInput, 'token'>) => {
     setBusy(true);
     setError(undefined);
     setPassphraseError(undefined);
     try {
-      const res = await api.conn.importCommitV2({ ...input, token: currentToken() });
+      const res = await api.conn.importCommit({ ...input, token: currentToken() });
       setResult(res);
       setStep('result');
       notifyConnectionsChanged();

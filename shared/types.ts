@@ -101,79 +101,12 @@ export type ConnectionExportResult =
   | { written: number; omittedSecrets: { name: string; field: ExportSecretField }[] }
   | { cancelled: true };
 
-export type ImportPreview =
-  | {
-      /** Single-use handle to the parsed file held in main. */
-      token: string;
-      hasSecrets: boolean;
-      entries: {
-        index: number;
-        name: string;
-        savedAs: string;
-        repick: RepickFile[];
-        hasSecrets: boolean;
-      }[];
-    }
-  | { cancelled: true };
-
-export interface ImportCommitInput {
-  token: string;
-  indices: number[];
-  passphrase?: string;
-  withoutSecrets?: boolean;
-}
-
-export interface ImportCommitResult {
-  /** `index` is the entry's position in the file, which is what the preview listed. */
-  created: { index: number; id: string; name: string }[];
-  /** Entries that could not be created; the others were still imported. */
-  failed: { index: number; name: string; reason: string }[];
-  secretsNotStored: { name: string; reason: string }[];
-}
-
-// Adding Connections from pasted connection strings (C13 §7.1). Passwords go
-// in only: the preview says whether a line has one, never what it is.
-
-/** Applied to every line of a batch. */
-export interface UriBatchDefaults {
-  readOnly: boolean;
-  directConnection: boolean;
-}
-
 /** What the user typed for one line in the credentials step. */
 export interface UriCredentials {
   index: number;
   /** Typed in the second step; `''` means the user cleared it: no authentication. */
   username?: string;
   password?: string;
-}
-
-export type UriPreviewEntry =
-  | {
-      index: number;
-      ok: true;
-      /** The name it will be saved under, after clash renaming. */
-      savedAs: string;
-      host: string;
-      port: number;
-      srv: boolean;
-      authUsername?: string;
-      hasPassword: boolean;
-      /** Missing a username or a password, so the credentials step lists it. */
-      needsCredentials: boolean;
-      repick: RepickFile[];
-      warnings: string[];
-    }
-  | { index: number; ok: false; reason: string };
-
-export interface UriPreview {
-  entries: UriPreviewEntry[];
-}
-
-export interface UriCommitInput {
-  uris: string[];
-  defaults: UriBatchDefaults;
-  credentials: UriCredentials[];
 }
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -347,8 +280,7 @@ export interface ImportUrisResult {
   review: Review;
 }
 
-/** Named ImportCommitInput once the old commit channel is retired. */
-export interface ImportCommitInput2 {
+export interface ImportCommitInput {
   token: string;
   indices: number[];
   passphrase?: string;
@@ -359,8 +291,7 @@ export interface ImportCommitInput2 {
   directConnection: { index: number; value: boolean }[];
 }
 
-/** Named ImportCommitResult once the old commit channel is retired. */
-export interface ImportCommitResult2 {
+export interface ImportCommitResult {
   created: { index: number; id: string; name: string }[];
   renamed: { index: number; from: string; to: string }[];
   /** Validation/create failures. */

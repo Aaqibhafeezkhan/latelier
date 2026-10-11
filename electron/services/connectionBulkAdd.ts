@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ConnectionInput, RepickFile, UriCredentials, UriPreviewEntry } from '@shared/types';
+import type { ConnectionInput, RepickFile, UriCredentials } from '@shared/types';
 import { AppError } from '../errors.ts';
 import { parseConnectionUri } from '../mongo/uri-parse.ts';
 import { applyCrossFieldRules, BaseInputShape } from '../ipc/schemas/connection.ts';
@@ -73,35 +73,11 @@ export function planLineNames(existing: Iterable<string>, lines: readonly Line[]
   return lines.map((l) => (l.ok ? planned[k++]! : ''));
 }
 
-/** X.509 authenticates with a certificate and AWS with its own keys: neither is asked for a password here. */
-export function needsCredentials(input: Partial<ConnectionInput>): boolean {
-  if (input.authMech === 'x509') return false;
-  return !input.authUsername || !input.password;
-}
-
 /** What the user picks again: the auth-derived marker plus any the parser read off the string. */
 export function repickFor(input: Partial<ConnectionInput>, found: readonly RepickFile[] = []): RepickFile[] {
   const files = new Set(found);
   if (input.authMech === 'x509') files.add('tlsClientCert');
   return [...files];
-}
-
-export function previewEntry(line: Line, index: number, savedAs: string): UriPreviewEntry {
-  if (!line.ok) return { index, ok: false, reason: line.reason };
-  const { input } = line;
-  return {
-    index,
-    ok: true,
-    savedAs,
-    host: input.host!,
-    port: input.port!,
-    srv: input.connectionType === 'srv',
-    ...(input.authUsername ? { authUsername: input.authUsername } : {}),
-    hasPassword: Boolean(input.password),
-    needsCredentials: needsCredentials(input),
-    repick: repickFor(input, line.repick),
-    warnings: line.warnings,
-  };
 }
 
 /** The mechanisms that authenticate with a username and password. */

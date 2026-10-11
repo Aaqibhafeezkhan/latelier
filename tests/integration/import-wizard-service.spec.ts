@@ -91,7 +91,7 @@ describe('ImportWizardService', () => {
     const dialogs = { savePath: async () => path.join(dir, 'export.json'), openPath: async () => openFrom };
     const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const wizard = new ImportWizardService({ conns, vault, dialogs, log });
-    const exporter = new ConnectionExportService({ conns, vault, dialogs, scrypt: FAST, log });
+    const exporter = new ConnectionExportService({ conns, vault, dialogs, scrypt: FAST });
     return { keychain, vault, repo, conns, wizard, exporter, log };
   };
 
@@ -133,17 +133,15 @@ describe('ImportWizardService', () => {
       expect(await a.wizard.importOpen()).toEqual({ cancelled: true });
     });
 
-    it('refuses a file that is gone without naming its path, in either import', async () => {
+    it('refuses a file that is gone without naming its path', async () => {
       const a = install();
       openFrom = path.join(dir, 'gone.json');
-      for (const run of [() => a.wizard.importOpen(), () => a.exporter.importPreview()]) {
-        const err = (await run().then(
-          () => null,
-          (e: unknown) => e,
-        )) as AppError;
-        expect(err).toMatchObject({ code: 'VALIDATION', message: "This file can't be read." });
-        expect(JSON.stringify({ message: err.message, details: err.details })).not.toContain(dir);
-      }
+      const err = (await a.wizard.importOpen().then(
+        () => null,
+        (e: unknown) => e,
+      )) as AppError;
+      expect(err).toMatchObject({ code: 'VALIDATION', message: "This file can't be read." });
+      expect(JSON.stringify({ message: err.message, details: err.details })).not.toContain(dir);
       expect(a.log.warn).toHaveBeenCalledWith('conn-import', 'could not read the picked file', { code: 'ENOENT' });
       expect(JSON.stringify(a.log.warn.mock.calls)).not.toContain(dir);
     });
@@ -222,7 +220,7 @@ describe('ImportWizardService', () => {
       expect(review.rows[3]).toEqual({ index: 3, ok: false, reason: "OIDC sign-in isn't supported yet." });
 
       const commit = (passphrase?: string) =>
-        a.wizard.importCommitV2({
+        a.wizard.importCommit({
           token: opened.token,
           indices: [0, 1, 2],
           ...(passphrase === undefined ? {} : { passphrase }),
@@ -273,7 +271,7 @@ describe('ImportWizardService', () => {
     it('"Import without passwords" needs no passphrase and takes typed credentials', async () => {
       const a = install();
       const { token } = await openReview(a.wizard, ENCRYPTED);
-      const result = await a.wizard.importCommitV2({
+      const result = await a.wizard.importCommit({
         token,
         indices: [0, 1],
         withoutSecrets: true,
@@ -290,7 +288,7 @@ describe('ImportWizardService', () => {
       const a = install();
       const { token } = await openReview(a.wizard, ENCRYPTED);
       const commit = (indices: number[]) =>
-        a.wizard.importCommitV2({ token, indices, passphrase: COMPASS_PASS, readOnly: false, credentials: [], directConnection: [] });
+        a.wizard.importCommit({ token, indices, passphrase: COMPASS_PASS, readOnly: false, credentials: [], directConnection: [] });
       await expect(commit([0, 3])).rejects.toMatchObject({
         code: 'VALIDATION',
         message: "The selection includes a connection that can't be imported.",
@@ -316,7 +314,7 @@ describe('ImportWizardService', () => {
         }),
       );
       const { token } = await openReview(a.wizard, file);
-      const result = await a.wizard.importCommitV2({
+      const result = await a.wizard.importCommit({
         token,
         indices: [0],
         passphrase: 'blob pass',
@@ -337,7 +335,7 @@ describe('ImportWizardService', () => {
       expect(review.hasEncryptedSecrets).toBe(false);
       expect(okRow(review, 0)).toMatchObject({ hasPassword: true, passwordSealed: false, needsCredentials: false });
 
-      const result = await a.wizard.importCommitV2({
+      const result = await a.wizard.importCommit({
         token,
         indices: [0, 2],
         readOnly: true,
@@ -382,7 +380,7 @@ describe('ImportWizardService', () => {
       expect(okRow(review, 1)).toMatchObject({ savedAs: 'RW', hasPassword: false, needsCredentials: false, repick: ['tlsClientCert'] });
 
       const commit = (passphrase: string) =>
-        b.wizard.importCommitV2({ token, indices: [0, 1], passphrase, readOnly: true, credentials: [], directConnection: [] });
+        b.wizard.importCommit({ token, indices: [0, 1], passphrase, readOnly: true, credentials: [], directConnection: [] });
       expect(await codeOf(commit('wrong passphrase!'))).toBe('BAD_PASSPHRASE');
       const result = await commit(EXPORT_PASS);
 
@@ -401,7 +399,7 @@ describe('ImportWizardService', () => {
       await a.exporter.export({ ids: [c.id], includeSecrets: false });
       const b = install();
       const { token } = await openReview(b.wizard, path.join(dir, 'export.json'));
-      const result = await b.wizard.importCommitV2({
+      const result = await b.wizard.importCommit({
         token,
         indices: [0],
         readOnly: false,
@@ -432,7 +430,7 @@ describe('ImportWizardService', () => {
 
       // Nothing to commit before a mapping, and the refusal keeps the token.
       expect(
-        await codeOf(a.wizard.importCommitV2({ token, indices: [0], readOnly: false, credentials: [], directConnection: [] })),
+        await codeOf(a.wizard.importCommit({ token, indices: [0], readOnly: false, credentials: [], directConnection: [] })),
       ).toBe('VALIDATION');
 
       const first = a.wizard.importMap({ token, at: 'data.servers', mapping: { name: 'label', connectionString: 'uri' } });
@@ -446,7 +444,7 @@ describe('ImportWizardService', () => {
       });
       expect(okRow(second.review, 1)).toMatchObject({ savedAs: 'B', host: 'b.example', port: 2000 });
 
-      const result = await a.wizard.importCommitV2({
+      const result = await a.wizard.importCommit({
         token,
         indices: [0, 1],
         readOnly: false,
@@ -494,7 +492,7 @@ describe('ImportWizardService', () => {
     it('creates only the ticked rows, with credentials, Direct connection and Read-only as sent', async () => {
       const a = install();
       const { token } = a.wizard.importUris(URIS);
-      const result = await a.wizard.importCommitV2({
+      const result = await a.wizard.importCommit({
         token,
         indices: [0, 2, 3],
         readOnly: true,
@@ -523,7 +521,7 @@ describe('ImportWizardService', () => {
       const a = install();
       const { token } = a.wizard.importUris(URIS);
       const commit = (indices: number[]) =>
-        a.wizard.importCommitV2({ token, indices, readOnly: false, credentials: [], directConnection: [] });
+        a.wizard.importCommit({ token, indices, readOnly: false, credentials: [], directConnection: [] });
       expect(await codeOf(commit([1]))).toBe('VALIDATION');
       expect(await codeOf(commit([0, 0]))).toBe('VALIDATION');
       expect(await codeOf(commit([5]))).toBe('VALIDATION');
@@ -536,7 +534,7 @@ describe('ImportWizardService', () => {
       const { token, review } = a.wizard.importUris(['mongodb://h', 'mongodb://k']);
       expect(okRow(review, 0).savedAs).toBe('h');
       await a.conns.create(input({ name: 'h', password: 'x' }));
-      const result = await a.wizard.importCommitV2({ token, indices: [0, 1], readOnly: false, credentials: [], directConnection: [] });
+      const result = await a.wizard.importCommit({ token, indices: [0, 1], readOnly: false, credentials: [], directConnection: [] });
       expect(result.created.map((c) => c.name)).toEqual(['h (2)', 'k']);
       expect(result.renamed).toEqual([{ index: 0, from: 'h', to: 'h (2)' }]);
     });
@@ -544,7 +542,7 @@ describe('ImportWizardService', () => {
     it('skips a row the import rules reject and still creates the rest', async () => {
       const a = install();
       const { token } = a.wizard.importUris(['mongodb://h', 'mongodb://k']);
-      const result = await a.wizard.importCommitV2({
+      const result = await a.wizard.importCommit({
         token,
         indices: [0, 1],
         readOnly: false,
@@ -559,7 +557,7 @@ describe('ImportWizardService', () => {
       const a = install({ allowPlaintext: false });
       a.keychain.setAvailable(false);
       const { token } = a.wizard.importUris(['mongodb://u:p@h']);
-      const result = await a.wizard.importCommitV2({ token, indices: [0], readOnly: false, credentials: [], directConnection: [] });
+      const result = await a.wizard.importCommit({ token, indices: [0], readOnly: false, credentials: [], directConnection: [] });
       expect(result.created).toHaveLength(1);
       expect(result.secretsNotStored).toEqual([
         { name: 'h', reason: 'No secure storage on this install, and storing passwords unencrypted is off.' },
@@ -570,7 +568,46 @@ describe('ImportWizardService', () => {
 
   describe('commit', () => {
     const commitAll = (w: ImportWizardService, token: string, indices: number[]) =>
-      w.importCommitV2({ token, indices, readOnly: false, credentials: [], directConnection: [] });
+      w.importCommit({ token, indices, readOnly: false, credentials: [], directConnection: [] });
+
+    describe('sealed secrets of a L\'Atelier export', () => {
+      /** Exports one Connection holding all three secret kinds and opens it on a second install. */
+      const sealedImport = async (second: { allowPlaintext?: boolean }, setup?: (b: ReturnType<typeof install>) => void) => {
+        const a = install();
+        const c = await a.conns.create(input({ name: 'Many', password: 'p1', sshPassword: 's1', sshPassphrase: 's2' }));
+        await a.exporter.export({ ids: [c.id], includeSecrets: true, passphrase: EXPORT_PASS });
+        const b = install(second);
+        setup?.(b);
+        const { token } = await openReview(b.wizard, path.join(dir, 'export.json'));
+        const run = () =>
+          b.wizard.importCommit({ token, indices: [0], passphrase: EXPORT_PASS, readOnly: false, credentials: [], directConnection: [] });
+        return { b, run };
+      };
+
+      it('reports an unstorable Connection once, however many of its secrets there are', async () => {
+        const { run } = await sealedImport({}, (b) => b.keychain.setAvailable(false));
+        const result = await run();
+        expect(result.created).toHaveLength(1);
+        expect(result.secretsNotStored).toHaveLength(1);
+      });
+
+      it('stores the secrets in the vault when the install allows plaintext storage', async () => {
+        const { b, run } = await sealedImport({ allowPlaintext: true }, (i) => i.keychain.setAvailable(false));
+        const result = await run();
+        expect(result.secretsNotStored).toEqual([]);
+        expect(b.vault.get(result.created[0]!.id, 'password')).toBe('p1');
+      });
+
+      it('reports a secret the vault failed to store, and keeps the Connection', async () => {
+        const { b, run } = await sealedImport({});
+        vi.spyOn(b.vault, 'set').mockImplementation(() => {
+          throw new Error('disk on fire');
+        });
+        const result = await run();
+        expect(result.created).toHaveLength(1);
+        expect(result.secretsNotStored).toEqual([{ name: 'Many', reason: 'The password could not be stored.' }]);
+      });
+    });
 
     it('lets one of two concurrent commits on a token through, so rows are created once', async () => {
       const a = install();
@@ -603,7 +640,7 @@ describe('ImportWizardService', () => {
       const a = install();
       const { token } = await openReview(a.wizard, ENCRYPTED);
       const commit = (passphrase: string) =>
-        a.wizard.importCommitV2({ token, indices: [0], passphrase, readOnly: false, credentials: [], directConnection: [] });
+        a.wizard.importCommit({ token, indices: [0], passphrase, readOnly: false, credentials: [], directConnection: [] });
       const wrong = commit('not the passphrase');
       // The commit is waiting on the key derivation; the window closes now.
       a.wizard.clearPending();
@@ -623,7 +660,7 @@ describe('ImportWizardService', () => {
       const unknown: ImportOpenResult = await open(a.wizard, writeFile('u.json', '{"servers":[{"host":"h"}]}'));
       a.wizard.clearPending();
       expect(
-        await codeOf(a.wizard.importCommitV2({ token: uris.token, indices: [0], readOnly: false, credentials: [], directConnection: [] })),
+        await codeOf(a.wizard.importCommit({ token: uris.token, indices: [0], readOnly: false, credentials: [], directConnection: [] })),
       ).toBe('VALIDATION');
       if (!('token' in unknown)) throw new Error('expected a token');
       expect(await codeOf(() => a.wizard.importMap({ token: unknown.token, at: 'servers', mapping: { host: 'host' } }))).toBe(

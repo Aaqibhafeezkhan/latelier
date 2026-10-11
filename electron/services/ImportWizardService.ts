@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type {
-  ImportCommitInput2,
-  ImportCommitResult2,
+  ImportCommitInput,
+  ImportCommitResult,
   ImportMapInput,
   ImportMapResult,
   ImportOpenResult,
@@ -148,7 +148,7 @@ export class ImportWizardService {
    * C14 §7. Only a successful commit consumes the token: a wrong passphrase
    * (or none) puts it back so the user can retry or import without passwords.
    */
-  async importCommitV2(input: ImportCommitInput2): Promise<ImportCommitResult2> {
+  async importCommit(input: ImportCommitInput): Promise<ImportCommitResult> {
     const pending = this.held(input.token);
     const indices = [...input.indices].sort((a, b) => a - b);
     if (new Set(indices).size !== indices.length) {
@@ -183,7 +183,7 @@ export class ImportWizardService {
     );
     const creds = new Map(input.credentials.map((c) => [c.index, c]));
     const direct = new Map(input.directConnection.map((d) => [d.index, d.value]));
-    const result: ImportCommitResult2 = {
+    const result: ImportCommitResult = {
       created: [],
       renamed: [],
       skipped: [],

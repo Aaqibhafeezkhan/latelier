@@ -20,16 +20,11 @@ import type {
   ConnectionExportResult,
   ConnectionInput,
   ImportCommitInput,
-  ImportCommitInput2,
-  ImportCommitResult2,
+  ImportCommitResult,
   ImportMapInput,
   ImportMapResult,
   ImportOpenResult,
   ImportUrisResult,
-  ImportCommitResult,
-  UriCommitInput,
-  UriPreview,
-  ImportPreview,
   UpdateState,
   ConnectionRuntime,
   ConnectionSummary,
@@ -182,18 +177,11 @@ export interface IpcApi {
     test: (input: ConnectionInput) => Promise<ProbeResult>;
     /** Main shows the save dialog and writes the file; secrets never come back. */
     export: (input: ConnectionExportInput) => Promise<ConnectionExportResult>;
-    /** Main shows the open dialog and parses the file; the result holds a token, not the contents. */
-    importPreview: () => Promise<ImportPreview>;
-    importCommit: (input: ImportCommitInput) => Promise<ImportCommitResult>;
-    /** Parses pasted connection strings and plans their names; passwords never come back. */
-    previewUris: (uris: string[]) => Promise<UriPreview>;
-    createFromUris: (input: UriCommitInput) => Promise<ImportCommitResult>;
     /** C14 wizard: main shows the open dialog, detects the format and returns a token plus a review (or mapping candidates). */
     importOpen: () => Promise<ImportOpenResult>;
     importMap: (input: ImportMapInput) => Promise<ImportMapResult>;
     importUris: (uris: string[]) => Promise<ImportUrisResult>;
-    /** Temporary name; renamed to importCommit when the old commit is retired. */
-    importCommitV2: (input: ImportCommitInput2) => Promise<ImportCommitResult2>;
+    importCommit: (input: ImportCommitInput) => Promise<ImportCommitResult>;
   };
 
   app: {
@@ -470,14 +458,10 @@ export const IPC_CHANNELS = {
   connParseUri:  'conn:parseUri',  // SECRET_INPUT
   connTest:      'conn:test',      // SECRET_INPUT
   connExport:        'conn:export',        // SECRET_INPUT
-  connImportPreview: 'conn:importPreview',
-  connImportCommit:  'conn:importCommit',  // SECRET_INPUT
-  connPreviewUris:    'conn:previewUris',    // SECRET_INPUT
-  connCreateFromUris: 'conn:createFromUris', // SECRET_INPUT
   connImportOpen:     'conn:importOpen',
   connImportMap:      'conn:importMap',
   connImportUris:     'conn:importUris',     // SECRET_INPUT
-  connImportCommitV2: 'conn:importCommit2',  // SECRET_INPUT
+  connImportCommit:   'conn:importCommit',   // SECRET_INPUT
 
   // App-level utilities -----------------------------------------
   appMenuCommandEvent: 'app:menu-command-event',
