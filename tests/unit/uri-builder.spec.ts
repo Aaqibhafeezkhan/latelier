@@ -278,6 +278,21 @@ describe('buildUri', () => {
       expect(srv).not.toContain('%');
     });
 
+    it.each([
+      ['an encoded slash', 'm%C3%BCnchen%2Fevil'],
+      ['an encoded query', 'm%C3%BCnchen%3F%3DauthSource'],
+      ['an encoded fragment', 'm%C3%BCnchen%23x'],
+      ['an ideographic full stop', 'm%C3%BCnchen%E3%80%82evil.com'],
+    ])('never shortens or rewrites a non-ASCII host with %s into a different punycode name', (_, host) => {
+      const uri = buildUri(mk({ host }));
+      expect(uri).not.toContain('xn--');
+      expect(uri).toContain(`//${host}:27017/`);
+    });
+
+    it('hands an ASCII host to the driver exactly as typed, case included', () => {
+      expect(buildUri(mk({ host: 'Mongo.Example.com' }))).toContain('//Mongo.Example.com:27017/');
+    });
+
     it('leaves a percent-encoded Unix-socket host as it is', () => {
       expect(buildUri(mk({ host: '%2Ftmp%2Fmongodb-27017.sock' }))).toContain('%2Ftmp%2Fmongodb-27017.sock:27017/');
     });

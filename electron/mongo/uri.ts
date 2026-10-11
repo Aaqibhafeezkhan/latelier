@@ -1,4 +1,4 @@
-import { domainToASCII } from 'node:url';
+import { domainToASCII, domainToUnicode } from 'node:url';
 import type { MongoClientOptions } from 'mongodb';
 import type { Connection } from '@shared/types';
 
@@ -128,7 +128,11 @@ function toDriverHost(hostname: string): string {
     return hostname;
   }
   if (!/[\u0080-\uFFFF]/.test(decoded)) return hostname;
-  return domainToASCII(decoded) || hostname;
+  // domainToASCII cuts a name at `/`, `?` or `#` and folds look-alike dots, so
+  // the punycode is used only when it names exactly the decoded host; any other
+  // host goes on as written rather than as a different name.
+  const ascii = domainToASCII(decoded);
+  return domainToUnicode(ascii) === decoded.toLowerCase() ? ascii : hostname;
 }
 // Stryker restore BlockStatement
 
