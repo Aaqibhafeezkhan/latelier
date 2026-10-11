@@ -274,8 +274,12 @@ export function parseConnectionUri(raw: string): ParsedUri {
   };
 }
 
-// Letters, digits and . - _ plus % for percent-encoded bytes (unix sockets).
-const HOST_CHARS = /^[A-Za-z0-9._%-]+$/;
+// Letters, digits and . - _ plus % for percent-encoded bytes (unix sockets),
+// and any non-ASCII character: the driver accepts an internationalised name
+// such as münchen.example, as this parser always has. Non-ASCII spaces are not
+// host-name characters, same as the ASCII one.
+const HOST_CHARS = /^[A-Za-z0-9._%\u0080-\uFFFF-]+$/;
+const ANY_SPACE = /\s/;
 const IPV6_LITERAL = /^\[[0-9A-Fa-f:.]+\]$/;
 
 /**
@@ -289,7 +293,7 @@ export function parseHostPort(
   withPort: boolean,
 ): { host: string; port?: number } | { problem: string } {
   const split = withPort ? splitHostPort(authority) : { host: authority, port: undefined };
-  if (!HOST_CHARS.test(split.host) && !IPV6_LITERAL.test(split.host)) {
+  if ((!HOST_CHARS.test(split.host) || ANY_SPACE.test(split.host)) && !IPV6_LITERAL.test(split.host)) {
     return { problem: "The host has characters a host name can't contain." };
   }
   if (split.port === undefined) return { host: split.host };

@@ -192,6 +192,12 @@ describe('parseConnectionUri', () => {
     ['[::1]x', { problem: "The host has characters a host name can't contain." }],
     ['a[1.2]', { problem: "The host has characters a host name can't contain." }],
     ['[1.2]a', { problem: "The host has characters a host name can't contain." }],
+    ['m\u00fcnchen.example:27018', { host: 'm\u00fcnchen.example', port: 27018 }],
+    ['a b', { problem: "The host has characters a host name can't contain." }],
+    ['a/b', { problem: "The host has characters a host name can't contain." }],
+    ['a?b', { problem: "The host has characters a host name can't contain." }],
+    ['a#b', { problem: "The host has characters a host name can't contain." }],
+    ['a@b', { problem: "The host has characters a host name can't contain." }],
     ['h:0', { problem: 'Port must be a number from 1 to 65535.' }],
     ['h:', { problem: 'Port must be a number from 1 to 65535.' }],
   ])('parseHostPort(%j) follows the host rules', (authority, expected) => {
@@ -506,6 +512,11 @@ describe('parseConnectionUri: host and port validation', () => {
     ['mongodb://h$x:27017', HOST_MSG],
     ['mongodb://a:b:27017', HOST_MSG],
     ['mongodb+srv://h&tls=true', HOST_MSG],
+    ['mongodb://a b', HOST_MSG],
+    ['mongodb://h[1]', HOST_MSG],
+    ['mongodb://m\u00fcnchen\u00a0.example', HOST_MSG],
+    ['mongodb://m\u00fcnchen\u3000.example', HOST_MSG],
+    ['mongodb://m\u00fcnchen$.example', HOST_MSG],
   ])('refuses %s', (uri, message) => {
     expect(() => parseConnectionUri(uri)).toThrow(new ValidationError(message));
   });
@@ -518,6 +529,11 @@ describe('parseConnectionUri: host and port validation', () => {
     ['mongodb://my_host-1.example.com:27017', 'my_host-1.example.com', 27017],
     ['mongodb://h:1', 'h', 1],
     ['mongodb://h:65535', 'h', 65535],
+    ['mongodb://m\u00fcnchen.example', 'm\u00fcnchen.example', 27017],
+    ['mongodb://m\u00fcnchen.example:27018/db', 'm\u00fcnchen.example', 27018],
+    ['mongodb://\u65e5\u672c.example', '\u65e5\u672c.example', 27017],
+    ['mongodb://\ud83d\ude00.example', '\ud83d\ude00.example', 27017],
+    ['mongodb+srv://m\u00fcnchen.example', 'm\u00fcnchen.example', 27017],
   ])('accepts %s', (uri, host, port) => {
     const { input } = parseConnectionUri(uri);
     expect({ host: input.host, port: input.port }).toEqual({ host, port });
