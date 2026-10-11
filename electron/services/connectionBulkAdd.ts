@@ -1,11 +1,5 @@
 import { z } from 'zod';
-import type {
-  ConnectionInput,
-  RepickFile,
-  UriBatchDefaults,
-  UriCredentials,
-  UriPreviewEntry,
-} from '@shared/types';
+import type { ConnectionInput, RepickFile, UriCredentials, UriPreviewEntry } from '@shared/types';
 import { AppError } from '../errors.ts';
 import { parseConnectionUri } from '../mongo/uri-parse.ts';
 import { applyCrossFieldRules, BaseInputShape } from '../ipc/schemas/connection.ts';
@@ -114,14 +108,16 @@ export function previewEntry(line: Line, index: number, savedAs: string): UriPre
 const PASSWORD_MECHS = new Set(['default', 'scram256', 'scram1', 'none']);
 
 /**
- * The Connection a line creates. Credentials typed in the second step win
- * over the string's, and a username cleared there means no authentication;
- * a username with no mechanism negotiates (`default`).
+ * The Connection a parsed row creates, with the user's final choices for it:
+ * `directConnection` is the value itself, not a default, and is never applied
+ * to SRV. Credentials typed in the second step win over the row's, and a
+ * username cleared there means no authentication; a username with no
+ * mechanism negotiates (`default`). Colour and SSH are the row's own.
  */
 export function lineToInput(
-  line: ParsedLine,
+  line: { input: Partial<ConnectionInput> },
   name: string,
-  defaults: UriBatchDefaults,
+  set: { readOnly: boolean; directConnection: boolean },
   creds: UriCredentials | undefined,
 ): ConnectionInput {
   const parsed = line.input;
@@ -132,7 +128,7 @@ export function lineToInput(
   const authMech = cleared ? 'none' : parsed.authMech === 'none' && username ? 'default' : parsed.authMech!;
   return {
     name,
-    color: DEFAULT_COLOR,
+    color: parsed.color ?? DEFAULT_COLOR,
     connectionType: parsed.connectionType!,
     host: parsed.host!,
     port: parsed.port!,
@@ -142,16 +138,13 @@ export function lineToInput(
     ...(parsed.authDatabase ? { authDatabase: parsed.authDatabase } : {}),
     ...(password ? { password } : {}),
     tls: parsed.tls!,
+    ...(parsed.ssh ? { ssh: parsed.ssh } : {}),
     advanced: {
       ...parsed.advanced!,
       // The driver refuses directConnection on an SRV string.
-      directConnection: srv
-        ? false
-        : line.explicitDirect
-          ? parsed.advanced!.directConnection
-          : defaults.directConnection,
+      directConnection: !srv && set.directConnection,
     },
-    readOnly: defaults.readOnly,
+    readOnly: set.readOnly,
   };
 }
 

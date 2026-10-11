@@ -256,7 +256,14 @@ export class ConnectionExportService {
         result.failed.push({ index: i, name: label, reason: line.reason });
         continue;
       }
-      const { password, ...conn } = lineToInput(line, names[i]!, input.defaults, creds.get(i));
+      // A line that sets directConnection itself keeps its own value over the batch default.
+      const direct = line.explicitDirect ? line.input.advanced!.directConnection : input.defaults.directConnection;
+      const { password, ...conn } = lineToInput(
+        line,
+        names[i]!,
+        { readOnly: input.defaults.readOnly, directConnection: direct },
+        creds.get(i),
+      );
       const problem = lineInputProblem({ ...conn, ...(password ? { password } : {}) });
       if (problem) {
         result.failed.push({ index: i, name: names[i]!, reason: problem });

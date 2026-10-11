@@ -659,6 +659,18 @@ describe('ConnectionExportService', () => {
       expect(srv).toMatchObject({ authMech: 'none', hasPasswordStored: false });
     });
 
+    it("keeps a line's own directConnection over the batch default", async () => {
+      const a = install();
+      const result = await a.service.createFromUris({
+        uris: ['mongodb://off/?directConnection=false', 'mongodb://on'],
+        defaults: { readOnly: false, directConnection: true },
+        credentials: [],
+      });
+      const [off, on] = result.created.map((c) => a.conns.get(c.id));
+      expect(off!.advanced.directConnection).toBe(false);
+      expect(on!.advanced.directConnection).toBe(true);
+    });
+
     it('saves a line with blank credentials without authentication', async () => {
       const a = install();
       const result = await a.service.createFromUris({

@@ -230,14 +230,20 @@ describe('lineToInput', () => {
 
   it('leaves optional fields out rather than setting them undefined', () => {
     const c = lineToInput(ok('mongodb://h'), 'h', DEFAULTS, undefined);
-    for (const k of ['defaultDb', 'authUsername', 'authDatabase', 'password']) expect(c).not.toHaveProperty(k);
+    for (const k of ['defaultDb', 'authUsername', 'authDatabase', 'password', 'ssh']) expect(c).not.toHaveProperty(k);
     expect(c.authMech).toBe('none');
   });
 
-  it("keeps the string's own directConnection over the batch default", () => {
+  it('applies the chosen directConnection, whatever the string said', () => {
     const on = { readOnly: false, directConnection: true };
-    expect(lineToInput(ok('mongodb://h/?directConnection=false'), 'h', on, undefined).advanced.directConnection).toBe(false);
-    expect(lineToInput(ok('mongodb://h/?directConnection=true'), 'h', DEFAULTS, undefined).advanced.directConnection).toBe(true);
+    expect(lineToInput(ok('mongodb://h/?directConnection=false'), 'h', on, undefined).advanced.directConnection).toBe(true);
+    expect(lineToInput(ok('mongodb://h/?directConnection=true'), 'h', DEFAULTS, undefined).advanced.directConnection).toBe(false);
+  });
+
+  it("keeps the row's own colour and SSH settings", () => {
+    const ssh = { enabled: true, host: 'bastion', port: 22, username: 'tunnel', authMethod: 'key' as const };
+    const c = lineToInput({ input: { ...ok('mongodb://h').input, color: '#123456', ssh } }, 'h', DEFAULTS, undefined);
+    expect(c).toMatchObject({ color: '#123456', ssh });
   });
 
   it('never sets directConnection on an SRV line, whatever asks for it', () => {
