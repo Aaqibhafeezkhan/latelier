@@ -302,11 +302,12 @@ describe('Import Wizard: commit', () => {
 
   it('notes the original name only on rows renamed by a clash', async () => {
     const [prod, ...rest] = REVIEW.rows;
+    if (!prod?.ok) throw new Error('fixture: first row must be ok');
     setup({
       open: {
         token: 'tok',
         source: 'compass',
-        review: { ...REVIEW, rows: [{ ...prod!, savedAs: 'Prod (2)', renamedFrom: 'Prod' }, ...rest] },
+        review: { ...REVIEW, rows: [{ ...prod, savedAs: 'Prod (2)', renamedFrom: 'Prod' }, ...rest] },
       },
     });
     await chooseFile();
