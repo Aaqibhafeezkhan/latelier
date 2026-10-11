@@ -177,3 +177,25 @@ describe('parseConnectionUri property: refusals never echo the password', () => 
     );
   });
 });
+
+describe('parseConnectionUri property: unparseable userinfo is never echoed', () => {
+  // Passwords mixing '/', ':' and a digits-only start are what made the SRV
+  // port strip read the userinfo as a host, and the library quote it back.
+  const pwArb = fc
+    .tuple(fc.stringMatching(/^[0-9]{0,5}$/), fc.array(fc.constantFrom(...'/:Ab9'.split('')), { minLength: 1, maxLength: 10 }))
+    .map(([digits, rest]) => `${digits}${rest.join('')}ZQX9`);
+  it('neither an error nor a warning repeats the password', () => {
+    fc.assert(
+      fc.property(fc.constantFrom('mongodb://', 'mongodb+srv://'), pwArb, fc.constantFrom('', ':27017'), (scheme, pw, port) => {
+        try {
+          const { warnings } = parseConnectionUri(`${scheme}alice:${pw}@cluster.example.net${port}/db`);
+          expect(JSON.stringify(warnings)).not.toContain('ZQX9');
+        } catch (err) {
+          expect(err).toBeInstanceOf(ValidationError);
+          expect((err as Error).message).not.toContain('ZQX9');
+        }
+      }),
+      { numRuns: 200 },
+    );
+  });
+});

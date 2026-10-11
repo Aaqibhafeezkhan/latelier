@@ -25,6 +25,9 @@ const READ_PREFS: ReadPref[] = [
   'nearest',
 ];
 
+const SRV_SCHEME = 'mongodb+srv://';
+const INVALID_URI = "This isn't a valid connection string.";
+
 const PROXY_PARAMS = ['proxyhost', 'proxyport', 'proxyusername', 'proxypassword'];
 
 const DROPPED_OPTIONS = new Set([
@@ -64,34 +67,36 @@ export function parseConnectionUri(raw: string): ParsedUri {
   // surface a warning at the end.
   const srvPortStripped: string[] = [];
   let normalized = trimmed;
-  // Stryker disable next-line ConditionalExpression,StringLiteral: forcing this guard true only widens which strings reach the replace() below; the replacement regex is itself anchored to the literal 'mongodb+srv://' prefix, so it never matches a non-SRV string regardless of the guard. Verified with node: 'mongodb://...'.replace(/^(mongodb\+srv:\/\/...)/, ...) returns the input unchanged.
-  if (normalized.startsWith('mongodb+srv://')) {
-    normalized = normalized.replace(
-      // Stryker disable next-line Regex: removing the leading `^` is unobservable here — this branch only runs when `normalized` already starts with the literal at index 0 (see the startsWith guard above), and String#replace tries the leftmost position first, so the match is found at index 0 whether or not it is anchored. Verified with node across strings that also contain the literal again later.
-      /^(mongodb\+srv:\/\/(?:[^@/]*@)?)([^/?]+)/,
-      (_full, prefix: string, hostSegment: string) => {
-        const cleaned = hostSegment
-          .split(',')
-          .map((h) => {
-            const m = h.match(/^(.*?):(\d+)$/);
-            if (m) {
-              srvPortStripped.push(m[0]!);
-              return m[1]!;
-            }
-            return h;
-          })
-          .join(',');
-        return prefix + cleaned;
-      },
-    );
+  if (normalized.startsWith(SRV_SCHEME)) {
+    // The host list starts after the last '@' before the query, so a userinfo
+    // holding '/' or ':digits' is never read as a host and never reaches the
+    // warning below.
+    const rest = normalized.slice(SRV_SCHEME.length);
+    const queryAt = rest.indexOf('?');
+    const hostStart = rest.lastIndexOf('@', queryAt === -1 ? rest.length : queryAt) + 1;
+    const fromHost = rest.slice(hostStart);
+    const hostEnd = fromHost.search(/[/?]/);
+    const hostSegment = hostEnd === -1 ? fromHost : fromHost.slice(0, hostEnd);
+    const cleaned = hostSegment
+      .split(',')
+      .map((h) => {
+        const m = h.match(/^(.*?):(\d+)$/);
+        if (m) {
+          srvPortStripped.push(m[0]!);
+          return m[1]!;
+        }
+        return h;
+      })
+      .join(',');
+    normalized = SRV_SCHEME + rest.slice(0, hostStart) + cleaned + fromHost.slice(hostSegment.length);
   }
 
   let cs: ConnectionString;
   try {
     cs = new ConnectionString(normalized);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new ValidationError(`could not parse URI: ${msg}`);
+  } catch {
+    // Never the library's message: it quotes the userinfo, password included.
+    throw new ValidationError(INVALID_URI);
   }
 
   const warnings: ParsedUriWarning[] = [];

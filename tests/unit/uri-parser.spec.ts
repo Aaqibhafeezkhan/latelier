@@ -163,8 +163,31 @@ describe('parseConnectionUri', () => {
     expect(() => parseConnectionUri('   ')).toThrow('URI is empty');
   });
 
-  it('rejects unparseable URI, wrapping the underlying message', () => {
-    expect(() => parseConnectionUri('mongodb://')).toThrow(/^could not parse URI:/);
+  it('rejects unparseable URI with a fixed sentence, never the library message', () => {
+    expect(() => parseConnectionUri('mongodb://')).toThrow(/^This isn't a valid connection string\.$/);
+  });
+
+  it('never quotes the userinfo when it cannot parse the string', () => {
+    for (const uri of [
+      'mongodb+srv://alice:2024/hunter2@cluster.example.net',
+      'mongodb://alice:2024/hunter2@h',
+      'mongodb://alice/hunter2:x@h',
+    ]) {
+      expect(() => parseConnectionUri(uri)).toThrow("This isn't a valid connection string.");
+    }
+  });
+
+  it('does not read an SRV userinfo holding "/" and ":digits" as the host', () => {
+    // An escaped password with '/' must reach the host list intact.
+    const { input, warnings } = parseConnectionUri('mongodb+srv://alice:2024%2Fhunter2@cluster.example.net:27017/db?tls=true');
+    expect(input).toMatchObject({ host: 'cluster.example.net', password: '2024/hunter2', defaultDb: 'db' });
+    expect(warnings.find((w) => w.code === 'OPTION_DROPPED')?.detail).toBe(
+      'SRV URIs cannot include a port; stripped: cluster.example.net:27017',
+    );
+    // An '@' in the query is not the end of the userinfo.
+    expect(parseConnectionUri('mongodb+srv://u:p@c.example.net:1/?appName=a@b').input).toMatchObject({
+      host: 'c.example.net', authUsername: 'u', advanced: { appName: 'a@b' },
+    });
   });
 
   it('the scheme check is anchored to the start, not found anywhere in the string', () => {
@@ -356,7 +379,7 @@ describe('parseConnectionUri', () => {
       parseConnectionUri(
         'mongodb+srv://a.example.com:27017,b.example.com:27018/mydb',
       ),
-    ).toThrow(/multiple service names/);
+    ).toThrow("This isn't a valid connection string.");
   });
 
   it('a numeric-only host with no port is not misread as a bare port number', () => {
