@@ -435,7 +435,9 @@ describe('ImportWizardService', () => {
       expect(await codeOf(() => a.wizard.importMap({ token: opened.token, at: 'data', mapping: {} }))).toBe('VALIDATION');
 
       const compass = await open(a.wizard, PLAIN);
-      expect(await codeOf(() => a.wizard.importMap({ token: compass.token, at: '', mapping: {} }))).toBe('VALIDATION');
+      expect(() => a.wizard.importMap({ token: compass.token, at: '', mapping: {} })).toThrow(
+        'Only a file in an unrecognised format has fields to map.',
+      );
     });
   });
 
