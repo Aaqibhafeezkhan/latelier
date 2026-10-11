@@ -102,7 +102,8 @@ const chooseFile = () => userEvent.click(screen.getByRole('button', { name: 'Cho
 const reviewTable = () => screen.findByRole('table', { name: 'Connections to import' });
 const box = (name: string) => screen.getByRole('checkbox', { name }) as HTMLInputElement;
 const importButton = () => screen.getByRole('button', { name: /^Import( \d+ Connections?)?$/ }) as HTMLButtonElement;
-const badPassphrase = () => Object.assign(new Error('Wrong passphrase'), { code: 'BAD_PASSPHRASE' });
+const badPassphrase = () =>
+  Object.assign(new Error('Wrong passphrase for this Compass export.'), { code: 'BAD_PASSPHRASE' });
 
 afterEach(() => {
   uninstallAtelierMock();
@@ -299,6 +300,21 @@ describe('Import Wizard: commit', () => {
     });
   });
 
+  it('notes the original name only on rows renamed by a clash', async () => {
+    const [prod, ...rest] = REVIEW.rows;
+    if (!prod?.ok) throw new Error('fixture: first row must be ok');
+    setup({
+      open: {
+        token: 'tok',
+        source: 'compass',
+        review: { ...REVIEW, rows: [{ ...prod, savedAs: 'Prod (2)', renamedFrom: 'Prod' }, ...rest] },
+      },
+    });
+    await chooseFile();
+    await reviewTable();
+    expect(screen.getAllByText(/^renamed from /).map((n) => n.textContent)).toEqual(['renamed from "Prod"']);
+  });
+
   it('keeps the review on a wrong passphrase and retries on the same token', async () => {
     let calls = 0;
     const { importCommitV2, changed } = setup({
@@ -314,7 +330,7 @@ describe('Import Wizard: commit', () => {
     await userEvent.type(screen.getByLabelText('Export Passphrase'), 'wrong');
     await userEvent.click(importButton());
 
-    expect(await screen.findByText('Wrong Export Passphrase.')).toBeTruthy();
+    expect(await screen.findByText('Wrong passphrase for this Compass export.')).toBeTruthy();
     expect(box('Import Recent').checked).toBe(true);
     expect(changed).not.toHaveBeenCalled();
 

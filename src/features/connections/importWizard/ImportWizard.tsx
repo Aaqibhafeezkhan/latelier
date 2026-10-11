@@ -109,7 +109,8 @@ export function ImportWizard({ initial, onClose }: ImportWizardProps) {
       notifyConnectionsChanged();
     } catch (e) {
       // A wrong passphrase leaves the token usable in main, so the review stays for a retry.
-      if (isIpcError(e) && e.code === 'BAD_PASSPHRASE') setPassphraseError('Wrong Export Passphrase.');
+      // Main words this per source (own export vs Compass), so show its message verbatim.
+      if (isIpcError(e) && e.code === 'BAD_PASSPHRASE') setPassphraseError(e.message);
       else {
         setError(getErrorMessage(e, 'Import failed'));
         // Rows may have been created before the failure; the list must not stay stale.
