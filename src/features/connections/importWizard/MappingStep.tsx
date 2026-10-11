@@ -5,11 +5,16 @@ import { MAP_TARGETS } from './mapTargets';
 
 export interface MappingStepProps {
   collections: MappingCollection[];
+  /** Mapping is being applied in main: Back and Next hold still so a second click can't race it. */
+  busy?: boolean;
   onBack(): void;
   onNext(at: string, mapping: Partial<Record<MapTarget, string>>): void;
 }
 
 type Assignment = Record<string, MapTarget>; // path -> target
+
+/** What main sends as the sample of a field it hides whole; anything else masked is a stripped string. */
+const HIDDEN_SAMPLE = '••••';
 
 /** Each target goes to at most one path; the first suggestion wins a tie. */
 function suggestions(c: MappingCollection): Assignment {
@@ -30,7 +35,7 @@ function pickerLabel(c: MappingCollection): string {
 }
 
 /** C14 §5: tell main which field of an unrecognised JSON file is which part of a Connection. */
-export function MappingStep({ collections, onBack, onNext }: MappingStepProps) {
+export function MappingStep({ collections, busy = false, onBack, onNext }: MappingStepProps) {
   const [at, setAt] = React.useState(collections[0]!.at);
   const collection = collections.find((c) => c.at === at) ?? collections[0]!;
   const [assign, setAssign] = React.useState<Assignment>(() => suggestions(collection));
@@ -92,9 +97,9 @@ export function MappingStep({ collections, onBack, onNext }: MappingStepProps) {
               <Table.Tr key={f.path}>
                 <Table.Td style={{ fontFamily: 'ui-monospace, monospace', overflowWrap: 'anywhere' }}>{f.path}</Table.Td>
                 <Table.Td style={{ overflowWrap: 'anywhere' }}>
-                  {f.masked ? (
+                  {f.masked && (f.sample === HIDDEN_SAMPLE || f.sample === '') ? (
                     <>
-                      <span aria-hidden="true">••••</span>
+                      <span aria-hidden="true">{HIDDEN_SAMPLE}</span>
                       <Text size="xs" c="dimmed">
                         Taken from the file — not shown
                       </Text>
@@ -118,10 +123,10 @@ export function MappingStep({ collections, onBack, onNext }: MappingStepProps) {
         </Table>
       </div>
       <Group justify="flex-end" gap="xs">
-        <Button variant="subtle" size="compact-xs" onClick={onBack}>
+        <Button variant="subtle" size="compact-xs" disabled={busy} onClick={onBack}>
           Back
         </Button>
-        <Button size="compact-xs" disabled={!canNext} onClick={next}>
+        <Button size="compact-xs" disabled={!canNext || busy} onClick={next}>
           Next
         </Button>
       </Group>

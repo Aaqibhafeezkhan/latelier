@@ -81,10 +81,11 @@ A connection string from any source, whether pasted, Compass's `connectionString
 - **Refusals.** A string the parser refuses makes the row unusable, with the parser's reason as the row's reason:
   - `MONGODB-OIDC` gives *"OIDC sign-in isn't supported yet."*, in any casing.
   - Any other mechanism the parser doesn't support, such as Kerberos (`GSSAPI`) or LDAP (`PLAIN`), gives `unsupported authMechanism: <value>`.
-  - A host with characters a host name can't contain, or a port outside 1–65535, is refused in words, never by quoting the input.
+  - A host with characters a host name can't contain, or a port outside 1–65535, is refused in words, never by quoting the input. A host name holds letters, digits, `.`, `-` and `_`, or is a bracketed IPv6 literal. A `%` is allowed only when the host ends in `.sock`, the driver's Unix-socket form, so `good%2eexample` is refused.
+  - A non-ASCII host such as `münchen.example` is accepted, in any case, only when DNS would resolve the name shown: it must convert to punycode (`domainToASCII`) and back (`domainToUnicode`) to the same name, bar case. This refuses what UTS46 rewrites or drops, such as an ideographic full stop, zero-width characters, a soft hyphen, fullwidth `／＠？＃：，` and a right-to-left override. The driver gets such a host as its punycode, for standard and SRV connections alike.
   - A string the connection-string library can't parse at all gives the fixed sentence *"This isn't a valid connection string."* The library's own message quotes the userinfo, password included, so it is never passed on.
 
-The debug log masks a connection string's userinfo and its secret query parameters (`password`, `proxyPassword`, `tlsCertificateKeyFilePassword`, `sslPEMKeyPassword`, and an `authMechanismProperties` value holding `AWS_SESSION_TOKEN`). It does not recognise a percent-encoded parameter name, a parameter after the legacy `;` separator, or a connection string percent-encoded inside a parameter.
+The debug log masks a connection string's userinfo and its secret query parameters (`password`, `proxyPassword`, `tlsCertificateKeyFilePassword`, `sslPEMKeyPassword`, and an `authMechanismProperties` value holding `AWS_SESSION_TOKEN`). It compares parameter names percent-decoded, as the driver does, and keeps a name with a malformed escape as written. It does not recognise a parameter after the legacy `;` separator, or a connection string percent-encoded inside a parameter.
 
 ## 4. Compass export
 
@@ -156,9 +157,9 @@ Two kinds of key are skipped everywhere, in collection paths and field paths ali
 
 Within the chosen collection, each row is flattened to dot paths over its scalar leaves (string, number, boolean). Array indexes inside a row are plain path segments, for example `servers.0.host`. `null`, objects and arrays are never mappable themselves. Leaves more than 20 levels below the row are not offered; the limit also bounds the walk. A `__proto__` key stays data. The screen lists the union of paths across all rows, in document order, up to 200, each with **one sample value**, taken from the first row that has the path.
 
-**Masking.** Masking happens in main, and a raw secret value never reaches the renderer. A field is masked when either rule below applies. The screen then shows `••••` and the hint *"Taken from the file — not shown"* instead of the sample.
+**Masking.** Masking happens in main, and a raw secret value never reaches the renderer. A field is masked when either rule below applies. When main hides the value whole (`••••`), the screen shows `••••` and the hint *"Taken from the file — not shown"*. When main sends a connection string with its secrets stripped, the screen shows that string, so the user can recognise the field.
 
-- **Key rule.** The path's last key is its last segment that isn't an all-digit array index, so a list under `apiKeys` is masked like a single key. When that key contains `pass`, `pwd`, `secret`, `token`, `key` or `credential` (case-insensitive substring), the sample is replaced by `••••`, whatever the value's type. Because it is a substring rule, it also masks harmless names such as `keyboard`. A needless mask only costs the user a sample. A missed one shows a secret.
+- **Key rule.** The path's last key is its last segment that isn't an all-digit array index, so a list under `apiKeys` is masked like a single key. When that key contains `pass`, `pw`, `pwd`, `secret`, `token`, `key` or `credential` (case-insensitive substring), the sample is replaced by `••••`, whatever the value's type. Because it is a substring rule, it also masks harmless names such as `keyboard`. A needless mask only costs the user a sample. A missed one shows a secret. `auth` is not on the list, so `authSource` and `authMechanism` samples stay visible.
 - **Value rule.** This rule covers any text that holds `mongodb://` or `mongodb+srv://` anywhere, in any case.
   - The text is first trimmed of spaces and zero-width characters.
   - Text that holds a second connection string, or that the connection-string library can't parse (text before the string included), is replaced by `••••`. It fails closed, because where each string ends inside it can't be told reliably.
@@ -187,7 +188,7 @@ Each target takes at most one path, and each path goes to at most one target. On
 
 A value the target doesn't accept is ignored for that row. The row shows a warning naming the path, never the value. A missing or empty value is simply absent, with no warning. Every field that isn't mapped takes the same default as a pasted string.
 
-**Secret paths.** A path the key or value rule masks can only feed Password or Connection string, the two targets whose value never appears in the review. Mapped to any other target, it is ignored with the warning *"<path> was ignored: it holds a secret; map it to Password."* Otherwise a value the mapping screen hid could come back through a field the review shows.
+**Secret paths.** A path the key or value rule masks can only feed Password or Connection string, the two targets whose value never appears in the review. Mapped to any other target, it is ignored with the warning *"<path> was ignored: it holds a secret; map it to Password or Connection string."* Otherwise a value the mapping screen hid could come back through a field the review shows.
 
 ### 5.4 Suggestions
 
@@ -217,7 +218,7 @@ A target is suggested for one path only: the first in document order. A path who
 
 ### 5.6 Leaving the step
 
-*Back* returns to Source. *Next* sends only the chosen collection's path and the target→path assignments to main (§8). Main applies them to the file it holds and returns the final approval rows. The final approval's *Back* returns to Field Mapping with the choices intact. *Next* can be pressed again on the same token, and each call replaces the previous candidate rows.
+*Back* returns to Source. While main applies the mapping, *Back* and *Next* are disabled. *Next* sends only the chosen collection's path and the target→path assignments to main (§8). Main applies them to the file it holds and returns the final approval rows. The final approval's *Back* returns to Field Mapping with the choices intact. *Next* can be pressed again on the same token, and each call replaces the previous candidate rows.
 
 ## 6. Final approval
 
@@ -358,6 +359,7 @@ interface ImportCommitResult {
   - The commit then takes the token before opening secrets. A failure while opening them, such as `BAD_PASSPHRASE` or a missing passphrase, puts it back for the retry. The exception is a window that closed meanwhile: its tokens must not outlive it.
   - A commit that gets past that point spends the token, even if every row ends up skipped.
   - Two concurrent commits on one token create the rows once.
+  - Starting a new import (`conn:importOpen` or `conn:importUris`) drops every token already held, since one wizard runs at a time. A cancelled import's pasted passwords and file secrets don't stay in memory.
   - Every token expires when the window closes. Using a spent or expired token fails with *"This import has expired. Choose the file again."*
 - `conn:importMap` works only on an Unknown JSON token, and only with a collection path the file has. It can be called again on the same token, and each call replaces the previous candidate rows. It carries no secret: the renderer sends paths, never values.
 - `conn:importUris` and `conn:importCommit` are tagged `SECRET_INPUT` and listed in `scripts/ipc-secret-allowlist.txt`, beside C13's `conn:export`.

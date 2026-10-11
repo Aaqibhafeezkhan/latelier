@@ -96,7 +96,11 @@ export class ImportWizardService {
     this.log = opts.log;
   }
 
-  /** Called when the window closes: a token does not outlive it. */
+  /**
+   * Called when the window closes, and when a new import starts: one wizard
+   * runs at a time, so a token from a cancelled one must not keep its pasted
+   * passwords or file secrets in memory.
+   */
   clearPending(): void {
     this.pending.clear();
     this.generation++;
@@ -104,6 +108,7 @@ export class ImportWizardService {
 
   /** C14 §2: picks, reads and classifies a file. A refusal throws before a token exists. */
   async importOpen(): Promise<ImportOpenResult> {
+    this.clearPending();
     const picked = await this.dialogs.openPath();
     if (picked === null) return { cancelled: true };
     const found = detect(await readImportFile(picked, this.log));
@@ -139,6 +144,7 @@ export class ImportWizardService {
 
   /** C13 §7.1 as an Import Source: nothing is written, and a password is reported as present, never returned. */
   importUris(uris: readonly string[]): ImportUrisResult {
+    this.clearPending();
     const pending: Pending = { source: 'uris', rows: uris.map(uriRow), reviewed: [] };
     const review = this.review(pending);
     return { token: this.hold(pending), review };

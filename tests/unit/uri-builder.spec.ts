@@ -270,9 +270,20 @@ describe('buildUri', () => {
       expect(uri).toMatch(/^mongodb:\/\/xmongodb:27017\//);
     });
 
-    it('non-ASCII host goes through real URL normalization, not raw passthrough', () => {
-      const uri = buildUri(mk({ host: 'CAFÉ.com' }));
-      expect(uri).toContain('CAF%C3%89.com');
+    it('hands the driver a non-ASCII host as punycode, for standard and SRV alike', () => {
+      expect(buildUri(mk({ host: 'CAFÉ.com' }))).toContain('//xn--caf-dma.com:27017/');
+      expect(buildUri(mk({ host: 'münchen.example' }))).toContain('xn--mnchen-3ya.example:27017/');
+      const srv = buildUri(mk({ host: 'münchen.example', connectionType: 'srv' }));
+      expect(srv).toContain('xn--mnchen-3ya.example/');
+      expect(srv).not.toContain('%');
+    });
+
+    it('leaves a percent-encoded Unix-socket host as it is', () => {
+      expect(buildUri(mk({ host: '%2Ftmp%2Fmongodb-27017.sock' }))).toContain('%2Ftmp%2Fmongodb-27017.sock:27017/');
+    });
+
+    it('keeps a host with a malformed escape as written instead of throwing', () => {
+      expect(() => buildUri(mk({ host: '%E0%A4%A.sock' }))).not.toThrow();
     });
 
     describe('malformed-host fallback path (URL constructor throws)', () => {
