@@ -43,8 +43,10 @@ const SECRET_URI_PARAMS = new Set([
   'password', 'proxypassword', 'tlscertificatekeyfilepassword', 'sslpemkeypassword',
 ]);
 const URI_STRING = /mongodb(?:\+srv)?:\/\/\S*/gi;
-// Name and value are disjoint character classes, so the scan stays linear.
-const URI_QUERY_PARAM = /([?&])([^=&]*)=([^&]*)/g;
+// The name stops at any separator, `?` included: a name that could run across
+// later `?`s rescans the rest of the string from each one when no `=` follows,
+// which is quadratic on a run of `?`. With it, the scan stays linear.
+const URI_QUERY_PARAM = /([?&])([^=&?]*)=([^&]*)/g;
 
 // An authMechanismProperties value holding the AWS session token is masked
 // whole: splitting a malformed list to find the token's end cannot be trusted.

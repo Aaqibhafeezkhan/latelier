@@ -398,6 +398,7 @@ describe('redactSecrets: connection-string query secrets', () => {
     ['mongodb://h/?proxy%50assword=s3cret&tls=true', 'mongodb://h/?proxy%50assword=***&tls=true'],
     ['mongodb://h/?%61uthMechanismProperties=AWS_SESSION_TOKEN:s3cret', 'mongodb://h/?%61uthMechanismProperties=***'],
     ['failed on mongodb://h/?proxyPassword=s3cret retrying', 'failed on mongodb://h/?proxyPassword=*** retrying'],
+    ['mongodb://h/?foo?proxyPassword=s3cret', 'mongodb://h/?foo?proxyPassword=***'],
   ])('masks %s', (input, expected) => {
     expect(redactSecrets(input)).toBe(expected);
   });
@@ -415,6 +416,14 @@ describe('redactSecrets: connection-string query secrets', () => {
   it('masks only authMechanismProperties for the session-token rule', () => {
     const uri = 'mongodb://h/?appName=AWS_SESSION_TOKEN:x';
     expect(redactSecrets(uri)).toBe(uri);
+  });
+
+  it('scans a long run of `?` with no `=` in linear time', () => {
+    const uri = `mongodb://h/${'?'.repeat(200_000)}`;
+    const started = performance.now();
+    expect(redactSecrets(uri)).toBe(uri);
+    // The quadratic form took about 16s here; the linear one takes a few ms.
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 
   it('leaves a secret-named parameter outside a connection string alone', () => {
