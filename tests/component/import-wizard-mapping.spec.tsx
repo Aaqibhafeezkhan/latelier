@@ -139,6 +139,17 @@ describe('MappingStep', () => {
     expect(screen.getByText(/Only the first 500 rows are read/)).toBeTruthy();
   });
 
+  it('says how many paths of lists and of fields were left out as ambiguous, and nothing when none were', () => {
+    const { unmount } = render(
+      <MappingStep collections={[{ ...servers, ambiguousFields: 2 }]} ambiguousCollections={1} onBack={vi.fn()} onNext={vi.fn()} />,
+    );
+    expect(screen.getByText(/Some lists are left out: 1 path names more than one list/)).toBeTruthy();
+    expect(screen.getByText(/Some fields are left out: 2 paths name more than one value in a row/)).toBeTruthy();
+    unmount();
+    setup();
+    expect(screen.queryByText(/left out:/)).toBeNull();
+  });
+
   it('gives a target to only the first of two fields suggesting it', () => {
     setup([{ ...servers, fields: [
       { path: 'a.host', sample: 'x', masked: false, suggested: 'host' },
@@ -146,6 +157,33 @@ describe('MappingStep', () => {
     ] }]);
     expect(select('a.host').value).toBe('host');
     expect(select('b.host').value).toBe('');
+  });
+
+  it('keeps a __proto__ or constructor field as data: suggested, chosen and sent', async () => {
+    // Paths are file keys; a plain-object assignment would hit Object.prototype for these two.
+    // `constructor` would read Object as its target, which React refuses as a select value.
+    const consoleError = vi.spyOn(console, 'error');
+    const { onNext } = setup([{ at: '', rows: 1, fields: [
+      { path: '__proto__', sample: 'mongodb://h', masked: false, suggested: 'connectionString' },
+      { path: 'constructor', sample: 'Prod', masked: false },
+    ] }]);
+    expect(select('__proto__').value).toBe('connectionString');
+    expect(select('constructor').value).toBe('');
+    expect(consoleError.mock.calls.flat().join(' ')).not.toContain('Invalid value for prop');
+    consoleError.mockRestore();
+    expect(next().disabled).toBe(false);
+    await userEvent.click(next());
+    expect(onNext).toHaveBeenLastCalledWith('', { connectionString: '__proto__' });
+
+    await pick('__proto__', '');
+    expect(next().disabled).toBe(true);
+    await pick('__proto__', 'host');
+    await pick('constructor', 'name');
+    expect(select('__proto__').value).toBe('host');
+    expect(select('constructor').value).toBe('name');
+    expect(next().disabled).toBe(false);
+    await userEvent.click(next());
+    expect(onNext).toHaveBeenLastCalledWith('', { host: '__proto__', name: 'constructor' });
   });
 
   it('is operable from the keyboard', async () => {

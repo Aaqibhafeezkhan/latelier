@@ -114,13 +114,14 @@ export class ImportWizardService {
     const found = detect(await readImportFile(picked, this.log));
     if (found.source === 'unknown') {
       const collections = buildCollections(found.value);
+      const { collections: held, ambiguous } = findCollections(found.value);
       const token = this.hold({
         source: 'unknown',
         rows: [],
         reviewed: [],
-        collections: findCollections(found.value),
+        collections: held,
       });
-      return { token, source: 'unknown', collections };
+      return { token, source: 'unknown', collections, ...(ambiguous ? { ambiguousCollections: ambiguous } : {}) };
     }
     const pending: Pending =
       found.source === 'latelier'

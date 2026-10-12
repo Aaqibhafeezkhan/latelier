@@ -137,6 +137,12 @@ describe('Import Wizard: source routing', () => {
     await reviewTable();
   });
 
+  it('Field Mapping says how many paths main left out because two lists share them', async () => {
+    setup({ open: { token: 'tok-j', source: 'unknown', collections: COLLECTIONS, ambiguousCollections: 2 } });
+    await chooseFile();
+    expect(await screen.findByText(/Some lists are left out: 2 paths name more than one list/)).toBeTruthy();
+  });
+
   it('an unknown JSON file goes through Field Mapping, and Back from the review keeps the choices', async () => {
     const { importMap } = setup({ open: { token: 'tok-j', source: 'unknown', collections: COLLECTIONS } });
     await chooseFile();

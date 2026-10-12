@@ -24,7 +24,7 @@ describe('MAP_TARGETS', () => {
 
 describe('findCollections', () => {
   it('takes a top-level array of objects as the collection at ""', () => {
-    expect(findCollections([{ a: 1 }, { a: 2 }])).toEqual([{ at: '', rows: [{ a: 1 }, { a: 2 }] }]);
+    expect(findCollections([{ a: 1 }, { a: 2 }])).toEqual({ collections: [{ at: '', rows: [{ a: 1 }, { a: 2 }] }], ambiguous: 0 });
   });
 
   it('lists nested arrays largest first, ties in document order', () => {
@@ -33,7 +33,7 @@ describe('findCollections', () => {
       data: { servers: rows(3), others: rows(2) },
       tie: rows(2),
     };
-    expect(findCollections(value).map((c) => [c.at, c.rows.length])).toEqual([
+    expect(findCollections(value).collections.map((c) => [c.at, c.rows.length])).toEqual([
       ['data.servers', 3],
       ['data.others', 2],
       ['tie', 2],
@@ -43,7 +43,7 @@ describe('findCollections', () => {
 
   it('finds collections inside array elements and objects that are not collections', () => {
     const value = [[{ a: 1 }], { list: [{ b: 1 }, { b: 2 }] }];
-    expect(findCollections(value).map((c) => c.at)).toEqual(['1.list', '0']);
+    expect(findCollections(value).collections.map((c) => c.at)).toEqual(['1.list', '0']);
   });
 
   it("does not search a collection's rows for more collections", () => {
@@ -51,37 +51,37 @@ describe('findCollections', () => {
       servers: [{ replicas: [{ h: 1 }, { h: 2 }, { h: 3 }] }, { replicas: [{ h: 4 }] }],
       meta: { owners: [{ n: 1 }] },
     };
-    expect(findCollections(value).map((c) => c.at)).toEqual(['servers', 'meta.owners']);
+    expect(findCollections(value).collections.map((c) => c.at)).toEqual(['servers', 'meta.owners']);
   });
 
   it('ignores empty arrays and arrays that mix objects with anything else', () => {
     const value = { empty: [], mixed: [{ a: 1 }, 2], nulls: [{ a: 1 }, null], nested: [[{ a: 1 }]], ok: rows(1) };
-    expect(findCollections(value).map((c) => c.at)).toEqual(['nested.0', 'ok']);
+    expect(findCollections(value).collections.map((c) => c.at)).toEqual(['nested.0', 'ok']);
   });
 
   it('treats a lone top-level object as one row', () => {
     const value = { host: 'h', port: 1 };
-    expect(findCollections(value)).toEqual([{ at: '', rows: [value] }]);
+    expect(findCollections(value).collections).toEqual([{ at: '', rows: [value] }]);
   });
 
   it('finds an array five levels down but not six', () => {
     const five = { a: { b: { c: { d: { e: rows(1) } } } } };
     const six = { a: { b: { c: { d: { e: { f: rows(1) } } } } } };
-    expect(findCollections(five).map((c) => c.at)).toEqual(['a.b.c.d.e']);
+    expect(findCollections(five).collections.map((c) => c.at)).toEqual(['a.b.c.d.e']);
     // Six levels down is out of reach, so the top object is the lone row.
-    expect(findCollections(six)).toEqual([{ at: '', rows: [six] }]);
+    expect(findCollections(six).collections).toEqual([{ at: '', rows: [six] }]);
   });
 
   it('caps a collection at 500 rows and reports the cut', () => {
-    const [c] = findCollections(rows(503));
+    const [c] = findCollections(rows(503)).collections;
     expect(c!.rows).toHaveLength(500);
     expect(c!.rows[499]).toEqual({ i: 499 });
     expect(c!.truncatedRows).toBe(3);
-    expect(findCollections(rows(500))[0]).not.toHaveProperty('truncatedRows');
+    expect(findCollections(rows(500)).collections[0]).not.toHaveProperty('truncatedRows');
   });
 
   it('ranks by the row count before the cap', () => {
-    expect(findCollections({ a: rows(600), b: rows(700) }).map((c) => c.at)).toEqual(['b', 'a']);
+    expect(findCollections({ a: rows(600), b: rows(700) }).collections.map((c) => c.at)).toEqual(['b', 'a']);
   });
 
   it.each([
@@ -154,6 +154,69 @@ describe('buildCollections — fields', () => {
   it('keeps a "__proto__" key as data', () => {
     const value = JSON.parse('[{"__proto__": {"host": "h"}, "port": 1}]');
     expect(fields(value).map((f) => f.path)).toEqual(['__proto__.host', 'port']);
+  });
+});
+
+describe('buildCollections — paths that name two things', () => {
+  // A literal dotted key and real nesting join to the same path, so one of
+  // them would silently stand in for the other.
+  const REVIEWED = '{"db.servers":[{"host":"first.example"}],"db":{"servers":[{"host":"second.example"}]}}';
+
+  it('refuses a file whose only lists share their path, with no fallback to the top-level object', () => {
+    expect(() => buildCollections(JSON.parse(REVIEWED))).toThrow(ValidationError);
+    expect(() => buildCollections(JSON.parse(REVIEWED))).toThrow(
+      "The lists of connections in this file can't be told apart: each has the same path as another list.",
+    );
+  });
+
+  it('leaves colliding lists out and keeps the others', () => {
+    const value = JSON.parse(REVIEWED.replace(/^\{/, '{"ok":[{"host":"ok.example"}],'));
+    expect(buildCollections(value).map((c) => c.at)).toEqual(['ok']);
+  });
+
+  it.each([
+    ['three ways', '{"a.b.c":[{"x":1}],"a.b":{"c":[{"x":2}]},"a":{"b":{"c":[{"x":3}]}},"ok":[{"x":4}]}'],
+    ['an array index against a "0" key', '{"a":[[{"x":1}]],"a.0":[{"x":2}],"ok":[{"x":3}]}'],
+    ['empty keys against a dot', '{"":{"":[{"x":1}]},".":[{"x":2}],"ok":[{"x":3}]}'],
+  ])('leaves out lists that collide %s', (_label, text) => {
+    expect(buildCollections(JSON.parse(text)).map((c) => c.at)).toEqual(['ok']);
+  });
+
+  it('leaves out a field two leaves of a row share, and never reads either value', () => {
+    const value = JSON.parse('[{"host":"h","a.b":"first-leaf","a":{"b":"second-leaf"}}]');
+    expect(fields(value).map((f) => f.path)).toEqual(['host']);
+    expect(JSON.stringify(buildCollections(value))).not.toMatch(/first-leaf|second-leaf/);
+    const row = combineRow(value[0], { host: 'host', name: 'a.b' });
+    expect(row.nameHint).toBe('');
+    expect(row.warnings).toEqual([]);
+  });
+
+  it('leaves out a field that collides in any row, even one the first row has once', () => {
+    const value = JSON.parse('[{"host":"h","a.b":1},{"host":"i","a.b":2,"a":{"b":3}},{"z":1}]');
+    expect(fields(value).map((f) => f.path)).toEqual(['host', 'z']);
+  });
+
+  it.each([
+    ['three ways', '{"a.b.c":1,"a.b":{"c":2},"a":{"b":{"c":3}},"host":"h"}'],
+    ['an array index against a "0" key', '{"a":[1],"a.0":2,"host":"h"}'],
+    ['an empty key', '{"x":1,"":{"x":2},"host":"h"}'],
+  ])('leaves out fields that collide %s', (_label, text) => {
+    expect(fields([JSON.parse(text)]).map((f) => f.path)).toEqual(['host']);
+  });
+
+  it('counts the paths left out, not the lists or leaves behind them', () => {
+    const lists = '{"a.b":[{"x":1}],"a":{"b":[{"x":2}]},"c.d":[{"x":3}],"c":{"d":[{"x":4}],"d.e":[{"x":5}]},"ok":[{"x":6}]}';
+    expect(findCollections(JSON.parse(lists)).ambiguous).toBe(2);
+    expect(findCollections(JSON.parse(lists)).collections.map((c) => c.at)).toEqual(['c.d.e', 'ok']);
+    const three = '{"a.b.c":1,"a.b":{"c":2},"a":{"b":{"c":3}},"x.y":1,"x":{"y":2},"host":"h"}';
+    expect(buildCollections([JSON.parse(three)])[0]).toMatchObject({ fields: [{ path: 'host' }], ambiguousFields: 2 });
+    expect(buildCollections([{ host: 'h' }])[0]).not.toHaveProperty('ambiguousFields');
+  });
+
+  it('never shows a secret through a colliding path', () => {
+    const value = JSON.parse('[{"host":"h","a.uri":"mongodb://u:pw-marker@x","a":{"uri":"plain"}}]');
+    expect(JSON.stringify(buildCollections(value))).not.toContain('pw-marker');
+    expect(combineRow(value[0], { host: 'host', connectionString: 'a.uri' }).secrets).toEqual({});
   });
 });
 
@@ -255,7 +318,7 @@ describe('buildCollections — masking', () => {
     const long = 'k'.repeat(257);
     const fine = 'f'.repeat(256);
     expect(fields([{ host: 'h', [long]: 1, [fine]: 2 }]).map((f) => f.path)).toEqual(['host', fine]);
-    expect(findCollections({ [long]: [{ a: 1 }], [fine]: [{ b: 1 }] }).map((c) => c.at)).toEqual([fine]);
+    expect(findCollections({ [long]: [{ a: 1 }], [fine]: [{ b: 1 }] }).collections.map((c) => c.at)).toEqual([fine]);
   });
 
   it.each([
