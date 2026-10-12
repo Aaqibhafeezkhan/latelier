@@ -149,13 +149,15 @@ Main walks the parsed value, at most 5 levels deep:
 
 A collection is capped at 500 rows, ranked by its full count. Anything beyond the cap is left out, and the screen says how many rows were.
 
+A path joins keys with `.`, so two lists can share one. A key with a dot in it can sit beside real nesting (`"db.servers"` and `db` → `servers`). An empty key or a `"0"` key can sit beside an array index. Picking by path could then import the other list, so no list at a shared path is offered. The screen says how many paths were left out. When that leaves no list at all, the file is refused with *"The lists of connections in this file can't be told apart: each has the same path as another list."* The top-level object is not used as a row instead.
+
 Two kinds of key are skipped everywhere, in collection paths and field paths alike:
 - a key that holds a connection string (`mongodb://` or `mongodb+srv://`, any case), because a path is shown on screen and the string may carry a password;
 - a key longer than 256 characters: nobody maps one, and the file would otherwise control how much work each leaf costs.
 
 ### 5.2 Fields
 
-Within the chosen collection, each row is flattened to dot paths over its scalar leaves (string, number, boolean). Array indexes inside a row are plain path segments, for example `servers.0.host`. `null`, objects and arrays are never mappable themselves. Leaves more than 20 levels below the row are not offered; the limit also bounds the walk. A `__proto__` key stays data. The screen lists the union of paths across all rows, in document order, up to 200, each with **one sample value**, taken from the first row that has the path.
+Within the chosen collection, each row is flattened to dot paths over its scalar leaves (string, number, boolean). Array indexes inside a row are plain path segments, for example `servers.0.host`. `null`, objects and arrays are never mappable themselves. Leaves more than 20 levels below the row are not offered; the limit also bounds the walk. A `__proto__` key stays data. Two leaves of a row can share a path the same way two lists can (§5.1), as in `{"a.b": 1, "a": {"b": 2}}`. Which one is meant can't be told, so neither is offered, sampled or read. A path shared in any row is left out for every row, and the screen says how many paths were. The screen lists the union of paths across all rows, in document order, up to 200, each with **one sample value**, taken from the first row that has the path.
 
 **Masking.** Masking happens in main, and a raw secret value never reaches the renderer. A field is masked when either rule below applies. When main hides the value whole (`••••`), the screen shows `••••` and the hint *"Taken from the file — not shown"*. When main sends a connection string with its secrets stripped, the screen shows that string, so the user can recognise the field.
 
@@ -312,12 +314,12 @@ type ReviewRow =
 interface Review { hasEncryptedSecrets: boolean; rows: ReviewRow[] }
 
 interface MappingField { path: string; sample: string; masked: boolean; suggested?: MapTarget }
-interface MappingCollection { at: string; rows: number; fields: MappingField[]; truncatedRows?: number }
+interface MappingCollection { at: string; rows: number; fields: MappingField[]; truncatedRows?: number; ambiguousFields?: number }
 
 type ImportOpenResult =
   | { cancelled: true }
   | { token: string; source: 'latelier' | 'compass'; review: Review }
-  | { token: string; source: 'unknown'; collections: MappingCollection[] };
+  | { token: string; source: 'unknown'; collections: MappingCollection[]; ambiguousCollections?: number };
 
 interface ImportMapInput { token: string; at: string; mapping: Partial<Record<MapTarget, string>> }
 interface ImportMapResult { review: Review }

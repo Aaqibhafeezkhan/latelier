@@ -5,6 +5,8 @@ import { MAP_TARGETS } from './mapTargets';
 
 export interface MappingStepProps {
   collections: MappingCollection[];
+  /** Paths main left out because two lists in the file share them. */
+  ambiguousCollections?: number;
   /** Mapping is being applied in main: Back and Next hold still so a second click can't race it. */
   busy?: boolean;
   onBack(): void;
@@ -30,13 +32,15 @@ function suggestions(c: MappingCollection): Assignment {
   return out;
 }
 
+const paths = (n: number): string => (n === 1 ? '1 path names' : `${n.toLocaleString()} paths name`);
+
 function pickerLabel(c: MappingCollection): string {
   const rows = `${c.rows.toLocaleString()} ${c.rows === 1 ? 'row' : 'rows'}`;
   return c.at === '' ? `This file (${rows})` : `${c.at} (${rows})`;
 }
 
 /** C14 §5: tell main which field of an unrecognised JSON file is which part of a Connection. */
-export function MappingStep({ collections, busy = false, onBack, onNext }: MappingStepProps) {
+export function MappingStep({ collections, ambiguousCollections, busy = false, onBack, onNext }: MappingStepProps) {
   const [at, setAt] = React.useState(collections[0]!.at);
   const collection = collections.find((c) => c.at === at) ?? collections[0]!;
   const [assign, setAssign] = React.useState<Assignment>(() => suggestions(collection));
@@ -75,12 +79,23 @@ export function MappingStep({ collections, busy = false, onBack, onNext }: Mappi
           data={collections.map((c) => ({ value: c.at, label: pickerLabel(c) }))}
         />
       )}
+      {ambiguousCollections !== undefined && (
+        <Text size="xs" c="orange">
+          Some lists are left out: {paths(ambiguousCollections)} more than one list in this file, so which is meant can&apos;t be told.
+        </Text>
+      )}
       <Text size="xs" c="dimmed">
         Say which field holds each part of a Connection. Map either a Connection string or a Host.
       </Text>
       {collection.truncatedRows !== undefined && (
         <Text size="xs" c="orange">
           Only the first 500 rows are read ({collection.truncatedRows.toLocaleString()} left out).
+        </Text>
+      )}
+      {collection.ambiguousFields !== undefined && (
+        <Text size="xs" c="orange">
+          Some fields are left out: {paths(collection.ambiguousFields)} more than one value in a row, such as a key with a
+          dot in it beside a nested key, so which is meant can&apos;t be told.
         </Text>
       )}
       <div style={{ maxHeight: 320, overflowY: 'auto' }}>

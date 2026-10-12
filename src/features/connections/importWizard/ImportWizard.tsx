@@ -35,6 +35,7 @@ export function ImportWizard({ initial, onClose }: ImportWizardProps) {
   const [token, setToken] = React.useState<string | null>(null);
   const [source, setSource] = React.useState<ImportSource | null>(null);
   const [collections, setCollections] = React.useState<MappingCollection[] | null>(null);
+  const [ambiguousCollections, setAmbiguousCollections] = React.useState<number | undefined>();
   const [review, setReview] = React.useState<Review | null>(null);
   // Bumped on every new review so the approval step's ticks and fields never
   // carry over to rows they were not chosen for; `importMap` keeps the token.
@@ -79,6 +80,7 @@ export function ImportWizard({ initial, onClose }: ImportWizardProps) {
         setSource('unknown');
         setToken(res.token);
         setCollections(res.collections);
+        setAmbiguousCollections(res.ambiguousCollections);
         setStep('mapping');
       } else {
         showReview(res.source, res.token, res.review);
@@ -157,6 +159,7 @@ export function ImportWizard({ initial, onClose }: ImportWizardProps) {
               <MappingStep
                 key={token}
                 collections={collections}
+                ambiguousCollections={ambiguousCollections}
                 busy={busy}
                 onBack={() => {
                   setError(undefined);

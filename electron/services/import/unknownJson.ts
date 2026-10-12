@@ -53,8 +53,13 @@ function isObject(v: unknown): v is Row {
  * first (ties keep document order). A collection's own rows are not searched
  * for more: their arrays are fields of the row. With none, a top-level object
  * is the one row. Throws `ValidationError` when there is nothing to map.
+ *
+ * Keys are joined with `.`, so a dotted key, an empty key or a `"0"` key can
+ * give two arrays the same `at`. Picking by `at` could then import the other
+ * one, so every array at such a path is left out; `ambiguous` counts those
+ * paths.
  */
-export function findCollections(value: unknown): FoundCollection[] {
+export function findCollections(value: unknown): { collections: FoundCollection[]; ambiguous: number } {
   const found: { at: string; rows: Row[] }[] = [];
   const walk = (node: unknown, path: string[]): void => {
     if (Array.isArray(node) && node.length > 0 && node.every(isObject)) {
@@ -69,20 +74,36 @@ export function findCollections(value: unknown): FoundCollection[] {
   walk(value, []);
   if (found.length === 0 && isObject(value)) found.push({ at: '', rows: [value] });
   if (found.length === 0) throw new ValidationError('No connections found in this file.');
-  found.sort((a, b) => b.rows.length - a.rows.length);
-  return found.map(({ at, rows }) =>
+  const ambiguous = repeated(found.map((c) => c.at));
+  const kept = found.filter((c) => !ambiguous.has(c.at));
+  if (kept.length === 0) {
+    throw new ValidationError("The lists of connections in this file can't be told apart: each has the same path as another list.");
+  }
+  kept.sort((a, b) => b.rows.length - a.rows.length);
+  const collections = kept.map(({ at, rows }) =>
     rows.length > MAX_ROWS
       ? { at, rows: rows.slice(0, MAX_ROWS), truncatedRows: rows.length - MAX_ROWS }
       : { at, rows },
   );
+  return { collections, ambiguous: ambiguous.size };
+}
+
+/** The values that occur more than once. */
+function repeated(values: Iterable<string>): Set<string> {
+  const seen = new Set<string>();
+  const twice = new Set<string>();
+  for (const v of values) (seen.has(v) ? twice : seen).add(v);
+  return twice;
 }
 
 /**
  * Dot path → scalar leaf, in document order, at most 20 segments deep. A `Map`,
- * so a `__proto__` key stays data.
+ * so a `__proto__` key stays data. A path two leaves share (see
+ * `findCollections`) is in `ambiguous` and left out of `values`: which leaf it
+ * means can't be told, so neither is shown or read.
  */
-function flattenRow(row: Row): Map<string, Scalar> {
-  const out = new Map<string, Scalar>();
+function flattenRow(row: Row): { values: Map<string, Scalar>; ambiguous: Set<string> } {
+  const leaves: [string, Scalar][] = [];
   const walk = (node: object, prefix: string, depth: number): void => {
     for (const [key, child] of Object.entries(node)) {
       if (unsafeKey(key)) continue;
@@ -90,12 +111,13 @@ function flattenRow(row: Row): Map<string, Scalar> {
       if (typeof child === 'object' && child !== null) {
         if (depth < MAX_ROW_DEPTH) walk(child, path, depth + 1);
       } else if (typeof child === 'string' || typeof child === 'number' || typeof child === 'boolean') {
-        out.set(path, child);
+        leaves.push([path, child]);
       }
     }
   };
   walk(row, '', 1);
-  return out;
+  const ambiguous = repeated(leaves.map(([path]) => path));
+  return { values: new Map(leaves.filter(([path]) => !ambiguous.has(path))), ambiguous };
 }
 
 /**
@@ -199,15 +221,18 @@ function isConnectionString(v: Scalar): v is string {
  * A target is suggested for one path only, the first; a connection-string
  * value outranks the path's key name.
  */
-function buildFields(rows: readonly Row[]): MappingField[] {
+function buildFields(rows: readonly Row[]): { fields: MappingField[]; ambiguous: number } {
+  const flat = rows.map(flattenRow);
+  // A path ambiguous in any row is left out for all: mapped, it would silently read nothing from that row.
+  const ambiguous = new Set(flat.flatMap((f) => [...f.ambiguous]));
   const firsts = new Map<string, Scalar>();
-  for (const row of rows) {
-    for (const [path, value] of flattenRow(row)) {
-      if (!firsts.has(path) && firsts.size < MAX_FIELDS) firsts.set(path, value);
+  for (const { values } of flat) {
+    for (const [path, value] of values) {
+      if (!ambiguous.has(path) && !firsts.has(path) && firsts.size < MAX_FIELDS) firsts.set(path, value);
     }
   }
   const taken = new Set<MapTarget>();
-  return [...firsts].map(([path, value]) => {
+  const fields = [...firsts].map(([path, value]) => {
     const name = lastKey(path);
     const target = isConnectionString(value)
       ? 'connectionString'
@@ -219,16 +244,21 @@ function buildFields(rows: readonly Row[]): MappingField[] {
     }
     return field;
   });
+  return { fields, ambiguous: ambiguous.size };
 }
 
 /** What `conn:importOpen` shows for an Unknown JSON file. */
 export function buildCollections(value: unknown): MappingCollection[] {
-  return findCollections(value).map(({ at, rows, truncatedRows }) => ({
-    at,
-    rows: rows.length,
-    fields: buildFields(rows),
-    ...(truncatedRows ? { truncatedRows } : {}),
-  }));
+  return findCollections(value).collections.map(({ at, rows, truncatedRows }) => {
+    const { fields, ambiguous } = buildFields(rows);
+    return {
+      at,
+      rows: rows.length,
+      fields,
+      ...(truncatedRows ? { truncatedRows } : {}),
+      ...(ambiguous ? { ambiguousFields: ambiguous } : {}),
+    };
+  });
 }
 
 /** The only targets whose value stays out of the renderer: secrets go to `secrets`, a string's to the parser. */
@@ -272,7 +302,7 @@ function setsTls(uri: string): boolean {
  */
 export function combineRow(row: Row, mapping: Partial<Record<MapTarget, string>>): CandidateRow {
   // Widened so an unmapped target's `undefined` path simply finds nothing.
-  const values: ReadonlyMap<string | undefined, Scalar> = flattenRow(row);
+  const values: ReadonlyMap<string | undefined, Scalar> = flattenRow(row).values;
   const warnings: string[] = [];
   const read = <T>(target: MapTarget, accept: (v: Scalar) => T | undefined, what: string): T | undefined => {
     const path = mapping[target];

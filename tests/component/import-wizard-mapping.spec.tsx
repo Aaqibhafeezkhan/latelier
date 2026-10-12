@@ -139,6 +139,17 @@ describe('MappingStep', () => {
     expect(screen.getByText(/Only the first 500 rows are read/)).toBeTruthy();
   });
 
+  it('says how many paths of lists and of fields were left out as ambiguous, and nothing when none were', () => {
+    const { unmount } = render(
+      <MappingStep collections={[{ ...servers, ambiguousFields: 2 }]} ambiguousCollections={1} onBack={vi.fn()} onNext={vi.fn()} />,
+    );
+    expect(screen.getByText(/Some lists are left out: 1 path names more than one list/)).toBeTruthy();
+    expect(screen.getByText(/Some fields are left out: 2 paths name more than one value in a row/)).toBeTruthy();
+    unmount();
+    setup();
+    expect(screen.queryByText(/left out:/)).toBeNull();
+  });
+
   it('gives a target to only the first of two fields suggesting it', () => {
     setup([{ ...servers, fields: [
       { path: 'a.host', sample: 'x', masked: false, suggested: 'host' },

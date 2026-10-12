@@ -256,12 +256,20 @@ export interface MappingCollection {
   rows: number;
   fields: MappingField[];
   truncatedRows?: number;
+  /** Field paths left out because two leaves of a row share them (C14 §5.2). */
+  ambiguousFields?: number;
 }
 
 export type ImportOpenResult =
   | { cancelled: true }
   | { token: string; source: 'latelier' | 'compass'; review: Review }
-  | { token: string; source: 'unknown'; collections: MappingCollection[] };
+  | {
+      token: string;
+      source: 'unknown';
+      collections: MappingCollection[];
+      /** Paths left out because two lists share them (C14 §5.1). */
+      ambiguousCollections?: number;
+    };
 
 export interface ImportMapInput {
   token: string;

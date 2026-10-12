@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionInput, ImportOpenResult, Review, ReviewRow } from '@shared/types';
 import { ConnectionRepo } from '../../electron/db/repositories/ConnectionRepo';
-import { ConflictError, type AppError } from '../../electron/errors';
+import { ConflictError, ValidationError, type AppError } from '../../electron/errors';
 import { ConnectionService, connectionReader } from '../../electron/mongo/ConnectionService';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { SecretsVault } from '../../electron/secrets/SecretsVault';
@@ -466,6 +466,44 @@ describe('ImportWizardService', () => {
       expect(() => a.wizard.importMap({ token: compass.token, at: '', mapping: {} })).toThrow(
         'Only a file in an unrecognised format has fields to map.',
       );
+    });
+  });
+
+  describe('Unknown JSON: paths that name two things', () => {
+    // `db.servers` is both a literal dotted key and real nesting: picking one must never import the other.
+    const REVIEWED = '{"db.servers":[{"host":"first.example"}],"db":{"servers":[{"host":"second.example"}]}';
+
+    it('does not offer or import lists that share a path, and says how many paths were left out', async () => {
+      const a = install();
+      const opened = await open(a.wizard, writeFile('u.json', `${REVIEWED},"ok":[{"host":"ok.example"}]}`));
+      if (opened.source !== 'unknown') throw new Error('expected unknown');
+      expect(opened.collections.map((c) => c.at)).toEqual(['ok']);
+      expect(opened.ambiguousCollections).toBe(1);
+      expect(await codeOf(() => a.wizard.importMap({ token: opened.token, at: 'db.servers', mapping: { host: 'host' } }))).toBe(
+        'VALIDATION',
+      );
+      const mapped = a.wizard.importMap({ token: opened.token, at: 'ok', mapping: { host: 'host' } });
+      expect(okRow(mapped.review, 0)).toMatchObject({ host: 'ok.example' });
+    });
+
+    it('refuses a file whose only lists share a path', async () => {
+      const a = install();
+      openFrom = writeFile('u.json', `${REVIEWED}}`);
+      const err = await a.wizard.importOpen().then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(ValidationError);
+      expect((err as Error).message).not.toMatch(/example|db\.servers/);
+    });
+
+    it('reads neither value of a field two leaves share, and says how many fields were left out', async () => {
+      const a = install();
+      const opened = await open(a.wizard, writeFile('u.json', '[{"host":"h.example","a.b":"first","a":{"b":"second"}}]'));
+      if (opened.source !== 'unknown') throw new Error('expected unknown');
+      expect(opened.collections[0]).toMatchObject({ fields: [{ path: 'host' }], ambiguousFields: 1 });
+      const mapped = a.wizard.importMap({ token: opened.token, at: '', mapping: { host: 'host', name: 'a.b' } });
+      expect(okRow(mapped.review, 0).savedAs).toBe('h.example');
     });
   });
 
