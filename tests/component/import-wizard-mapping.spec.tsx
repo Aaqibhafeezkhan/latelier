@@ -148,6 +148,29 @@ describe('MappingStep', () => {
     expect(select('b.host').value).toBe('');
   });
 
+  it('keeps a __proto__ or constructor field as data: suggested, chosen and sent', async () => {
+    // Paths are file keys; a plain-object assignment would hit Object.prototype for these two.
+    const { onNext } = setup([{ at: '', rows: 1, fields: [
+      { path: '__proto__', sample: 'mongodb://h', masked: false, suggested: 'connectionString' },
+      { path: 'constructor', sample: 'Prod', masked: false },
+    ] }]);
+    expect(select('__proto__').value).toBe('connectionString');
+    expect(select('constructor').value).toBe('');
+    expect(next().disabled).toBe(false);
+    await userEvent.click(next());
+    expect(onNext).toHaveBeenLastCalledWith('', { connectionString: '__proto__' });
+
+    await pick('__proto__', '');
+    expect(next().disabled).toBe(true);
+    await pick('__proto__', 'host');
+    await pick('constructor', 'name');
+    expect(select('__proto__').value).toBe('host');
+    expect(select('constructor').value).toBe('name');
+    expect(next().disabled).toBe(false);
+    await userEvent.click(next());
+    expect(onNext).toHaveBeenLastCalledWith('', { host: '__proto__', name: 'constructor' });
+  });
+
   it('is operable from the keyboard', async () => {
     const user = userEvent.setup();
     const { onNext } = setup();

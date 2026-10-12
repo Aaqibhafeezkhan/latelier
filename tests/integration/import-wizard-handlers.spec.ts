@@ -302,6 +302,27 @@ describe('conn:import* handlers: no secret reaches the renderer', () => {
     expect(data(await commit(opened.token, [0])).created).toHaveLength(1);
   });
 
+  it('unknown JSON: a __proto__ or constructor key is a field like any other', async () => {
+    openFrom = path.join(dir, 'proto.json');
+    // Written as JSON text: JSON.parse makes `__proto__` an own key, as a real file would.
+    fs.writeFileSync(openFrom, '[{"__proto__":"mongodb://proto.example","constructor":"Proto"}]');
+    const opened = data(await call<ImportOpenResult>(IPC_CHANNELS.connImportOpen, {}));
+    if (!('collections' in opened)) throw new Error('expected an unknown file');
+    expect(opened.collections[0]!.fields).toEqual([
+      { path: '__proto__', sample: 'mongodb://proto.example', masked: false, suggested: 'connectionString' },
+      { path: 'constructor', sample: 'Proto', masked: false },
+    ]);
+    const mapped = data(
+      await call<{ review: Review }>(IPC_CHANNELS.connImportMap, {
+        token: opened.token,
+        at: '',
+        mapping: { connectionString: '__proto__', name: 'constructor' },
+      }),
+    );
+    expect(mapped.review.rows[0]).toMatchObject({ ok: true, savedAs: 'Proto', host: 'proto.example' });
+    expect(data(await commit(opened.token, [0])).created).toHaveLength(1);
+  });
+
   it('pasted URIs, an unparseable one included: review, a refused payload, commit', async () => {
     const uris = [
       'mongodb://u:uri-pw-marker@h1/?proxyHost=p&proxyPassword=proxy-pw-marker',

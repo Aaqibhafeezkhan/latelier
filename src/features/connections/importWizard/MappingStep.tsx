@@ -11,7 +11,8 @@ export interface MappingStepProps {
   onNext(at: string, mapping: Partial<Record<MapTarget, string>>): void;
 }
 
-type Assignment = Record<string, MapTarget>; // path -> target
+/** Path -> target. A `Map`: a path is a file key, and `__proto__` or `constructor` on a plain object would hit Object.prototype. */
+type Assignment = ReadonlyMap<string, MapTarget>;
 
 /** What main sends as the sample of a field it hides whole; anything else masked is a stripped string. */
 const HIDDEN_SAMPLE = '••••';
@@ -19,11 +20,11 @@ const HIDDEN_SAMPLE = '••••';
 /** Each target goes to at most one path; the first suggestion wins a tie. */
 function suggestions(c: MappingCollection): Assignment {
   const taken = new Set<MapTarget>();
-  const out: Assignment = {};
+  const out = new Map<string, MapTarget>();
   for (const f of c.fields) {
     if (f.suggested && !taken.has(f.suggested)) {
       taken.add(f.suggested);
-      out[f.path] = f.suggested;
+      out.set(f.path, f.suggested);
     }
   }
   return out;
@@ -49,18 +50,17 @@ export function MappingStep({ collections, busy = false, onBack, onNext }: Mappi
 
   const choose = (path: string, target: MapTarget | '') =>
     setAssign((prev) => {
-      const next: Assignment = {};
-      for (const [p, t] of Object.entries(prev)) if (p !== path && t !== target) next[p] = t;
-      if (target) next[path] = target;
+      const next = new Map([...prev].filter(([p, t]) => p !== path && t !== target));
+      if (target) next.set(path, target);
       return next;
     });
 
-  const mapped = new Set(Object.values(assign));
+  const mapped = new Set(assign.values());
   const canNext = mapped.has('connectionString') || mapped.has('host');
 
   const next = () => {
     const mapping: Partial<Record<MapTarget, string>> = {};
-    for (const [path, target] of Object.entries(assign)) mapping[target] = path;
+    for (const [path, target] of assign) mapping[target] = path;
     onNext(collection.at, mapping);
   };
 
@@ -112,7 +112,7 @@ export function MappingStep({ collections, busy = false, onBack, onNext }: Mappi
                   <NativeSelect
                     size="xs"
                     aria-label={`Use ${f.path} as`}
-                    value={assign[f.path] ?? ''}
+                    value={assign.get(f.path) ?? ''}
                     onChange={(e) => choose(f.path, e.currentTarget.value as MapTarget | '')}
                     data={[{ value: '', label: '—' }, ...MAP_TARGETS.map((t) => ({ value: t.target, label: t.label }))]}
                   />
