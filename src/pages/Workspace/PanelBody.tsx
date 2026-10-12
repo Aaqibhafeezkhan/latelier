@@ -309,7 +309,7 @@ export function PanelBody({
                 <Group gap="xs" justify="center">
                   <ConnectionSwitcher {...switcherProps} variant="cta" />
                   {switcherProps.connections.length === 0 && (
-                    <Button variant="default" size="xs" onClick={openImport}>
+                    <Button variant="default" size="xs" onClick={() => openImport()}>
                       Import connections
                     </Button>
                   )}

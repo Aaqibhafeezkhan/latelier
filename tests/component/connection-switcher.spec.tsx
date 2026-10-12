@@ -5,6 +5,7 @@ import { itReturnsFocusToPopoverTrigger } from '../helpers/popoverFocusReturn';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
+import { ConnectionTransferProvider } from '../../src/features/connections/ConnectionTransferProvider';
 import { collectionTabFixture, installAtelierMock, multiConnectionMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import type { Connection, ConnectionRuntime, ConnectionSummary, WorkspaceTab, CollectionTab } from '@shared/types';
 
@@ -219,9 +220,12 @@ function mount(
   });
   return render(
     <MemoryRouter initialEntries={['/workspace']}>
-      <Workspace />
-      <LocationProbe />
-      {opts.extra}
+      {/* The App-level owner of the Import Wizard, which the table's Paste URIs opens. */}
+      <ConnectionTransferProvider>
+        <Workspace />
+        <LocationProbe />
+        {opts.extra}
+      </ConnectionTransferProvider>
     </MemoryRouter>,
   );
 }

@@ -1,13 +1,13 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { act, render, screen, waitFor, within } from '../helpers/render';
+import { act, fireEvent, render, screen, waitFor, within } from '../helpers/render';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import Workspace from '../../src/pages/Workspace';
 import { ConnectionTransferProvider } from '../../src/features/connections/ConnectionTransferProvider';
 import { ImportWizard } from '../../src/features/connections/importWizard/ImportWizard';
 import type { MenuCommand } from '@shared/ipc';
-import type { ConnectionSummary } from '@shared/types';
+import type { ConnectionSummary, ImportCommitInput, ImportCommitResult, ImportUrisResult, Review } from '@shared/types';
 
 const row = (id: string, name: string): ConnectionSummary => ({
   id, name, color: '#1A6835', host: `${name.toLowerCase()}.example.com`, port: 27017,
@@ -24,10 +24,11 @@ async function expectOpenAt(source: 'file' | 'paste') {
   await waitFor(() => expect(document.activeElement).toBe(source === 'file' ? fileButton() : pasteBox()));
 }
 
-function mountWorkspace(connections: ConnectionSummary[]) {
+type MockOverrides = NonNullable<Parameters<typeof installAtelierMock>[0]>;
+function mountWorkspace(connections: ConnectionSummary[], conn: Omit<NonNullable<MockOverrides['conn']>, 'list'> = {}) {
   let fire: (c: MenuCommand) => void = () => {};
   installAtelierMock({
-    conn: { list: async () => connections },
+    conn: { list: async () => connections, ...conn },
     tabs: { list: async () => [] },
     app: {
       onMenuCommand: (cb) => {
@@ -98,6 +99,51 @@ describe('Import Wizard entry points', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Import Connections' })).toBeNull());
     expect(screen.getByRole('dialog', { name: 'Connections' })).toBeTruthy();
+  });
+});
+
+describe('Import Wizard: one instance', () => {
+  /** One pasted string with no credentials, so the review asks for them inline. */
+  const NEEDS_CREDS: Review = {
+    hasEncryptedSecrets: false,
+    rows: [
+      {
+        index: 0, ok: true, savedAs: 'db1.example.com', host: 'db1.example.com', port: 27017, srv: false,
+        hasPassword: false, passwordSealed: false, needsCredentials: true,
+        directConnection: true, defaultTicked: true, repick: [], warnings: [], tls: false, ssh: false,
+      },
+    ],
+  };
+
+  it('File menu commands leave a pasted review, its token and its typed credentials alone', async () => {
+    const importOpen = vi.fn(async () => ({ cancelled: true as const }));
+    const importUris = vi.fn(async (): Promise<ImportUrisResult> => ({ token: 'tok-u', review: NEEDS_CREDS }));
+    const importCommit = vi.fn<(i: ImportCommitInput) => Promise<ImportCommitResult>>(async () => ({
+      created: [{ index: 0, id: 'n1', name: 'db1.example.com' }],
+      renamed: [], skipped: [], repick: [], secretsNotStored: [], warnings: [],
+    }));
+    const { fireMenu } = mountWorkspace([row('c1', 'Prod')], { importOpen, importUris, importCommit });
+    const table = await openTable();
+    await userEvent.click(within(table).getByRole('button', { name: 'Paste URIs' }));
+    await expectOpenAt('paste');
+    fireEvent.change(pasteBox(), { target: { value: 'mongodb://db1.example.com' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('table', { name: 'Connections to import' });
+    await userEvent.type(screen.getByRole('textbox', { name: 'Username for db1.example.com' }), 'alice');
+
+    // The native menu stays usable while the wizard is open.
+    fireMenu('connections.import');
+    expect(screen.getAllByRole('dialog', { name: 'Import Connections' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Choose file…' })).toBeNull();
+    fireMenu('connections.export');
+    expect(screen.queryByRole('dialog', { name: 'Export Connections' })).toBeNull();
+    expect(screen.getAllByRole('dialog', { name: 'Import Connections' })).toHaveLength(1);
+    expect((screen.getByRole('textbox', { name: 'Username for db1.example.com' }) as HTMLInputElement).value).toBe('alice');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Import 1 Connection' }));
+    await waitFor(() => expect(importCommit).toHaveBeenCalledTimes(1));
+    expect(importCommit.mock.calls[0]![0]).toMatchObject({ token: 'tok-u' });
+    expect(importOpen).not.toHaveBeenCalled();
   });
 });
 
