@@ -96,14 +96,19 @@ function secretPath(path: string): boolean {
   return SECRET_PARTS.some((p) => last.includes(p));
 }
 
+// Generating the nested files, not building from them, takes the time here:
+// 500 runs is about 1.5s locally (0.2s of it in buildCollections) and about 6s
+// on a CI runner, past the 5s default.
+const PROPERTY_TIMEOUT = { timeout: 30_000 };
+
 describe('buildCollections — masking properties', () => {
-  it('never lets a planted secret into its output', () => {
+  it('never lets a planted secret into its output', PROPERTY_TIMEOUT, () => {
     fc.assert(fc.property(file, (value) => {
       expect(JSON.stringify(buildCollections(value))).not.toContain(PREFIX);
     }), { numRuns: 500 });
   });
 
-  it('shows •••• for every path whose last key looks secret', () => {
+  it('shows •••• for every path whose last key looks secret', PROPERTY_TIMEOUT, () => {
     fc.assert(fc.property(file, (value) => {
       for (const c of buildCollections(value)) {
         for (const f of c.fields) {
@@ -142,7 +147,7 @@ const rowWithMapping = combineRowArb.chain((r) => {
 });
 
 describe('combineRow — secret properties', () => {
-  it('keeps every planted secret out of the row, whatever the mapping, except in `secrets`', () => {
+  it('keeps every planted secret out of the row, whatever the mapping, except in `secrets`', PROPERTY_TIMEOUT, () => {
     fc.assert(fc.property(rowWithMapping, ([r, mapping]) => {
       const shown: Partial<ReturnType<typeof combineRow>> = combineRow(r, mapping);
       delete shown.secrets;
