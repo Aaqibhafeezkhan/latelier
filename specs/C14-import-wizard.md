@@ -49,7 +49,7 @@ Source ──► detect ──┬─ L'Atelier export ─┐
 4. **Final approval** (§6). This is the same screen for every source.
 5. **Commit and result** (§7).
 
-Entry points are C13 §6's: the command palette and File menu ("Import Connections…"), the Connections table footer, and the empty first-launch screen. All of them open the wizard on the Source screen. The footer keeps its three buttons:
+Entry points are C13 §6's: the command palette and File menu ("Import Connections…"), the Connections table footer, and the empty first-launch screen. All of them open the wizard on the Source screen. There is one wizard, mounted at app level: asking to open it, or to open Export, while it is open does nothing, so a menu command never replaces a review in progress. The footer keeps its three buttons:
 - **+ New** opens the form, as before.
 - **Paste URIs** opens the wizard with the paste box focused.
 - **Import** opens the wizard with *Choose file…* focused.
@@ -85,7 +85,7 @@ A connection string from any source, whether pasted, Compass's `connectionString
   - A non-ASCII host such as `münchen.example` is accepted, in any case, only when DNS would resolve the name shown: it must convert to punycode (`domainToASCII`) and back (`domainToUnicode`) to the same name, bar case. This refuses what UTS46 rewrites or drops, such as an ideographic full stop, zero-width characters, a soft hyphen, fullwidth `／＠？＃：，` and a right-to-left override. The driver gets such a host as its punycode, for standard and SRV connections alike; a stored host whose punycode would name a different host (cut at an encoded `/`, `?` or `#`, or a folded dot) goes to the driver as written instead.
   - A string the connection-string library can't parse at all gives the fixed sentence *"This isn't a valid connection string."* The library's own message quotes the userinfo, password included, so it is never passed on.
 
-The debug log masks a connection string's userinfo and its secret query parameters (`password`, `proxyPassword`, `tlsCertificateKeyFilePassword`, `sslPEMKeyPassword`, and an `authMechanismProperties` value holding `AWS_SESSION_TOKEN`). It compares parameter names percent-decoded, as the driver does, and keeps a name with a malformed escape as written. It does not recognise a parameter after the legacy `;` separator, or a connection string percent-encoded inside a parameter.
+The debug log masks a connection string's userinfo and its secret query parameters (`password`, `proxyPassword`, `tlsCertificateKeyFilePassword`, `sslPEMKeyPassword`, and an `authMechanismProperties` value holding `AWS_SESSION_TOKEN`). It reads parameter names, and the `authMechanismProperties` value it checks for `AWS_SESSION_TOKEN`, percent-decoded as the driver does: valid escapes are decoded and a malformed one is kept as written. It does not recognise a parameter after the legacy `;` separator, or a connection string percent-encoded inside a parameter.
 
 ## 4. Compass export
 
@@ -115,7 +115,7 @@ An export made with a passphrase removes each entry's secrets: the password is s
 Decryption runs in main, at commit, for the ticked rows only:
 
 1. The bytes are laid out as: 2-byte big-endian version (must be `1`), 16-byte salt, 16-byte IV, 16-byte auth tag, then the ciphertext.
-2. The key is PBKDF2-SHA512 over the passphrase and salt, with 100,000 iterations and 32 bytes of output. It is derived with the asynchronous `pbkdf2`, because 100,000 rounds for each sealed entry would otherwise block the main process.
+2. The key is PBKDF2-SHA512 over the passphrase and salt, with 100,000 iterations and 32 bytes of output. It is derived with the asynchronous `pbkdf2`, because 100,000 rounds for each sealed entry would otherwise block the main process. Each entry has its own salt, so each costs one derivation. The first ticked sealed entry is opened alone, so a wrong passphrase fails after one derivation; the rest run two at a time, leaving threads for file and DNS work, and every started job settles before the commit returns or fails.
 3. The cipher is AES-256-GCM, with no additional authenticated data.
 4. The plaintext is JSON: `{ "secrets": { "password", "sshTunnelPassword" or "sshTunnelPassphrase", … } }`.
 5. `password` becomes the row's password. `sshTunnelPassword` and `sshTunnelPassphrase` become its SSH secrets. An empty or null secret is skipped silently, with no warning. Any other secret, or a kept name that doesn't hold text, is dropped. The result names it in a warning, never with its value: *"The "<name>" secret was not imported."*
