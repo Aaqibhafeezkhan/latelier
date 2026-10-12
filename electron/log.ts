@@ -50,21 +50,18 @@ const URI_QUERY_PARAM = /([?&])([^=&?]*)=([^&]*)/g;
 
 // An authMechanismProperties value holding the AWS session token is masked
 // whole: splitting a malformed list to find the token's end cannot be trusted.
-// The driver and URLSearchParams decode parameter names, so `%70roxyPassword`
-// is `proxyPassword`; the name is compared decoded. A malformed escape stays raw.
-function decodedName(name: string): string {
-  try {
-    return decodeURIComponent(name);
-  } catch {
-    // decodeURIComponent throws only URIError, and only for a malformed escape.
-    return name;
-  }
+// The driver reads parameters through URLSearchParams, which decodes valid
+// escapes and keeps malformed ones as written, so `%70roxyPassword` is
+// `proxyPassword` and `AWS%5FSESSION%5FTOKEN` is the token's marker even next
+// to a broken escape. Name and value are compared the way the driver sees them.
+function asDriverReads(raw: string): string {
+  return new URLSearchParams(`v=${raw}`).get('v')!;
 }
 
 function scrubQueryParam(match: string, sep: string, name: string, value: string): string {
-  const key = decodedName(name).toLowerCase();
+  const key = asDriverReads(name).toLowerCase();
   const secret = SECRET_URI_PARAMS.has(key)
-    || (key === 'authmechanismproperties' && /aws_session_token/i.test(value));
+    || (key === 'authmechanismproperties' && /aws_session_token/i.test(asDriverReads(value)));
   return secret ? `${sep}${name}=***` : match;
 }
 

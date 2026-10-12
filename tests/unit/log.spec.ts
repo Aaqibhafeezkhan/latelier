@@ -399,6 +399,9 @@ describe('redactSecrets: connection-string query secrets', () => {
     ['mongodb://h/?%61uthMechanismProperties=AWS_SESSION_TOKEN:s3cret', 'mongodb://h/?%61uthMechanismProperties=***'],
     ['failed on mongodb://h/?proxyPassword=s3cret retrying', 'failed on mongodb://h/?proxyPassword=*** retrying'],
     ['mongodb://h/?foo?proxyPassword=s3cret', 'mongodb://h/?foo?proxyPassword=***'],
+    ['mongodb://h/?authMechanismProperties=AWS%5FSESSION%5FTOKEN:s3cret', 'mongodb://h/?authMechanismProperties=***'],
+    ['mongodb://h/?authMechanismProperties=%E0%A4%A:AWS%5FSESSION%5FTOKEN:s3cret', 'mongodb://h/?authMechanismProperties=***'],
+    ['mongodb://h/?%E0%A4%A=1&proxy%50assword=s3cret', 'mongodb://h/?%E0%A4%A=1&proxy%50assword=***'],
   ])('masks %s', (input, expected) => {
     expect(redactSecrets(input)).toBe(expected);
   });
