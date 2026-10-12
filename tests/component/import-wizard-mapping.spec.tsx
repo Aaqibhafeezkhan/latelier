@@ -161,12 +161,16 @@ describe('MappingStep', () => {
 
   it('keeps a __proto__ or constructor field as data: suggested, chosen and sent', async () => {
     // Paths are file keys; a plain-object assignment would hit Object.prototype for these two.
+    // `constructor` would read Object as its target, which React refuses as a select value.
+    const consoleError = vi.spyOn(console, 'error');
     const { onNext } = setup([{ at: '', rows: 1, fields: [
       { path: '__proto__', sample: 'mongodb://h', masked: false, suggested: 'connectionString' },
       { path: 'constructor', sample: 'Prod', masked: false },
     ] }]);
     expect(select('__proto__').value).toBe('connectionString');
     expect(select('constructor').value).toBe('');
+    expect(consoleError.mock.calls.flat().join(' ')).not.toContain('Invalid value for prop');
+    consoleError.mockRestore();
     expect(next().disabled).toBe(false);
     await userEvent.click(next());
     expect(onNext).toHaveBeenLastCalledWith('', { connectionString: '__proto__' });
