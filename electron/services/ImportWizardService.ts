@@ -294,9 +294,40 @@ export class ImportWizardService {
     });
     if (blobs.length === 0) return new Map();
     if (!passphrase) throw new ValidationError('The export passphrase is required to import passwords.');
-    const opened = await Promise.all(
-      blobs.map(async ({ i, blob }) => [i, await decryptCompassSecrets(blob, passphrase)] as const),
-    );
-    return new Map(opened);
+    return openCompassBlobs(blobs, passphrase);
   }
+}
+
+/** Key derivations in flight at once; libuv's pool has 4 threads and fs/DNS share it. */
+const COMPASS_CONCURRENCY = 2;
+
+/**
+ * Every Compass entry has its own salt, so each blob costs one 100,000-round
+ * derivation. The first runs alone: a wrong passphrase then fails after one
+ * derivation with nothing else launched. The rest run a couple at a time, and
+ * every launched job settles before this returns or throws, so no work
+ * outlives the call and a retry never overlaps the previous attempt.
+ */
+async function openCompassBlobs(
+  blobs: readonly { i: number; blob: string }[],
+  passphrase: string,
+): Promise<Map<number, Opened>> {
+  const [first, ...rest] = blobs as [{ i: number; blob: string }, ...{ i: number; blob: string }[]];
+  const opened = new Map<number, Opened>([[first.i, await decryptCompassSecrets(first.blob, passphrase)]]);
+  let next = 0;
+  let failure: { err: unknown } | undefined;
+  // Workers never reject, so Promise.all below only returns once all are idle.
+  const worker = async (): Promise<void> => {
+    while (!failure && next < rest.length) {
+      const { i, blob } = rest[next++]!;
+      try {
+        opened.set(i, await decryptCompassSecrets(blob, passphrase));
+      } catch (err) {
+        failure ??= { err };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: COMPASS_CONCURRENCY }, worker));
+  if (failure) throw failure.err;
+  return opened;
 }
