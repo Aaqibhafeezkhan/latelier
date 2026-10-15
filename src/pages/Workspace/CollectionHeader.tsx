@@ -1,5 +1,5 @@
 import React from 'react';
-import { Group, Tooltip } from '@mantine/core';
+import { Button, Group, Tooltip } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { api } from '../../api/atelier';
 
@@ -7,6 +7,8 @@ interface CollectionHeaderProps {
   connectionId: string;
   dbName: string;
   collection: string;
+  onOpenReferences: () => void;
+  referenceRuleCount: number;
   /**
    * `useDocumentDialogs`'s write-completion counter — bumps once per
    * finished insert/edit/delete/delete-many. Reusing that existing signal
@@ -20,15 +22,16 @@ interface CollectionHeaderProps {
 /**
  * Top breadcrumb header. The Tree|JSON|Table view switch moved down to
  * `<ResultBar/>` alongside the pagination so the top row stays a clean
- * breadcrumb-plus-stats line. Insert and References used to live here too;
- * Insert moved to `<ResultBar/>` (primary create action, next to the
- * Documents menu) and References moved to the navigator's collection
- * context menu and the command palette — this is breadcrumb + stats only.
+ * breadcrumb-plus-stats line, plus the References button on the right.
+ * Insert lives in `<ResultBar/>`; References is also in the navigator's
+ * collection context menu and the command palette.
  */
 export function CollectionHeader({
   connectionId,
   dbName,
   collection,
+  onOpenReferences,
+  referenceRuleCount,
   refreshSignal,
 }: CollectionHeaderProps) {
   const T = themeVars;
@@ -117,6 +120,20 @@ export function CollectionHeader({
           </span>
         )}
       </Group>
+
+      <span style={{ flex: 1 }} />
+
+      {/* References — secondary action; collapses to icon + count */}
+      <Tooltip label={`Manage reference rules for this collection (${referenceRuleCount})`} withArrow>
+        <Button
+          data-hint-anchor="refs.configure"
+          variant="default"
+          size="compact-xs"
+          onClick={onOpenReferences}
+        >
+          References ({referenceRuleCount})
+        </Button>
+      </Tooltip>
     </Group>
   );
 }

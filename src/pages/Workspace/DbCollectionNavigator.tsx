@@ -1959,11 +1959,6 @@ function CollRow({
       aria-level={3}
       aria-selected={isActive}
       data-testid={`nav-coll-${row.dbName}-${coll.name}`}
-      // `refs.configure`'s anchor moved here from the header's now-removed
-      // References button: the row for the Focused Tab's own collection is
-      // the closest persistently-mounted stand-in for "where References now
-      // lives" (the context menu item itself only exists while open).
-      {...(isActive ? { 'data-hint-anchor': 'refs.configure' } : {})}
       // #58 — see ConnectionRow's comment: no `tabIndex`, real focus stays
       // on the container, this row is only named via `aria-activedescendant`.
       onClick={onClick}
