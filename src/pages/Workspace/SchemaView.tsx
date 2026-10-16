@@ -154,20 +154,24 @@ export function SchemaView({
       {/* Field list */}
       <div style={{ overflow: 'visible' }}>
         {entries.length === 0 ? (
-          <div
-            style={{
-              padding: '40px 14px',
-              textAlign: 'center',
-              color: T.textMuted,
-              fontSize: 12,
-            }}
-          >
-            {sampling
-              ? 'Sampling…'
-              : state.ranAt
-                ? 'No fields found in the sample.'
-                : 'Click Refresh to sample documents.'}
-          </div>
+          // A failed sample already says so in the banner above; "No fields
+          // found" would claim the collection is empty when we never read it.
+          (sampling || !state.errorMessage) && (
+            <div
+              style={{
+                padding: '40px 14px',
+                textAlign: 'center',
+                color: T.textMuted,
+                fontSize: 12,
+              }}
+            >
+              {sampling
+                ? 'Sampling…'
+                : state.ranAt
+                  ? 'No fields found in the sample.'
+                  : 'Click Refresh to sample documents.'}
+            </div>
+          )
         ) : (
           <table
             style={{
