@@ -17,6 +17,24 @@ import { ejsonParse } from '../../electron/mongo/ejson';
 import { NotFoundError } from '../../electron/errors';
 import { getSharedServer, stopSharedServer, uriToHostPort } from '../helpers/mongo';
 
+/** What the server sends when a role lacks `collStats`: code 13, `Unauthorized`. */
+function unauthorized(ns: string): Error {
+  return Object.assign(new Error(`not authorized on ${ns} to execute command $collStats`), {
+    code: 13,
+    codeName: 'Unauthorized',
+  });
+}
+
+/** Stands in for the `$collStats` aggregate: every way of reading it rejects with `err`. */
+function mockCollStatsFailure(err: Error) {
+  const reject = async () => {
+    throw err;
+  };
+  return vi
+    .spyOn(Collection.prototype, 'aggregate')
+    .mockImplementation((() => ({ next: reject, toArray: reject })) as never);
+}
+
 async function seedData(uri: string) {
   const c = new MongoClient(uri);
   try {
@@ -136,13 +154,7 @@ describe('MetaService', () => {
   // driver and never reached MetaService at all.
   it('listCollections falls back to cheap estimates when $collStats is unauthorized', async () => {
     await setup();
-    const aggregate = vi
-      .spyOn(Collection.prototype, 'aggregate')
-      .mockImplementation((() => ({
-        next: async () => {
-          throw new Error('not authorized on shopdb to execute command $collStats');
-        },
-      })) as never);
+    const aggregate = mockCollStatsFailure(unauthorized('shopdb'));
 
     try {
       const cols = await svc.listCollections({ connectionId: connId, dbName: 'shopdb' });
@@ -270,6 +282,98 @@ describe('MetaService', () => {
       ).rejects.toBeInstanceOf(NotFoundError);
     });
 
+    it('counts the documents of a populated time-series collection, which $collStats does not', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('readings').catch(() => undefined);
+        const coll = await db.createCollection('readings', { timeseries: { timeField: 't' } });
+        await coll.insertMany([{ t: new Date(), v: 1 }, { t: new Date(), v: 2 }, { t: new Date(), v: 3 }]);
+      });
+
+      const d = await svc.collectionDetails({
+        connectionId: connId,
+        dbName: DETAILS_DB,
+        collection: 'readings',
+      });
+      expect(d.type).toBe('timeseries');
+      expect(d.stats?.documentCount).toBe(3);
+
+      const row = (await svc.listCollections({ connectionId: connId, dbName: DETAILS_DB })).find(
+        (c) => c.name === 'readings',
+      );
+      expect(row?.documentCount).toBe(3);
+    });
+
+    it('throws the classified error when $collStats fails for a reason other than authorization', async () => {
+      await setup();
+      const aggregate = mockCollStatsFailure(
+        Object.assign(new Error('operation exceeded time limit'), { code: 50, codeName: 'MaxTimeMSExpired' }),
+      );
+      try {
+        await expect(
+          svc.collectionDetails({ connectionId: connId, dbName: 'shopdb', collection: 'products' }),
+        ).rejects.toMatchObject({ code: 'TIMEOUT' });
+      } finally {
+        aggregate.mockRestore();
+      }
+    });
+
+    it('throws, rather than report zeros, when $collStats is refused and both estimates fail too', async () => {
+      await setup();
+      const aggregate = mockCollStatsFailure(unauthorized('shopdb'));
+      const count = vi
+        .spyOn(Collection.prototype, 'estimatedDocumentCount')
+        .mockRejectedValue(Object.assign(new Error('socket closed'), { name: 'MongoNetworkError' }));
+      const indexes = vi
+        .spyOn(Collection.prototype, 'indexes')
+        .mockRejectedValue(Object.assign(new Error('socket closed'), { name: 'MongoNetworkError' }));
+      try {
+        await expect(
+          svc.collectionDetails({ connectionId: connId, dbName: 'shopdb', collection: 'products' }),
+        ).rejects.toMatchObject({ code: 'NETWORK' });
+      } finally {
+        aggregate.mockRestore();
+        count.mockRestore();
+        indexes.mockRestore();
+      }
+    });
+
+    it('leaves a figure undefined, not 0, when only its estimate fails', async () => {
+      await setup();
+      const aggregate = mockCollStatsFailure(unauthorized('shopdb'));
+      const indexes = vi.spyOn(Collection.prototype, 'indexes').mockRejectedValue(new Error('boom'));
+      try {
+        const d = await svc.collectionDetails({
+          connectionId: connId,
+          dbName: 'shopdb',
+          collection: 'products',
+        });
+        expect(d.stats?.documentCount).toBe(3);
+        expect(d.stats?.indexCount).toBeUndefined();
+        expect(d.stats?.sizeBytes).toBeUndefined();
+      } finally {
+        aggregate.mockRestore();
+        indexes.mockRestore();
+      }
+    });
+
+    it('logs the authorization failure it falls back from', async () => {
+      await setup();
+      const warn = vi.fn();
+      const logged = new MetaService(pool, { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() });
+      const aggregate = mockCollStatsFailure(unauthorized('shopdb'));
+      try {
+        await logged.collectionDetails({ connectionId: connId, dbName: 'shopdb', collection: 'products' });
+        expect(warn).toHaveBeenCalledWith(
+          'meta',
+          expect.stringContaining('$collStats'),
+          expect.objectContaining({ collection: 'products' }),
+        );
+      } finally {
+        aggregate.mockRestore();
+      }
+    });
+
     it('falls back to the estimate, without the optional sizes, when $collStats is unauthorized', async () => {
       await setup();
       await withDetailsDb(async (db) => {
@@ -277,13 +381,7 @@ describe('MetaService', () => {
         const coll = await db.createCollection('plain');
         await coll.insertMany([{ a: 1 }, { a: 2 }, { a: 3 }]);
       });
-      const aggregate = vi
-        .spyOn(Collection.prototype, 'aggregate')
-        .mockImplementation((() => ({
-          next: async () => {
-            throw new Error('not authorized on detailsdb to execute command $collStats');
-          },
-        })) as never);
+      const aggregate = mockCollStatsFailure(unauthorized('detailsdb'));
 
       try {
         const d = await svc.collectionDetails({
@@ -301,6 +399,30 @@ describe('MetaService', () => {
         aggregate.mockRestore();
       }
     });
+  });
+
+  it('listCollections leaves a collection\'s figures out, and still lists it, when its stats read fails', async () => {
+    await setup();
+    const aggregate = mockCollStatsFailure(
+      Object.assign(new Error('operation exceeded time limit'), { code: 50, codeName: 'MaxTimeMSExpired' }),
+    );
+    const warn = vi.fn();
+    const logged = new MetaService(pool, { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() });
+    try {
+      const cols = await logged.listCollections({ connectionId: connId, dbName: 'shopdb' });
+      const products = cols.find((c) => c.name === 'products');
+      expect(products).toBeDefined();
+      expect(warn).toHaveBeenCalledWith(
+        'meta',
+        'collection stats read failed',
+        expect.objectContaining({ collection: 'products' }),
+      );
+      expect(products!.documentCount).toBeUndefined();
+      expect(products!.sizeBytes).toBeUndefined();
+      expect(products!.indexCount).toBeUndefined();
+    } finally {
+      aggregate.mockRestore();
+    }
   });
 
   it('sampleSchema returns merged recent + random documents', async () => {

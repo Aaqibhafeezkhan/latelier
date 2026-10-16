@@ -496,10 +496,10 @@ function CollectionsTab({ conn, runtime }: {
                         <span style={{ fontSize: 12, fontWeight: 500, color: T.text }}>{c.name}</span>
                       </div>
                       <div style={{ fontSize: 11, color: T.textMuted, fontVariantNumeric: 'tabular-nums' }}>
-                        {c.documentCount.toLocaleString()}
+                        {c.documentCount?.toLocaleString() ?? '—'}
                       </div>
-                      <div style={{ fontSize: 11, color: T.textMuted }}>{humanBytes(c.sizeBytes)}</div>
-                      <div style={{ fontSize: 11, color: T.textMuted }}>{c.indexCount}</div>
+                      <div style={{ fontSize: 11, color: T.textMuted }}>{c.sizeBytes === undefined ? '—' : humanBytes(c.sizeBytes)}</div>
+                      <div style={{ fontSize: 11, color: T.textMuted }}>{c.indexCount ?? '—'}</div>
                       <div style={{ fontSize: 11, color: T.textMuted }}>
                         {relativeTime(c.lastModified, '—')}
                       </div>

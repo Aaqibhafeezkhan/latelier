@@ -155,9 +155,14 @@ export interface DbInfo {
 export interface CollectionInfo {
   name: string;
   type: 'collection' | 'view' | 'timeseries';
-  documentCount: number;
-  sizeBytes: number;
-  indexCount: number;
+  /**
+   * The three figures below are absent when the server did not report them
+   * (a time-series `$collStats` has no count) or the read failed: absent is
+   * not zero, and the UI shows a dash for it.
+   */
+  documentCount?: number;
+  sizeBytes?: number;
+  indexCount?: number;
   lastModified?: string;
   capped: boolean;
 }
@@ -167,11 +172,11 @@ export interface CollectionDetails {
   name: string;
   type: 'collection' | 'view' | 'timeseries';
   capped: boolean;
-  /** Absent for a view. The optional sizes are absent on the estimate fallback. */
+  /** Absent for a view. A figure the server did not report is absent, never 0. */
   stats?: {
-    documentCount: number;
-    sizeBytes: number;
-    indexCount: number;
+    documentCount?: number;
+    sizeBytes?: number;
+    indexCount?: number;
     storageSizeBytes?: number;
     avgObjSizeBytes?: number;
     totalIndexSizeBytes?: number;

@@ -701,8 +701,10 @@ mapping is GitHub Issues, which cite this spec's tiers in their bodies.
 A `Statistics` region at the top of the Structure pane, above Indexes. For a
 collection or time-series collection it shows documents, data size, storage
 size, average document size, indexes (count and total index size) and whether
-the collection is capped. A figure the server did not report renders `—`, not
-`0`. For a view it shows `View on <source>` and no figures. It fetches on entry
+the collection is capped. A figure the server did not report, or that could not
+be read, renders `—`, not `0`. While the first reply is pending the section says
+`Loading…`, and a switch to another collection drops the previous collection's
+figures rather than showing them under the new name. For a view it shows `View on <source>` and no figures. It fetches on entry
 and on its own Refresh button, and a failed fetch is an inline alert in the
 section: the indexes and the schema still render.
 
@@ -716,12 +718,19 @@ A read channel taking `{ connectionId, dbName, collection }` and returning
 `CollectionDetails` (`shared/ipc.ts`): `name`, `type`, `capped`, `stats?` and
 `options`.
 
-- `stats` is `documentCount`, `sizeBytes`, `indexCount` and, only when
-  `$collStats` answered, `storageSizeBytes`, `avgObjSizeBytes` and
-  `totalIndexSizeBytes`. When `$collStats` is refused (a restricted role) the
-  count comes from `estimatedDocumentCount` and the index count from
-  `indexes()`, and the three optional sizes are absent. `stats` is absent for a
-  view.
+- `stats` is `documentCount`, `sizeBytes`, `indexCount`, `storageSizeBytes`,
+  `avgObjSizeBytes` and `totalIndexSizeBytes`, each present only when the server
+  reported it. A sharded cluster answers `$collStats` with one document per
+  shard: counts and sizes are summed, the index count (the same on every shard)
+  is the largest, and the average is recomputed from the totals. A time-series
+  collection reports no count, so it is read with `estimatedDocumentCount`.
+  `stats` is absent for a view.
+- `$collStats` refused for lack of privilege, or by a tier that does not offer it,
+  falls back to `estimatedDocumentCount` for the count and `indexes()` for the
+  index count; the sizes are absent, and the refusal is logged. Any other
+  failure of `$collStats` (a timeout, a dropped connection) is an error of the
+  call. If the refusal fallback cannot read either estimate, the call is an
+  error too: unreadable figures are never reported as `0`.
 - `options` carries what `listCollections` reports: `viewOn` as a plain string,
   `pipeline` and `validator` as canonical EJSON strings, and the validation
   level and action. A later tier that edits a view or a validator reads them
@@ -730,7 +739,9 @@ A read channel taking `{ connectionId, dbName, collection }` and returning
   is `VALIDATION`.
 
 `MetaService.listCollections` and `collectionDetails` share one storage-stats
-read, so the `$collStats` call and its fallback exist once.
+read, so the `$collStats` call and its fallback exist once. A collection whose
+read fails is still listed, without figures, so one bad collection does not
+blank the navigator.
 
 ### 13.3 Acceptance criteria
 
@@ -738,7 +749,10 @@ read, so the `$collStats` call and its fallback exist once.
 - Entering Structure calls `meta:collectionDetails` once for the tab's
   collection; Refresh calls it again.
 - A collection shows its document count and its sizes in human units; an absent
-  optional size shows `—`.
+  figure, including the count of a time-series collection whose estimate failed,
+  shows `—`.
+- The section says `Loading…` until its first reply, and switching collection
+  clears the previous figures.
 - A view shows `View on <source>` and no document count.
 - A rejected fetch shows a `role="alert"` inside the section and does not stop
   the Indexes or Schema sections rendering.
@@ -754,7 +768,11 @@ read, so the `$collStats` call and its fallback exist once.
   collection with a validator, level and action (the validator parses back to
   the document); a view (no stats, `viewOn`, parsed pipeline); a missing
   collection (`NOT_FOUND`); `$collStats` refused (estimate, optional sizes
-  absent).
+  absent, the refusal logged); a populated time-series collection (real count,
+  here and in `listCollections`); `$collStats` failing for another reason
+  (classified error); refused with both estimates failing (error, no zeros).
+- Unit, `foldStorageStats`: single node, a two-shard reply, a missing count,
+  empty reply.
 - Integration, router: empty `collection` is `VALIDATION`; a valid payload is
   `{ ok: true }`; a missing collection is `NOT_FOUND`.
 - Unit, `humanBytes`: units, the petabyte ceiling, non-finite input.
@@ -782,7 +800,11 @@ before — so an array field has neither column.
 
 The sample arrives as canonical EJSON, so a number is a `$numberInt`,
 `$numberDouble`, `$numberLong` or `$numberDecimal` wrapper. Its string is read
-with `Number.parseFloat`; `NaN` and the infinities are ignored.
+with `Number.parseFloat`; `NaN` and the infinities are ignored. `$numberLong` and
+`$numberDecimal` values past 2^53, or with more than about 15 significant
+digits, are therefore approximate in the range. A field whose average overflows
+to infinity has no range at all, because the persisted JSON would turn it into
+`null`.
 
 ### 14.2 What is persisted
 

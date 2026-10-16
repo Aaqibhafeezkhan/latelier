@@ -20,7 +20,12 @@ interface Props {
  */
 export function CollectionStatsSection({ connectionId, dbName, collection }: Props) {
   const T = themeVars;
-  const [details, setDetails] = React.useState<CollectionDetails | null>(null);
+  // Keyed by target so a reply (or an error) is only ever shown for the
+  // collection it was read for: switching collections shows Loading, not the
+  // previous collection's figures.
+  const targetKey = `${connectionId}|${dbName}|${collection}`;
+  const [fetched, setFetched] = React.useState<{ key: string; details: CollectionDetails } | null>(null);
+  const details = fetched?.key === targetKey ? fetched.details : null;
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   // Only the latest request may write state: a slow reply for a collection the
@@ -33,16 +38,16 @@ export function CollectionStatsSection({ connectionId, dbName, collection }: Pro
     setError(null);
     try {
       const d = await api.meta.collectionDetails({ connectionId, dbName, collection });
-      if (id === latest.current) setDetails(d);
+      if (id === latest.current) setFetched({ key: targetKey, details: d });
     } catch (e) {
       if (id === latest.current) {
-        setDetails(null);
+        setFetched(null);
         setError(getErrorMessage(e, String(e)));
       }
     } finally {
       if (id === latest.current) setLoading(false);
     }
-  }, [connectionId, dbName, collection]);
+  }, [connectionId, dbName, collection, targetKey]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   React.useEffect(() => {
@@ -100,6 +105,10 @@ export function CollectionStatsSection({ connectionId, dbName, collection }: Pro
         </div>
       )}
 
+      {loading && !details && !error && (
+        <div style={{ padding: '10px 16px', fontSize: 12, color: T.textMuted }}>Loading…</div>
+      )}
+
       {details?.type === 'view' && (
         <div style={{ padding: '10px 16px', fontSize: 12, color: T.textMuted }}>
           View on {details.options.viewOn}
@@ -117,11 +126,11 @@ export function CollectionStatsSection({ connectionId, dbName, collection }: Pro
             fontSize: 12,
           }}
         >
-          <Figure label="Documents" value={stats.documentCount.toLocaleString()} />
+          <Figure label="Documents" value={stats.documentCount?.toLocaleString() ?? '—'} />
           <Figure label="Data size" value={size(stats.sizeBytes)} />
           <Figure label="Storage size" value={size(stats.storageSizeBytes)} />
           <Figure label="Avg. document size" value={size(stats.avgObjSizeBytes)} />
-          <Figure label="Indexes" value={`${stats.indexCount} · ${size(stats.totalIndexSizeBytes)}`} />
+          <Figure label="Indexes" value={`${stats.indexCount ?? '—'} · ${size(stats.totalIndexSizeBytes)}`} />
           <Figure label="Capped" value={details.capped ? 'Yes' : 'No'} />
         </div>
       )}

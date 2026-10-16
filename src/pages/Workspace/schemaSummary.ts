@@ -36,8 +36,11 @@ export function summarizeSchema(docs: unknown[]): SchemaSampleEntry[] {
       types: Object.fromEntries(info.types.entries()),
     };
     if (info.values.size > 0) entry.distinct = info.values.size;
-    if (info.numCount > 0) {
-      entry.numeric = { min: info.numMin, max: info.numMax, avg: info.numSum / info.numCount };
+    // A sum that overflows makes the average Infinity, which JSON persists as
+    // null; a null `avg` would crash the row on restore, so there is no range.
+    const avg = info.numSum / info.numCount;
+    if (info.numCount > 0 && Number.isFinite(avg)) {
+      entry.numeric = { min: info.numMin, max: info.numMax, avg };
     }
     out.push(entry);
   }

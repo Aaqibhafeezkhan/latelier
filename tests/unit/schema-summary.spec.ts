@@ -272,6 +272,13 @@ describe('summarizeSchema — distinct values and numeric range', () => {
     expect(byPath([{ n: -3 }, { n: -7 }], 'n').numeric).toEqual({ min: -7, max: -3, avg: -5 });
   });
 
+  it('drops numeric when the average overflows, keeping distinct', () => {
+    const big = { $numberDouble: '1.7e308' };
+    const n = byPath([{ n: big }, { n: { $numberDouble: '1.6e308' } }], 'n');
+    expect(n.numeric).toBeUndefined();
+    expect(n.distinct).toBe(2);
+  });
+
   it('stores no sample value, only counts and aggregates', () => {
     const entry = byPath([{ secret: 'hunter2' }, { secret: 'swordfish' }], 'secret');
     expect(JSON.stringify(entry)).not.toContain('hunter2');

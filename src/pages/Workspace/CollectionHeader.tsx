@@ -35,8 +35,8 @@ export function CollectionHeader({
   const cacheKey = `${connectionId}|${dbName}|${collection}`;
   const [stats, setStats] = React.useState<{
     key: string;
-    docCount: number;
-    indexCount: number;
+    docCount: number | null;
+    indexCount: number | null;
   } | null>(null);
   const current = stats && stats.key === cacheKey ? stats : null;
   const docCount = current?.docCount ?? null;
@@ -52,8 +52,8 @@ export function CollectionHeader({
         if (info) {
           setStats({
             key: cacheKey,
-            docCount: info.documentCount,
-            indexCount: info.indexCount,
+            docCount: info.documentCount ?? null,
+            indexCount: info.indexCount ?? null,
           });
         }
       } catch {

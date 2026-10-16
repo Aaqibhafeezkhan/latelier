@@ -229,6 +229,78 @@ describe('StructureView — statistics section', () => {
     await waitFor(() => expect(screen.getByText('_id_')).toBeTruthy());
   });
 
+  it('shows a dash for a document or index count the server did not report', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: {
+        collectionDetails: async () => ({
+          ...DETAILS,
+          type: 'timeseries' as const,
+          stats: { sizeBytes: 1536, storageSizeBytes: 4096 },
+        }),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('1.5 KB')).toBeTruthy());
+    const documents = within(stats).getByText('Documents').parentElement!;
+    expect(within(documents).getByText('—')).toBeTruthy();
+    expect(within(stats).queryByText('0')).toBeNull();
+    expect(within(stats).getByText('— · —')).toBeTruthy();
+  });
+
+  it('says Loading until the first reply arrives', async () => {
+    let resolve!: (d: CollectionDetails) => void;
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: {
+        collectionDetails: () => new Promise<CollectionDetails>((r) => (resolve = r)),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    expect(within(stats).getByText('Loading…')).toBeTruthy();
+    await act(async () => resolve(DETAILS));
+    await waitFor(() => expect(within(stats).getByText('42')).toBeTruthy());
+    expect(within(stats).queryByText('Loading…')).toBeNull();
+  });
+
+  it('drops the previous collection\'s figures while the next one loads', async () => {
+    const collectionDetails = vi.fn(({ collection }: { collection: string }) =>
+      collection === 'orders'
+        ? Promise.resolve(DETAILS)
+        : new Promise<CollectionDetails>(() => undefined),
+    );
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
+    });
+    const view = (collection: string) => (
+      <StructureView
+        connectionId="c1"
+        dbName="shop"
+        collection={collection}
+        state={DEFAULT_SCHEMA_TAB_STATE}
+        onPatch={vi.fn()}
+      />
+    );
+
+    const { rerender } = render(view('orders'));
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('42')).toBeTruthy());
+
+    rerender(view('customers'));
+
+    await waitFor(() => expect(within(stats).getByText('Loading…')).toBeTruthy());
+    expect(within(stats).queryByText('42')).toBeNull();
+  });
+
   it('ignores a slow reply for a collection the tab has since left', async () => {
     let resolveOrders!: (d: CollectionDetails) => void;
     const collectionDetails = vi.fn(({ collection }: { collection: string }) =>
