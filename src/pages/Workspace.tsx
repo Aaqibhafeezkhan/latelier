@@ -319,6 +319,20 @@ function WorkspaceInner() {
   const activeCollectionRef = useLatest(activeCollection);
   const activeScriptRef = useLatest(activeScript);
   const tabsRef = useLatest(tabs);
+  const focusedConnectionRef = useLatest(focusedConnection);
+
+  // "Go to Indexes" from the palette: the Structure view may not be mounted
+  // yet when the command runs, so the scroll waits for the render that shows it.
+  const scrollToIndexesRef = React.useRef(false);
+  const [indexesScrollNonce, setIndexesScrollNonce] = React.useState(0);
+  React.useEffect(() => {
+    if (!scrollToIndexesRef.current || activeView !== 'structure') return;
+    scrollToIndexesRef.current = false;
+    document
+      .querySelector<HTMLElement>('[role="region"][aria-label="Indexes"]')
+      // jsdom has no scrollIntoView.
+      ?.scrollIntoView?.({ block: 'start' });
+  }, [indexesScrollNonce, activeView]);
 
   // Stable callbacks for the major panels, reading state via the `*Ref` bag
   // so an unrelated re-render doesn't cascade through every child.
@@ -598,6 +612,39 @@ function WorkspaceInner() {
         },
       },
       {
+        id: 'shell.toggle',
+        title: shellOpen ? 'Close Shell' : 'Open Shell',
+        group: 'workspace',
+        keywords: ['shell', 'mongosh', 'repl', 'terminal'],
+        when: () => focusedConnectionRef.current !== null,
+        perform: () => setShellOpen((v) => !v),
+      },
+      {
+        id: 'view.structure.schema',
+        title: 'Go to Schema',
+        group: 'view',
+        keywords: ['structure', 'fields', 'types', 'sample'],
+        when: () => activeCollectionRef.current !== null,
+        perform: () => {
+          const a = activeCollectionRef.current;
+          if (a) tabsRef.current.setActiveView(a.id, 'structure');
+        },
+      },
+      {
+        id: 'view.structure.indexes',
+        title: 'Go to Indexes',
+        group: 'view',
+        keywords: ['structure', 'index'],
+        when: () => activeCollectionRef.current !== null,
+        perform: () => {
+          const a = activeCollectionRef.current;
+          if (!a) return;
+          scrollToIndexesRef.current = true;
+          setIndexesScrollNonce((n) => n + 1);
+          tabsRef.current.setActiveView(a.id, 'structure');
+        },
+      },
+      {
         id: 'query.drawer.toggle',
         title: builderCollapsed ? 'Expand query drawer' : 'Collapse query drawer',
         group: 'query',
@@ -674,7 +721,7 @@ function WorkspaceInner() {
         },
       })),
     ],
-    [active?.pinned, builderCollapsed, toggleBuilderWithFocus],
+    [active?.pinned, builderCollapsed, shellOpen, toggleBuilderWithFocus],
   );
 
   // `⌘K → orders`-style commands for every collection of the focused
