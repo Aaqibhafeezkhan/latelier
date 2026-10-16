@@ -77,7 +77,7 @@ export function rankCommands(
 
   // A subsequence of one character is a substring, so a single key never
   // reaches the fuzzy bucket and needs no length guard of its own.
-  const compact = q.replace(/\s+/g, '');
+  const compact = q.replace(/\s/g, '');
   const rows: RankedRow[] = [];
   for (const cmd of visible) {
     const title = cmd.title.toLowerCase();
