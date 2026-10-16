@@ -9,7 +9,7 @@ afterEach(() => {
   notifications.clean();
 });
 
-function setup(initial: UpdateState = { status: 'idle' }, restart = vi.fn(async () => ({ restarting: true as const }))) {
+function setup(initial: UpdateState = { status: 'idle' }, restart = vi.fn(async (): Promise<{ restarting: boolean }> => ({ restarting: true }))) {
   let push: (s: UpdateState) => void = () => {};
   const unsubscribe = vi.fn();
   installAtelierMock({
@@ -69,6 +69,19 @@ describe('UpdateReadyPrompt', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Restart to update' }));
     expect(await screen.findByText(/No update is ready to install\. It will be applied when you quit\./)).toBeTruthy();
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('a cancelled restart shows no error, and the prompt is offered again when ready is re-sent', async () => {
+    const restart = vi.fn(async () => ({ restarting: false }));
+    const { push } = setup({ status: 'ready', version: '1.2.3' }, restart);
+    fireEvent.click(await screen.findByRole('button', { name: 'Restart to update' }));
+    await waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Restart to update' })).toBeNull());
+    // Main re-sends ready after a cancel; the toast the click hid comes back.
+    push({ status: 'ready', version: '1.2.3' });
+    expect(await screen.findByRole('button', { name: 'Restart to update' })).toBeTruthy();
+    await act(async () => {});
+    expect(screen.queryByText(/could not be applied|will be applied when you quit/)).toBeNull();
   });
 
   it('is not a modal', async () => {

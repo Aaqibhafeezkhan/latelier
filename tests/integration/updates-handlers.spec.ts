@@ -28,16 +28,20 @@ describe('updates:* handlers', () => {
   let svc: UpdateService;
   let quitAnswer: boolean;
   let shellCommands: number;
+  let failInstall: (err: Error) => void;
+  let gate: ReturnType<typeof createQuitGate>;
 
   beforeEach(async () => {
     shim = createShim();
     quitAndInstall = vi.fn();
     let downloaded: ((i: { version: string }) => void) | undefined;
+    let errored: ((err: Error) => void) | undefined;
     const updater = {
       autoDownload: false,
       autoInstallOnAppQuit: false,
       on: (event: string, l: never) => {
         if (event === 'update-downloaded') downloaded = l;
+        if (event === 'error') errored = l;
       },
       checkForUpdates: async () => undefined,
       quitAndInstall,
@@ -45,13 +49,14 @@ describe('updates:* handlers', () => {
     const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     quitAnswer = true;
     shellCommands = 0;
-    const gate = createQuitGate({
+    gate = createQuitGate({
       counts: () => ({ scripts: 0, shellCommands, imports: 0, aggregations: 0 }),
       confirm: async () => quitAnswer,
     });
     svc = new UpdateService(async () => updater, log, () => {}, true, gate);
     await svc.start();
     fire = (version) => downloaded?.({ version });
+    failInstall = (err) => errored?.(err);
     registerUpdatesChannels(createRouter(shim.ipcMain, testSenderCheck), svc);
   });
 
@@ -85,6 +90,20 @@ describe('updates:* handlers', () => {
       data: { restarting: false },
     });
     expect(quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('restart answers restarting: false and asks again next time when the install fails after Quit', async () => {
+    fire('2.0.0');
+    shellCommands = 1;
+    // electron-updater reports a failed install through `error`, from inside
+    // quitAndInstall, and then does not quit.
+    quitAndInstall.mockImplementation(() => failInstall(new Error('No update filepath provided')));
+    expect(await shim.invoke(IPC_CHANNELS.updatesRestart, {})).toEqual({
+      ok: true,
+      data: { restarting: false },
+    });
+    expect(quitAndInstall).toHaveBeenCalledTimes(1);
+    expect(gate.check()).toBe('hold');
   });
 
   it('restart answers a VALIDATION error envelope when nothing is ready', async () => {
