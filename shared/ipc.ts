@@ -12,6 +12,7 @@ import type {
   UndoResult,
   CollectionCreateInput,
   CollectionDropInput,
+  CollectionModifyInput,
   CollectionRenameInput,
   CollectionTab,
   CollectionTabState,
@@ -265,6 +266,8 @@ export interface IpcApi {
     create: (input: CollectionCreateInput) => Promise<{ name: string }>;
     drop: (input: CollectionDropInput) => Promise<{ dropped: boolean }>;
     rename: (input: CollectionRenameInput) => Promise<{ name: string; auditId?: string }>;
+    /** `collMod`: a collection's validation rules, or a view's source and pipeline. */
+    modify: (input: CollectionModifyInput) => Promise<{ ok: true }>;
   };
 
   database: {
@@ -540,6 +543,7 @@ export const IPC_CHANNELS = {
   collectionCreate: 'collection:create',
   collectionDrop:   'collection:drop',
   collectionRename: 'collection:rename',
+  collectionModify: 'collection:modify',
   databaseDrop:     'database:drop',
 
   // Users -----------------------------------------

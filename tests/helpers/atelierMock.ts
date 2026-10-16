@@ -80,6 +80,7 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
       create: unused('collection.create') as IpcApi['collection']['create'],
       drop: unused('collection.drop') as IpcApi['collection']['drop'],
       rename: unused('collection.rename') as IpcApi['collection']['rename'],
+      modify: unused('collection.modify') as IpcApi['collection']['modify'],
     },
     database: {
       drop: unused('database.drop') as IpcApi['database']['drop'],
@@ -402,6 +403,7 @@ function makePermissiveStub(): IpcApi {
       create: noopAsync as IpcApi['collection']['create'],
       drop: async () => ({ dropped: true }),
       rename: noopAsync as IpcApi['collection']['rename'],
+      modify: noopAsync as IpcApi['collection']['modify'],
     },
     database: {
       drop: async () => ({ dropped: true as const }),

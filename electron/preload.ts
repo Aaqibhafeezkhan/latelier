@@ -113,6 +113,7 @@ const api: IpcApi = {
     create: (input) => call(IPC_CHANNELS.collectionCreate, input),
     drop: (input) => call(IPC_CHANNELS.collectionDrop, input),
     rename: (input) => call(IPC_CHANNELS.collectionRename, input),
+    modify: (input) => call(IPC_CHANNELS.collectionModify, input),
   },
 
   database: {
