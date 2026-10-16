@@ -52,7 +52,7 @@ describe('createQuitGate', () => {
 
   function gate(initial: RunningWork, answer: () => Promise<boolean> = async () => true) {
     const state = { work: initial };
-    const confirm = vi.fn((_message: string) => answer());
+    const confirm = vi.fn<(message: string) => Promise<boolean>>(() => answer());
     return { state, confirm, gate: createQuitGate({ counts: () => state.work, confirm }) };
   }
 
