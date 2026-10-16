@@ -1,5 +1,6 @@
 import { ValidationError } from '../errors.ts';
 import type { Logger } from '../log.ts';
+import type { QuitGate } from '../quitGuard.ts';
 import type { UpdateState } from '@shared/types';
 
 /** The subset of electron-updater's `autoUpdater` this service touches. */
@@ -38,17 +39,20 @@ export class UpdateService {
   private readonly log: Logger;
   private readonly emit: (state: UpdateState) => void;
   private readonly enabled: boolean;
+  private readonly quitGate: Pick<QuitGate, 'check' | 'ask'>;
 
   constructor(
     loadUpdater: () => Promise<UpdaterLike>,
     log: Logger,
     emit: (state: UpdateState) => void,
     enabled: boolean,
+    quitGate: Pick<QuitGate, 'check' | 'ask'>,
   ) {
     this.loadUpdater = loadUpdater;
     this.log = log;
     this.emit = emit;
     this.enabled = enabled;
+    this.quitGate = quitGate;
   }
 
   /** Resolves once the check has settled; never rejects. */
@@ -76,10 +80,22 @@ export class UpdateService {
     return this.state;
   }
 
-  restart(): void {
+  /**
+   * Asks about running work first: electron-updater starts the installer inside
+   * `quitAndInstall`, before the app's quit event, so asking at `before-quit`
+   * would be too late to cancel. A yes lets the quit that follows through
+   * without a second dialog. A no installs nothing and re-sends `ready`, so the
+   * renderer offers Restart again. Resolves whether the restart went ahead.
+   */
+  async restart(): Promise<boolean> {
     if (this.state.status !== 'ready') {
       throw new ValidationError(`No update is ready to install (state: ${this.state.status})`);
     }
+    if (this.quitGate.check() === 'hold' && !(await this.quitGate.ask())) {
+      this.emit(this.state);
+      return false;
+    }
     this.updater?.quitAndInstall(true, true);
+    return true;
   }
 }

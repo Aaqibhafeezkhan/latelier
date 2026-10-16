@@ -201,8 +201,12 @@ export interface IpcApi {
   /** Auto-update: one state, one action. See specs/X20-auto-update.md. */
   updates: {
     getState: () => Promise<UpdateState>;
-    /** Quits, installs the downloaded update and relaunches. Rejects unless `ready`. */
-    restart: () => Promise<{ restarting: true }>;
+    /**
+     * Quits, installs the downloaded update and relaunches. Rejects unless
+     * `ready`. Asks first when work is running; `restarting: false` means the
+     * user cancelled, and main re-sends `ready` so Restart is offered again.
+     */
+    restart: () => Promise<{ restarting: boolean }>;
     /** Main pushes the state when a download finishes; returns the unsubscribe. */
     onState: (cb: (state: UpdateState) => void) => () => void;
   };
