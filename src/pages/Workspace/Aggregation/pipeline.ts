@@ -358,17 +358,18 @@ export function formatBody(body: string): string {
 
 /**
  * The enabled stages as one canonical EJSON array, the `pipeline` a view is
- * created with. Throws naming the first enabled stage whose body does not parse.
+ * created with. Throws naming the first enabled stage whose body does not
+ * parse by its 1-based position in the builder, with the parser's reason.
  */
 export function stagesToPipelineJson(stages: Stage[]): string {
-  const pipeline = stages
-    .filter((s) => s.enabled)
-    .map((s) => {
-      try {
-        return { [s.op]: ejsonParse(s.body) };
-      } catch {
-        throw new Error(`stage ${s.id} (${s.op}): invalid EJSON`);
-      }
-    });
+  const pipeline: Record<string, unknown>[] = [];
+  stages.forEach((s, i) => {
+    if (!s.enabled) return;
+    try {
+      pipeline.push({ [s.op]: ejsonParse(s.body) });
+    } catch (e) {
+      throw new Error(`stage ${i + 1} (${s.op}): invalid EJSON — ${(e as Error).message}`, { cause: e });
+    }
+  });
   return ejsonStringify(pipeline);
 }

@@ -78,7 +78,7 @@ describe('SaveAsViewModal', () => {
     await userEvent.type(screen.getByLabelText('View name'), 'v');
     fireEvent.click(screen.getByRole('button', { name: 'Create view' }));
 
-    expect((await screen.findByRole('alert')).textContent).toMatch(/stage 4 \(\$match\)/);
+    expect((await screen.findByRole('alert')).textContent).toMatch(/stage 1 \(\$match\): invalid EJSON — /);
     expect(create).not.toHaveBeenCalled();
   });
 

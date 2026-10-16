@@ -825,10 +825,17 @@ describe('stagesToPipelineJson', () => {
     expect(stagesToPipelineJson([st(1, '$match', '{}', false)])).toBe('[]');
   });
 
-  it('throws naming the stage id and operator when a body is not valid EJSON', () => {
-    expect(() => stagesToPipelineJson([st(1, '$match', '{}'), st(7, '$group', '{ _id: ')])).toThrow(
-      'stage 7 ($group): invalid EJSON',
-    );
+  it('throws naming the stage by its position, its operator and the parser reason', () => {
+    const run = () => stagesToPipelineJson([st(4, '$match', '{}', false), st(7, '$group', '{ _id: ')]);
+    expect(run).toThrow(/^stage 2 \(\$group\): invalid EJSON — \S/);
+    let thrown: unknown;
+    try {
+      run();
+    } catch (e) {
+      thrown = e;
+    }
+    expect((thrown as Error).cause).toBeInstanceOf(Error);
+    expect((thrown as Error).message.endsWith((thrown as { cause: Error }).cause.message)).toBe(true);
   });
 
   it('skips a disabled stage even when its body would not parse', () => {
