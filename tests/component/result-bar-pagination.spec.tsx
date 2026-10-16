@@ -7,6 +7,7 @@ import { CollectionWorkspaceProvider } from '../../src/pages/Workspace/Collectio
 import type { CollectionTabState } from '@shared/types';
 
 interface BarStateOverride {
+  limit?: string;
   page?: number;
   pageSize?: number;
   docCount?: number | null;
@@ -24,7 +25,7 @@ function makeState(o: BarStateOverride): CollectionTabState {
     builder: {
       projection: [],
       sort: '',
-      limit: '',
+      limit: o.limit ?? '',
     },
     queryRaw: '{}',
     page: o.page ?? 0,
@@ -240,5 +241,25 @@ describe('ResultBar - a page size that could not be remembered says so', () => {
 
     expect(actions.run).toHaveBeenCalledWith({ pageSize: 100, page: 0 });
     await waitFor(() => expect(screen.getAllByText('Could not save the rows-per-page default')).toHaveLength(1));
+  });
+});
+
+describe('ResultBar - the limit that caps the results is visible beside the count', () => {
+  const chip = () => screen.queryByTestId('result-limit-cap');
+
+  it('shows "limit N" with its explanation when a limit is set', () => {
+    renderBar({ limit: '10', docCount: 10 });
+    expect(chip()?.textContent).toBe('limit 10');
+    expect(chip()?.getAttribute('title')).toContain('all pages');
+  });
+
+  it('shows nothing for a blank limit, or one that is coerced to no limit', () => {
+    renderBar({ limit: '', docCount: 10 });
+    expect(chip()).toBeNull();
+  });
+
+  it('shows nothing for a limit that is not a number', () => {
+    renderBar({ limit: 'abc', docCount: 10 });
+    expect(chip()).toBeNull();
   });
 });

@@ -10,7 +10,8 @@ import { DEFAULT_PAGE_SIZE_PREF_KEY, PAGE_SIZE_OPTIONS } from '../../state/works
 import { FieldsControl } from './FieldsControl';
 import { ExportDialog } from './ExportDialog';
 import { ImportDialog } from './ImportDialog';
-import { findProblem } from './builder';
+import { compileFindOptions, findProblem } from './builder';
+import { LIMIT_EXPLANATION, limitChipText } from './queryCaps';
 
 const VIEWS: ResultViewMode[] = ['Tree', 'JSON', 'Table'];
 
@@ -62,6 +63,9 @@ export function ResultBar() {
   // "No run yet" label. Read-only consumers (ScriptTab's snapshot provider)
   // have no working `run`, so they keep the plain label.
   const canRunHere = !isReadOnly && !isLoading && runProblem === null;
+
+  // The limit that actually applies (a coerced one shows as what it runs as).
+  const limitChip = limitChipText(compileFindOptions(state.builder).limit);
 
   const start = docCount !== null ? page * pageSize + 1 : null;
   const end = docCount !== null ? page * pageSize + docCount : null;
@@ -222,6 +226,14 @@ export function ResultBar() {
               >
                 (not current — fix the query above)
               </span>
+            )}
+            {limitChip !== null && (
+              <>
+                <span>·</span>
+                <span data-testid="result-limit-cap" title={LIMIT_EXPLANATION}>
+                  {limitChip}
+                </span>
+              </>
             )}
             {duration !== null && (
               <>
