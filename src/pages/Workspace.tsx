@@ -26,6 +26,9 @@ import {
 import { useQueryRunner } from './Workspace/useQueryRunner';
 import type { RunnerTarget } from './Workspace/useQueryRunner';
 import { useWorkspacePanelPrefs } from './Workspace/useWorkspacePanelPrefs';
+import { useNavigatorData, useNavigatorStatusSync } from './Workspace/useNavigatorData';
+import { ownGet } from '../utils/ownProperty';
+import type { DbInfo } from '@shared/ipc';
 import { useConnectionDialogs } from './Workspace/useConnectionDialogs';
 import { useDocumentDialogs } from './Workspace/useDocumentDialogs';
 import { offerUndo } from './Workspace/offerUndo';
@@ -69,6 +72,19 @@ function WorkspaceInner() {
   const [newTabOpen, setNewTabOpen] = React.useState(false);
 
   const panelPrefs = useWorkspacePanelPrefs();
+  // The navigator's tree, owned here: it outlives a collapsed sidebar and the
+  // palette's namespace commands read the same cache.
+  const navigatorData = useNavigatorData();
+  // A Connection that came back after a disconnect: its cached databases and
+  // collections predate the gap, so the palette's next sweep of it re-lists
+  // them all.
+  const reconnectedRef = React.useRef(new Set<string>());
+  const [reconnects, setReconnects] = React.useState(0);
+  const onNavigatorReconnect = React.useCallback((id: string) => {
+    reconnectedRef.current.add(id);
+    setReconnects((n) => n + 1);
+  }, []);
+  useNavigatorStatusSync(navigatorData, onNavigatorReconnect);
   const {
     prefsReady,
     leftWidth,
@@ -316,6 +332,20 @@ function WorkspaceInner() {
   const activeCollectionRef = useLatest(activeCollection);
   const activeScriptRef = useLatest(activeScript);
   const tabsRef = useLatest(tabs);
+  const focusedConnectionRef = useLatest(focusedConnection);
+
+  // "Go to Indexes" from the palette: the Structure view may not be mounted
+  // yet when the command runs, so the scroll waits for the render that shows it.
+  const scrollToIndexesRef = React.useRef(false);
+  const [indexesScrollNonce, setIndexesScrollNonce] = React.useState(0);
+  React.useEffect(() => {
+    if (!scrollToIndexesRef.current || activeView !== 'structure') return;
+    scrollToIndexesRef.current = false;
+    document
+      .querySelector<HTMLElement>('[role="region"][aria-label="Indexes"]')
+      // jsdom has no scrollIntoView.
+      ?.scrollIntoView?.({ block: 'start' });
+  }, [indexesScrollNonce, activeView]);
 
   // Stable callbacks for the major panels, reading state via the `*Ref` bag
   // so an unrelated re-render doesn't cascade through every child.
@@ -598,6 +628,39 @@ function WorkspaceInner() {
         },
       },
       {
+        id: 'shell.toggle',
+        title: shellOpen ? 'Close Shell' : 'Open Shell',
+        group: 'workspace',
+        keywords: ['shell', 'mongosh', 'repl', 'terminal'],
+        when: () => focusedConnectionRef.current !== null,
+        perform: () => setShellOpen((v) => !v),
+      },
+      {
+        id: 'view.structure.schema',
+        title: 'Go to Schema',
+        group: 'view',
+        keywords: ['structure', 'fields', 'types', 'sample'],
+        when: () => activeCollectionRef.current !== null,
+        perform: () => {
+          const a = activeCollectionRef.current;
+          if (a) tabsRef.current.setActiveView(a.id, 'structure');
+        },
+      },
+      {
+        id: 'view.structure.indexes',
+        title: 'Go to Indexes',
+        group: 'view',
+        keywords: ['structure', 'index'],
+        when: () => activeCollectionRef.current !== null,
+        perform: () => {
+          const a = activeCollectionRef.current;
+          if (!a) return;
+          scrollToIndexesRef.current = true;
+          setIndexesScrollNonce((n) => n + 1);
+          tabsRef.current.setActiveView(a.id, 'structure');
+        },
+      },
+      {
         id: 'query.drawer.toggle',
         title: builderCollapsed ? 'Expand query drawer' : 'Collapse query drawer',
         group: 'query',
@@ -674,56 +737,75 @@ function WorkspaceInner() {
         },
       })),
     ],
-    [active?.pinned, builderCollapsed, toggleBuilderWithFocus],
+    [active?.pinned, builderCollapsed, shellOpen, toggleBuilderWithFocus],
   );
 
-  // Mirrors the navigator's data for `⌘K → orders`-style collection commands,
-  // via its own meta:list fetch rather than sharing the navigator's cache.
-  const [paletteCollections, setPaletteCollections] = React.useState<
-    Array<{ db: string; coll: string }>
-  >([]);
+  // `⌘K → orders`-style commands for every collection of the focused
+  // Connection. The sweep fills the navigator's own cache, so the navigator
+  // never fetches what the palette already has, and the reverse.
+  const { tree: navigatorTree, loadDbs, loadColls } = navigatorData;
+  const focusedCache = focusedConnectionId
+    ? ownGet(navigatorTree.caches, focusedConnectionId)
+    : undefined;
+  const focusedIsConnected = focusedConnection?.status === 'connected';
+  // One attempt per database per database list: a database whose listing
+  // failed is not retried on every render, and a refreshed list sweeps again.
+  const sweptRef = React.useRef<{ dbs: DbInfo[] | null; done: Set<string> }>({
+    dbs: null,
+    done: new Set(),
+  });
   React.useEffect(() => {
-    const cid = focusedConnectionId;
-    let cancelled = false;
-    void (async () => {
-      await Promise.resolve();
-      if (cancelled) return;
-      if (!cid) {
-        setPaletteCollections([]);
-        return;
-      }
-      try {
-        const dbs = await api.meta.listDatabases({ connectionId: cid });
-        const collsByDb = await Promise.all(
-          dbs.map(async (d) => {
-            try {
-              const colls = await api.meta.listCollections({
-                connectionId: cid,
-                dbName: d.name,
-              });
-              return colls.map((c) => ({ db: d.name, coll: c.name }));
-            } catch {
-              return [];
-            }
-          }),
-        );
-        if (!cancelled) setPaletteCollections(collsByDb.flat());
-      } catch {
-        if (!cancelled) setPaletteCollections([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [focusedConnectionId]);
+    if (!focusedConnectionId || !focusedIsConnected) return;
+    if (reconnectedRef.current.delete(focusedConnectionId)) {
+      // The expanded databases were already re-listed by the status sync.
+      const id = focusedConnectionId;
+      const expanded = ownGet(navigatorTree.expanded, id) ?? {};
+      void loadDbs(id, { force: true }).then((dbs) => {
+        for (const d of dbs ?? []) if (!ownGet(expanded, d.name)) void loadColls(id, d.name);
+      });
+      return;
+    }
+    const c = focusedCache;
+    if (!c?.dbs) {
+      if (!c?.dbsLoading && !c?.err) void loadDbs(focusedConnectionId);
+      return;
+    }
+    if (sweptRef.current.dbs !== c.dbs) sweptRef.current = { dbs: c.dbs, done: new Set() };
+    const { done } = sweptRef.current;
+    for (const d of c.dbs) {
+      if (done.has(d.name) || ownGet(c.colls, d.name) || ownGet(c.collsLoading, d.name)) continue;
+      done.add(d.name);
+      void loadColls(focusedConnectionId, d.name);
+    }
+  }, [
+    focusedConnectionId,
+    focusedIsConnected,
+    focusedCache,
+    loadDbs,
+    loadColls,
+    reconnects,
+    navigatorTree.expanded,
+  ]);
+  // A disconnected Connection's cache is a snapshot that can't be opened from.
+  const paletteCollections = React.useMemo(() => {
+    const c = focusedCache;
+    if (!focusedIsConnected || !c?.dbs) return [];
+    return c.dbs.flatMap((d) =>
+      (ownGet(c.colls, d.name) ?? []).map((x) => ({ db: d.name, coll: x.name })),
+    );
+  }, [focusedCache, focusedIsConnected]);
 
   const collectionCommands = React.useMemo(
     () =>
       paletteCollections.map(({ db, coll }) => ({
-        id: `tab.open:${db}:${coll}`,
+        // Connection-qualified, so the same namespace on another Connection
+        // is not "recent".
+        id: `tab.open:${focusedConnectionId}:${db}:${coll}`,
         title: `Open: ${db}.${coll}`,
+        fuzzyText: `${db}.${coll}`,
         group: 'workspace' as const,
         keywords: ['collection', 'tab', 'new', db, coll],
+        hideWhenEmptyQuery: true,
         perform: () => {
           if (focusedConnectionId) {
             void tabsRef.current.openCollection({
@@ -1013,6 +1095,7 @@ function WorkspaceInner() {
         setNewTabOpen={setNewTabOpen}
         panelPrefs={panelPrefs}
         connectionDialogs={connectionDialogs}
+        navigatorData={navigatorData}
         onOpenReferences={() => setRefEditorOpen(true)}
       />
 

@@ -207,3 +207,116 @@ describe('groupRows', () => {
     expect(grouped.map((g) => g.key)).toEqual(['general', 'workspace', 'aggregation']);
   });
 });
+
+describe('rankCommands — fuzzy subsequence bucket', () => {
+  it('matches a subsequence of the title in the fuzzy bucket', () => {
+    const all = [make({ id: 'o', title: 'Open: shop.orders' })];
+    const ranked = rankCommands(all, 'shord', ctx, []);
+    expect(ranked.map((r) => [r.cmd.id, r.bucket])).toEqual([['o', 'fuzzy']]);
+  });
+
+  it('ranks fuzzy after prefix, substring and keyword matches', () => {
+    const all = [
+      make({ id: 'fz', title: 'Show recent queries' }),
+      make({ id: 'kw', title: 'Unrelated', keywords: ['src'] }),
+      make({ id: 'sub', title: 'Re-src thing' }),
+      make({ id: 'pref', title: 'Src first' }),
+    ];
+    const ranked = rankCommands(all, 'src', ctx, []);
+    expect(ranked.map((r) => r.cmd.id)).toEqual(['pref', 'sub', 'kw', 'fz']);
+    expect(ranked.map((r) => r.bucket)).toEqual(['prefix', 'substring', 'keyword', 'fuzzy']);
+  });
+
+  it('adds no fuzzy row for a one-character query', () => {
+    // One character is a subsequence exactly when it is a substring, so a
+    // single key never reaches the fuzzy bucket: it is prefix or substring.
+    const all = [make({ id: 'a', title: 'Alpha one' }), make({ id: 'b', title: 'Bravo' })];
+    expect(rankCommands(all, 'n', ctx, []).map((r) => [r.cmd.id, r.bucket])).toEqual([
+      ['a', 'substring'],
+    ]);
+  });
+
+  it('fuzzy-matches from two characters on', () => {
+    const all = [make({ id: 'a', title: 'Alpha one' })];
+    expect(rankCommands(all, 'ae', ctx, []).map((r) => r.bucket)).toEqual(['fuzzy']);
+  });
+
+  it('ignores whitespace in the query for the subsequence', () => {
+    const all = [make({ id: 'o', title: 'Open: shop.orders' })];
+    expect(rankCommands(all, 'sh  ord', ctx, []).map((r) => r.bucket)).toEqual(['fuzzy']);
+  });
+
+  it('does not match the right letters in the wrong order', () => {
+    const all = [make({ id: 'o', title: 'Open: shop.orders' })];
+    expect(rankCommands(all, 'dros', ctx, [])).toEqual([]);
+  });
+
+  it('keeps registration order inside the fuzzy bucket', () => {
+    const all = [
+      make({ id: 'z', title: 'Open: zoo.orders' }),
+      make({ id: 'a', title: 'Open: app.orders' }),
+    ];
+    expect(rankCommands(all, 'ords', ctx, []).map((r) => r.cmd.id)).toEqual(['z', 'a']);
+  });
+
+  it('promotes a fuzzy match into the recent bucket when the MRU has it', () => {
+    const all = [make({ id: 'o', title: 'Open: shop.orders' })];
+    expect(rankCommands(all, 'shord', ctx, ['o'])[0]!.bucket).toBe('recent');
+  });
+});
+
+describe('rankCommands — hideWhenEmptyQuery', () => {
+  const all = [
+    make({ id: 'plain', title: 'Plain' }),
+    make({ id: 'ns', title: 'Open: shop.orders', hideWhenEmptyQuery: true }),
+  ];
+
+  it('omits the command from the empty-query catalog', () => {
+    expect(rankCommands(all, '', ctx, []).map((r) => r.cmd.id)).toEqual(['plain']);
+  });
+
+  it('still lists it under Recent on an empty query when the MRU has it', () => {
+    const ranked = rankCommands(all, '   ', ctx, ['ns']);
+    expect(ranked.map((r) => [r.cmd.id, r.bucket])).toEqual([
+      ['ns', 'recent'],
+      ['plain', 'substring'],
+    ]);
+  });
+
+  it('shows it once there is a query', () => {
+    expect(rankCommands(all, 'orders', ctx, []).map((r) => r.cmd.id)).toEqual(['ns']);
+  });
+});
+
+describe('groupRows — fuzzy rows', () => {
+  it('groups a fuzzy row under its command group, not Recent', () => {
+    const groups = groupRows([
+      { cmd: make({ id: 'o', title: 'Open: shop.orders', group: 'workspace' }), bucket: 'fuzzy' },
+    ]);
+    expect(groups.map((g) => g.key)).toEqual(['workspace']);
+  });
+});
+
+describe('rankCommands — fuzzyText', () => {
+  it('matches the subsequence against fuzzyText instead of the title', () => {
+    const all = [
+      make({ id: 'a', title: 'Open: shop.orders', fuzzyText: 'shop.orders' }),
+      make({ id: 'b', title: 'Open: crm.leads', fuzzyText: 'crm.leads' }),
+    ];
+    // "opn" is a subsequence of every "Open: …" title, but of neither namespace.
+    expect(rankCommands(all, 'opn', ctx, [])).toEqual([]);
+    expect(rankCommands(all, 'shrd', ctx, []).map((r) => [r.cmd.id, r.bucket])).toEqual([
+      ['a', 'fuzzy'],
+    ]);
+  });
+
+  it('keeps substring matching on the full title', () => {
+    const all = [make({ id: 'a', title: 'Open: shop.orders', fuzzyText: 'shop.orders' })];
+    expect(rankCommands(all, 'open', ctx, []).map((r) => r.bucket)).toEqual(['prefix']);
+  });
+
+  it('lowercases fuzzyText before matching', () => {
+    const all = [make({ id: 'a', title: 'Open: Shop.Orders', fuzzyText: 'Shop.Orders' })];
+    expect(rankCommands(all, 'shrd', ctx, []).map((r) => r.bucket)).toEqual(['fuzzy']);
+  });
+});

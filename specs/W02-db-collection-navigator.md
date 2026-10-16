@@ -143,6 +143,14 @@ interface ConnectionCache {
 }
 ```
 
+**Where the state lives.** The tree (caches, expanded root and databases, connect errors) and its two loaders, `loadDbs` and `loadColls`, are owned by the Workspace (`useNavigatorData`) and passed to the navigator as a prop, not held inside it. Two reasons: the navigator unmounts when the sidebar collapses, and the cache must outlive that; and the command palette's `Open: <db>.<coll>` commands (X07 §5) read the same cache instead of fetching their own copy. A navigator rendered without the prop owns a private copy, which is what its standalone tests mount. `filter`, `focusedId` and `menu` stay local to the navigator.
+
+The `mongo.onStatus` subscription that keeps the tree current (connect errors in and out, and the reconnect refresh of previously-expanded databases) moves with the state: the owner of the tree subscribes, so a disconnect and reconnect while the sidebar is collapsed still refreshes what the reopened navigator shows.
+
+The loaders share in-flight requests: a second `loadDbs` for a connection, or `loadColls` for the same database, while one is pending returns the pending one rather than issuing a second IPC call. The navigator's mount effect and the palette's sweep both see an empty cache in the same commit, and the reducer's loading flags cannot stop that.
+
+A refresh that must see a change — the connection-level Refresh, every post-mutation refresh below, and the database list re-read after a reconnect — is a forced load: it never joins a pending request. It issues its own, and the older request's late answer is discarded rather than written over the newer one. A manual per-DB refresh still joins a pending listing, so a double-click costs one call.
+
 Key points:
 - Cache is keyed by `connectionId`. Switching tabs within the same connection keeps the cache; switching to a different connection's tab uses that cache.
 - `connectionExpanded` tracks whether the connection tree node is expanded. Defaults to `true` the first time a connection becomes active; can be toggled by the user.
@@ -159,6 +167,7 @@ Key points:
 - When the active tab's connection changes (switching to a tab on a different connection): the navigator reads from the target cache; no implicit re-fetch.
 - **Cache is per `connectionId`.** A "Refresh" affordance (small circular arrow) next to the filter dumps + refetches the whole connection. After the fresh DB list resolves, every DB that was expanded *before* the refresh — except the active tab's DB — has its collections re-fetched too, so previously-populated DBs don't go blank; the active DB's collections are re-fetched exactly once, by the active-DB auto-expand effect, so this loop excludes it to avoid a duplicate `meta:listCollections` call. A previously-expanded DB absent from the refreshed list (e.g. dropped externally) is simply skipped — no fetch, no crash.
 - Per-DB refresh (from the DB row context menu) invalidates only that DB's collections; DBs list is not re-fetched.
+- **The palette sweep.** While the focused connection is connected, the Workspace lists its databases and every database's collections into this same cache, once per database list (a refreshed list sweeps again; a database whose listing failed is not retried until then). After a reconnect it re-reads the database list (forced) and re-lists every database the status sync did not already refresh, so a database or collection added during the gap appears. While the focused connection is not connected the palette lists none of its collections, even though the cache still holds them. Expanding a database the sweep already filled shows its collections at once; the re-expand background refresh above still runs. Collapsing and reopening the sidebar fetches nothing.
 
 ### Post-mutation invalidation
 

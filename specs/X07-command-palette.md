@@ -13,9 +13,8 @@ The palette ships as renderer-only — no IPC. State lives in React context; the
 
 ## Scope
 
-- **In**: `Command` type, `CommandRegistry` context, `useRegisterCommands(commands)` hook, `<CommandPalette>` component mounted globally in `App.tsx`, `⌘K` / `Ctrl+K` global shortcut, Esc to close, ranked search, grouped results, keyboard navigation, recent-commands MRU (session-only), v1 catalog covering Connections / Workspace (collection + aggregation) / global.
+- **In**: `Command` type, `CommandRegistry` context, `useRegisterCommands(commands)` hook, `<CommandPalette>` component mounted globally in `App.tsx`, `⌘K` / `Ctrl+K` global shortcut, Esc to close, ranked search, grouped results, keyboard navigation, recent-commands MRU (persisted across relaunches, §7), v1 catalog covering Connections / Workspace (collection + aggregation) / global.
 - **Out** (deferred):
-  - **Persistent MRU** across relaunches (v1 keeps MRU in memory only).
   - **Per-command keybindings** — the palette displays existing shortcuts (e.g., `⌘T`) but does not own them. Rebinding lives in a future `keybindings` spec.
   - **Multi-step / nested commands** ("Open recent query > pick which one") — v1 flattens dynamic sublists into top-level entries (e.g., `connection.switch:<id>` per connection). A "deferred run with parameters" UX waits.
   - **User-defined commands** / scripting / macros.
@@ -83,6 +82,19 @@ export interface Command {
    */
   when?: (ctx: PaletteContext) => boolean;
   /**
+   * Left out of the empty-query catalog. Set on the dynamic
+   * one-row-per-namespace commands, which would otherwise flood the empty
+   * palette and bury the commands people browse for. A recently used one
+   * still shows under Recent.
+   */
+  hideWhenEmptyQuery?: boolean;
+  /**
+   * What the fuzzy match reads instead of the title. The namespace commands
+   * set it to `<db>.<coll>`, so the shared `Open: ` prefix is not a
+   * subsequence every one of them matches.
+   */
+  fuzzyText?: string;
+  /**
    * Side-effecting handler. Receives the palette context. Performing a
    * command always closes the palette; v1 has no "stay open" affordance.
    */
@@ -147,19 +159,20 @@ This is one of two coupling points between the palette and the rest of the app (
 
 ## 3. Search and ranking
 
-Filter is single-token-substring, case-insensitive, applied to `title + ' ' + (subtitle ?? '') + ' ' + (keywords ?? []).join(' ')`. No fuzzy matching in v1 (subjective tradeoff: substring is predictable and fast, fuzzy ranking adds tunables we don't need yet).
+Filter is case-insensitive, on the trimmed query. Substring matching is tried first, against the title, then the subtitle and the keywords (joined with a space). A command none of those match falls back to a fuzzy match: every character of the query, whitespace removed, appears in the title in order (a subsequence), so `shord` finds `Open: shop.orders`. A command with `fuzzyText` is matched against that instead of its title, so `opn` does not match every namespace through its `Open: ` prefix. The fuzzy match is title-only (or `fuzzyText`-only) and has no scoring: it is a last bucket, never a reorder of the substring ones. A one-character query cannot reach it, since one character is a subsequence exactly when it is a substring.
 
 Ranking, in order:
 1. Recently used (MRU bucket, oldest at the bottom of its bucket).
 2. Title prefix match (`q === title.slice(0, q.length)` lowercase).
 3. Title substring match.
 4. Subtitle / keywords substring match.
+5. Title subsequence (fuzzy) match.
 
 Within each rank bucket, preserve the registration order (which roughly tracks importance: ConnectionManager registers global commands first, then page-specific commands register).
 
 When MRU pulls a command into the RECENT bucket, that command does **not** also appear under its own group — it moves, not duplicates. This matches VS Code / Linear behavior and avoids two same-named rows on screen.
 
-Empty query → render the RECENT bucket first (if non-empty), then every other command grouped by `group`. Section headers in registration order: `general`, `navigation`, `connection`, `workspace`, `query`, `view`, `references`, `aggregation`.
+Empty query → render the RECENT bucket first (if non-empty), then every other command grouped by `group`. Commands with `hideWhenEmptyQuery` are left out of the grouped catalog, but one the MRU holds still shows in the RECENT bucket. Section headers in registration order: `general`, `navigation`, `connection`, `workspace`, `query`, `view`, `references`, `aggregation`.
 
 ## 4. UI
 
@@ -233,7 +246,8 @@ Empty query → render the RECENT bucket first (if non-empty), then every other 
 | connection    | `connection.switch:<id>`    | `Switch to: <name>`               | always; one row per connection (subtitle = host)                                      | navigates to `/workspace` with a `switchConnectionId` intent that `Workspace` runs via `switchConnection` — registered globally by `<ConnectionPaletteCommands>`, which holds its own `useConnections()` subscription |
 | workspace     | `tab.new`                   | New tab…                          | `pathname === '/workspace'` and active connection exists                              | opens the existing `<NewTabModal>` (`setNewTabOpen(true)`)             |
 | workspace     | `tab.new.aggregation`       | New aggregation tab on this coll. | `activeTab?.kind === 'collection'`                                                    | `tabs.openAggregation({connectionId, dbName, collection})` from the active tab's coords (no modal) |
-| workspace     | `tab.open:<db>:<coll>`      | `Open: <db>.<coll>`               | always while on `/workspace` with a browsing connection — one row per collection in every non-system db | `tabs.openCollection({connectionId, dbName, collection, reuseExisting: true})` — switches to an existing tab if one exists, otherwise creates a fresh one. Mirrors the navigator's plain-click behavior. Per-connection collection list is fetched once on mount + on browsing-connection change via `meta:listDatabases` + `meta:listCollections` (independent subscription from the navigator) |
+| workspace     | `tab.open:<connectionId>:<db>:<coll>` | `Open: <db>.<coll>`     | on `/workspace`, one row per collection of the **focused connection** only (never an unopened connection's, per X16 §4.2), and none while it is not connected; left out of the empty-query catalog (`hideWhenEmptyQuery`) but listed under Recent once used. The id names the connection, so the same namespace on another connection is not recent. Fuzzy-matched on `<db>.<coll>` (`fuzzyText`) | `tabs.openCollection({connectionId, dbName, collection, reuseExisting: true})` — switches to an existing tab if one exists, otherwise creates a fresh one. Mirrors the navigator's plain-click behavior. The list is read from the navigator's own cache (W02 §2), which the Workspace sweeps once the focused connection is connected, so a collection created, renamed or dropped through the navigator shows up here too and nothing is fetched twice |
+| workspace     | `shell.toggle`              | Open Shell / Close Shell          | a focused connection exists (title flips on whether the shell pane is open)           | toggles the Mongo shell pane, the same state the TitleBar's Shell button drives |
 | workspace     | `tab.close`                 | Close current tab                 | `activeTab !== null`                                                                  | `tabs.close(activeTab.id)` from `useWorkspaceTabs`                     |
 | workspace     | `tab.pin.toggle`            | Pin current tab / Unpin           | `activeTab !== null` (title flips on `activeTab.pinned`)                              | `tabs.setPinned(activeTab.id, !activeTab.pinned)`                      |
 | query         | `query.run`                 | Run query                         | `activeTab?.kind === 'collection'`                                                    | runs the active collection tab's query                                 |
@@ -243,6 +257,8 @@ Empty query → render the RECENT bucket first (if non-empty), then every other 
 | view          | `view.mode.tree`            | Show results as Tree              | `activeTab?.kind === 'collection'` and `state.view !== 'Tree'`                        | `tabs.patchCollectionState(activeTab.id, { view: 'Tree' })`            |
 | view          | `view.mode.json`            | Show results as JSON              | same, `state.view !== 'JSON'`                                                         | `tabs.patchCollectionState(activeTab.id, { view: 'JSON' })`            |
 | view          | `view.mode.table`           | Show results as Table             | same, `state.view !== 'Table'`                                                        | `tabs.patchCollectionState(activeTab.id, { view: 'Table' })`           |
+| view          | `view.structure.schema`     | Go to Schema                      | `activeTab?.kind === 'collection'`                                                    | `tabs.setActiveView(activeTab.id, 'structure')`: the Structure sub-view holds the schema |
+| view          | `view.structure.indexes`    | Go to Indexes                     | `activeTab?.kind === 'collection'`                                                    | same switch, then scrolls the Indexes region into view once the Structure view has rendered |
 | aggregation   | `agg.run`                   | Run pipeline                      | `activeTab?.kind === 'aggregation'`                                                   | runs the active aggregation                                            |
 | aggregation   | `agg.explain`               | Explain pipeline                  | `activeTab?.kind === 'aggregation'`                                                   | opens explain drawer                                                   |
 | aggregation   | `agg.save`                  | Save pipeline                     | `activeTab?.kind === 'aggregation'`                                                   | opens save modal                                                       |
@@ -266,14 +282,17 @@ When the owning component unmounts, the commands disappear from the palette auto
 
 - **One palette only.** Two `⌘K` presses with the palette already open does NOT stack; it closes.
 - **Performs are best-effort.** A `perform` that throws logs a dev-only `console.error`. The palette closes anyway; no error UI takes over the screen. (A toast is intentionally omitted in v1 — a failing command is rare and the user can read the dev console; adding a toast layer here just to handle this case is overkill.)
-- **No persistence.** MRU and pinned-command preferences (future) are session-only in v1. Closing and reopening the app forgets MRU. This is on purpose: MRU persisted across releases would surface stale command ids after refactors.
+- **MRU persists.** The RECENT bucket survives a relaunch (§7). A stored id that no registered command carries any more (a refactor renamed it, or its collection is gone) is skipped at rank time, never rendered.
 - **Hints stay behind the backdrop.** The palette's full-viewport backdrop visually covers any X06 hint that would otherwise be visible. No explicit suppression API is needed — the `rgba(0,0,0,0.45)` overlay handles it.
 
 ## 7. Persistence
 
-None for v1. No new `app_state` keys, no migrations, no IPC.
+The MRU lives in `app_state['ui.commandPalette.mru']`, a `string[]` of command ids, most recent first, through the existing `prefs:get` / `prefs:set` channels. Main validates it as at most 16 strings of at most 512 characters each; the renderer keeps 8.
 
-If a future iteration wants persistent MRU, the obvious shape is a single `app_state['ui.commandPalette.mru']` key holding `string[]`, validated against the live registry at load time (drop unknown ids).
+- **Load.** The palette reads the key once on mount. Anything other than an array of strings is ignored. The stored ids are merged behind any command performed while the read was in flight.
+- **Save.** Each perform writes the new list. The seed itself is never written back.
+- **Unknown ids** are dropped at rank time, not at load: a command registered later in the session (a collection that finishes loading) still finds its place.
+- **Failures** of the read or the write are silent. The history is a convenience, and the palette works the same without it.
 
 ## 8. Error handling
 
@@ -286,9 +305,9 @@ If a future iteration wants persistent MRU, the obvious shape is a single `app_s
 
 - `⌘K` (`Ctrl+K` on non-mac) opens the palette from any route. Pressing it again closes it.
 - Esc closes the palette and restores focus to the previously focused element.
-- Typing filters the catalog by case-insensitive substring across `title`, `subtitle`, and `keywords`.
+- Typing filters the catalog by case-insensitive substring across `title`, `subtitle`, and `keywords`, then by title subsequence (`shord` finds `Open: shop.orders`), ranked last.
 - Arrow keys move a visible cursor; Enter performs the command; performing closes the palette.
-- Performing a command bumps it to the top of the session MRU and the palette shows it under a "RECENT" header on next open.
+- Performing a command bumps it to the top of the MRU and the palette shows it under a "RECENT" header on next open, including after a relaunch.
 - **Superseded** — `/connections` no longer exists as a screen; `New connection` and every `Switch to: <name>` row are offered from `/workspace` (the Data View, now home) instead.
 - On `/connections/:id` (deep detail screen, reached only via the Switcher's "Manage connection…"), the palette includes `Edit selected connection` and `Delete selected connection`. Both are now also offered from `/workspace`, acting on the Active Connection.
 - On `/workspace` with a collection tab active, the palette includes `Run query`, `Save query`, `Configure references`, two `view.mode.*` toggles (only the non-current ones), `New aggregation tab on this coll.`, and `Pin current tab` / `Unpin current tab` matching the active tab's `pinned` flag.
@@ -303,7 +322,7 @@ If a future iteration wants persistent MRU, the obvious shape is a single `app_s
 ### Unit
 
 - `commands-registry.spec.ts` — `add` / `list` / `subscribe`; duplicate ids replace and warn once; multiple `add` calls compose; the unregister fn returned by `add` removes only what it added.
-- `commands-rank.spec.ts` — fixture catalog + queries → expected order. Covers MRU precedence, prefix > substring, keyword fallback.
+- `commands-rank.spec.ts` — fixture catalog + queries → expected order. Covers MRU precedence, prefix > substring, keyword fallback, the fuzzy (subsequence) last bucket, and `hideWhenEmptyQuery`.
 - `commands-when.spec.ts` — `when` returning false hides the command; `when` throwing is treated as false and warns once.
 
 ### Component
@@ -311,7 +330,7 @@ If a future iteration wants persistent MRU, the obvious shape is a single `app_s
 - `command-palette-shell.spec.tsx` — `⌘K` opens, Esc closes, click-outside closes; focus restored.
 - `command-palette-keyboard.spec.tsx` — arrow keys move cursor, Enter performs and closes.
 - `command-palette-search.spec.tsx` — typing filters; group headers hide when empty; "no matches" copy.
-- `command-palette-mru.spec.tsx` — performing twice in a row leaves the command at the top of RECENT.
+- `command-palette-mru.spec.tsx` — the stored history seeds RECENT; a perform writes it back, newest first; unknown ids and malformed values are ignored; a failed read leaves an empty RECENT.
 - `register-commands.spec.tsx` — `useRegisterCommands` registers on mount, unregisters on unmount, replaces on `deps` change.
 - `palette-context.spec.tsx` — context exposes the right `pathname` / `connectionId` / `activeTab` for each route fixture.
 
