@@ -7,6 +7,7 @@ import { DbCollectionNavigator } from '../../src/pages/Workspace/DbCollectionNav
 import { DEFAULT_AGGREGATION_TAB_STATE } from '@shared/defaults';
 import { connectionFixture, installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import type { CollectionInfo } from '../../shared/ipc';
+import type { AggregationTabState } from '@shared/types';
 
 afterEach(() => {
   uninstallAtelierMock();
@@ -25,6 +26,7 @@ const row = (name: string, type: 'collection' | 'view'): CollectionInfo => ({
 function mountNavigatorAndTab(
   rows: () => CollectionInfo[],
   mocks: Parameters<typeof installAtelierMock>[0],
+  state: AggregationTabState = DEFAULT_AGGREGATION_TAB_STATE,
 ) {
   installAtelierMock({
     meta: {
@@ -48,7 +50,7 @@ function mountNavigatorAndTab(
         connectionId="c1"
         dbName="shop"
         collection="orders"
-        state={DEFAULT_AGGREGATION_TAB_STATE}
+        state={state}
         darkMode={false}
         sourceCount={null}
         onPatch={vi.fn()}
@@ -95,11 +97,16 @@ describe('Save as collection — navigator refresh', () => {
           }) as never,
         },
       },
+      // Save as… needs a result to save.
+      {
+        ...DEFAULT_AGGREGATION_TAB_STATE,
+        lastRun: { rows: [{ a: 1 }], durationMs: 1, ranAt: '2026-01-01T00:00:00.000Z', stageCounts: {}, stageSamples: {} },
+      },
     );
     await screen.findByTestId('nav-coll-shop-orders');
     expect(screen.queryByTestId('nav-coll-shop-monthly')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save to collection' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save as…' }));
     fireEvent.change(await screen.findByLabelText(/Target collection/), { target: { value: 'monthly' } });
     fireEvent.change(screen.getByLabelText(/to confirm/i), { target: { value: 'monthly' } });
     fireEvent.click(screen.getByRole('button', { name: 'Confirm $out' }));
