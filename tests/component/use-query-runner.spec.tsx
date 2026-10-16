@@ -444,6 +444,209 @@ describe('useQueryRunner', () => {
     expect(emptyCall).toBeDefined();
   });
 
+  describe('plan side-fire (plan badge)', () => {
+    const plan = { queryPlanner: { winningPlan: { stage: 'IXSCAN', indexName: 'a_1' } } };
+
+    it('explains a successful find once at queryPlanner and patches lastRun.plan', async () => {
+      const documents = [{ _id: 1 }];
+      const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents, durationMs: 4, hasMore: false }),
+          count: async () => ({ count: 1 }),
+          explain: explainSpy,
+        },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({
+          active: makeTarget({
+            queryRaw: '{"a":1}',
+            builder: { projection: [], sort: '{"b":-1}', limit: '', projectionRaw: '{"a":1}' },
+          }),
+          patchCollectionState: patch,
+          loadingDelayMs: 0,
+        }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+
+      await waitFor(() => {
+        const planned = patch.mock.calls.find((c) => c[1].lastRun?.plan !== undefined);
+        expect(planned?.[1].lastRun.plan).toBe(plan);
+        // The plan rides on the same run's result, not a fresh blank one.
+        expect(planned?.[1].lastRun.documents).toBe(documents);
+        expect(planned?.[1].lastRun.durationMs).toBe(4);
+      });
+      expect(explainSpy).toHaveBeenCalledTimes(1);
+      expect(explainSpy).toHaveBeenCalledWith({
+        connectionId: 'c1',
+        dbName: 'app',
+        collection: 'users',
+        filter: '{"a":1}',
+        sort: '{"b":-1}',
+        projection: '{"a":1}',
+        verbosity: 'queryPlanner',
+      });
+    });
+
+    it('does not delay the documents or the count behind the explain', async () => {
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents: [], durationMs: 1, hasMore: false }),
+          count: async () => ({ count: 9 }),
+          explain: () => new Promise<never>(() => {}),
+        },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({ active: makeTarget(), patchCollectionState: patch, loadingDelayMs: 0 }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+
+      await waitFor(() =>
+        expect(patch.mock.calls.some((c) => c[1].totalCount === 9)).toBe(true),
+      );
+      expect(patch.mock.calls.some((c) => c[1].lastRun?.documents !== undefined)).toBe(true);
+    });
+
+    it('a rejected explain leaves the documents patched, with no plan and no error', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents: [{ _id: 1 }], durationMs: 4, hasMore: false }),
+          count: async () => ({ count: 1 }),
+          explain: async () => {
+            throw new Error('explain refused');
+          },
+        },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({ active: makeTarget(), patchCollectionState: patch, loadingDelayMs: 0 }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+
+      await waitFor(() => expect(warn).toHaveBeenCalled());
+      const runs = patch.mock.calls.filter((c) => c[1].lastRun !== undefined);
+      expect(runs).toHaveLength(1);
+      expect(runs[0][1].lastRun.documents).toEqual([{ _id: 1 }]);
+      expect(runs[0][1].lastRun.plan).toBeUndefined();
+      expect(runs[0][1].lastRun.error).toBeUndefined();
+    });
+
+    it('a run superseded before its explain resolves never patches that stale plan', async () => {
+      let resolveExplain1: ((v: { plan: unknown; verbosity: string }) => void) | undefined;
+      const explain1 = new Promise<{ plan: unknown; verbosity: string }>((res) => {
+        resolveExplain1 = res;
+      });
+      const explainSpy = vi
+        .fn<IpcApi['query']['explain']>()
+        .mockImplementationOnce(() => explain1)
+        .mockImplementationOnce(async () => ({
+          plan: { queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } },
+          verbosity: 'queryPlanner',
+        }));
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents: [], durationMs: 1, hasMore: false }),
+          count: async () => ({ count: 0 }),
+          explain: explainSpy,
+        },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({ active: makeTarget(), patchCollectionState: patch, loadingDelayMs: 0 }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        await result.current.run();
+      });
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+
+      await act(async () => {
+        resolveExplain1!({ plan, verbosity: 'queryPlanner' });
+        await explain1;
+      });
+      const planPatches = patch.mock.calls.filter((c) => c[1].lastRun?.plan !== undefined);
+      expect(planPatches).toHaveLength(1);
+      expect(planPatches[0][1].lastRun.plan).not.toBe(plan);
+    });
+
+    it('does not explain on the past-cap short-circuit', async () => {
+      const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents: [], durationMs: 0, hasMore: false }),
+          count: async () => ({ count: 0 }),
+          explain: explainSpy,
+        },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({
+          active: makeTarget({
+            page: 1,
+            pageSize: 50,
+            builder: { projection: [], sort: '', limit: '10' },
+          }),
+          patchCollectionState: patch,
+          loadingDelayMs: 0,
+        }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+
+      expect(explainSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not explain a refused filter or a failed find', async () => {
+      const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
+      installAtelierMock({
+        query: {
+          find: async () => {
+            throw Object.assign(new Error('nope'), { code: 'INTERNAL' });
+          },
+          count: async () => ({ count: 0 }),
+          explain: explainSpy,
+        },
+      });
+      const patch = vi.fn();
+      const refused = renderHook(() =>
+        useQueryRunner({
+          active: makeTarget({ queryRaw: 'not json' }),
+          patchCollectionState: patch,
+          loadingDelayMs: 0,
+        }),
+      );
+      await act(async () => {
+        await refused.result.current.run();
+      });
+      const failed = renderHook(() =>
+        useQueryRunner({ active: makeTarget(), patchCollectionState: patch, loadingDelayMs: 0 }),
+      );
+      await act(async () => {
+        await failed.result.current.run();
+      });
+
+      expect(explainSpy).not.toHaveBeenCalled();
+    });
+  });
+
   it('records a session event with queryRunKey when a recorder is supplied', async () => {
     installAtelierMock({
       query: {

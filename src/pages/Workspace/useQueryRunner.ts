@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CollectionTabState, ValType } from '@shared/types';
+import type { CollectionTabState, LastRun, ValType } from '@shared/types';
 import { api, getErrorMessage } from '../../api/atelier';
 import { invalidateRecentValuesCache } from '../../features/fieldSuggestions/sources';
 import { toDisplayValue } from '../../utils/displayValue';
@@ -317,14 +317,29 @@ export function useQueryRunner({
         const effectiveHasMore =
           findResult.hasMore &&
           (userLimit === null || skip + limit < userLimit);
-        patchState(target.id, {
-          lastRun: {
-            documents: findResult.documents,
-            durationMs: findResult.durationMs,
-            ranAt: new Date().toISOString(),
-          },
-          lastRunHasMore: effectiveHasMore,
-        });
+        const lastRun: LastRun = {
+          documents: findResult.documents,
+          durationMs: findResult.durationMs,
+          ranAt: new Date().toISOString(),
+        };
+        patchState(target.id, { lastRun, lastRunHasMore: effectiveHasMore });
+        // Fire-and-forget, like the count below: the plan badge's data. The
+        // result never waits on it, and a failed explain only means no badge.
+        api.query
+          .explain({
+            connectionId: target.connectionId,
+            dbName: target.dbName,
+            collection: target.collection,
+            filter,
+            sort: compiled.sort,
+            projection: compiled.projection,
+            verbosity: 'queryPlanner',
+          })
+          .then((res) => {
+            if (runToken !== runTokenRef.current.get(target.id)) return;
+            patchState(target.id, { lastRun: { ...lastRun, plan: res.plan } });
+          })
+          .catch((err: unknown) => console.warn('[query] plan explain failed', err));
         // Fire-and-forget: persists the values this run's conditions actually
         // carried for the value-suggestion popover. Never
         // blocks or fails the run itself — main re-filters by op and secret
