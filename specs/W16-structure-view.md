@@ -765,7 +765,8 @@ already fetches (no IPC change):
 - **Range** — `min – max · avg x` over the field's numeric occurrences
   (`number`, `long`, `decimal`), or `—`.
 
-A scalar is a value that is neither an array nor a plain sub-document. An EJSON
+A scalar is a value that is neither an array nor a plain sub-document, so
+`null` is one. An EJSON
 sentinel (`ObjectId`, `Date`, a number) is one scalar. `1` and `"1"`, and an
 `Int32` 1 and a `Long` 1, are different values. The scalar elements of an array
 are not counted — the walk still looks only at an array's object elements, as
