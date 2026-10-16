@@ -28,6 +28,9 @@ export function SaveAsViewModal({ connectionId, dbName, collection, stages, onCl
   const trimmed = name.trim();
 
   const requestClose = async () => {
+    // A close mid-create lets the dialog be reopened with a new draft, which
+    // the create's completion would then close.
+    if (submitting) return;
     if (name === '') return close();
     const discard = await confirmDestructive({
       title: 'Discard changes?',

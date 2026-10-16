@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { render, screen, fireEvent, waitFor } from '../helpers/render';
+import { act, render, screen, fireEvent, waitFor } from '../helpers/render';
 import { SaveAsViewModal } from '../../src/pages/Workspace/Aggregation/SaveAsViewModal';
 import { stagesToPipelineJson } from '../../src/pages/Workspace/Aggregation/pipeline';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
@@ -16,8 +16,10 @@ const STAGES: Stage[] = [
   { id: 2, op: '$limit', body: '10', enabled: false },
 ];
 
-function renderModal(stages: Stage[] = STAGES) {
-  const create = vi.fn(async (input: { collection: string }) => ({ name: input.collection }));
+function renderModal(
+  stages: Stage[] = STAGES,
+  create = vi.fn(async (input: { collection: string }) => ({ name: input.collection })),
+) {
   installAtelierMock({ collection: { create } });
   const onClose = vi.fn();
   const onCreated = vi.fn();
@@ -116,5 +118,28 @@ describe('SaveAsViewModal', () => {
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(screen.queryByRole('dialog', { name: 'Discard changes?' })).toBeNull();
+  });
+
+  // A dismissal mid-create would let the user reopen the dialog and type a new
+  // name, and the first create's completion would then close that one.
+  it('does not close or ask while the view is being created', async () => {
+    let resolve!: () => void;
+    const create = vi.fn(() => new Promise<{ name: string }>((r) => (resolve = () => r({ name: 'open_orders' }))));
+    const { onClose, onCreated } = renderModal(STAGES, create);
+    await userEvent.type(screen.getByLabelText('View name'), 'open_orders');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create view' }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await act(async () => {});
+    expect(screen.queryByRole('dialog', { name: 'Discard changes?' })).toBeNull();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await act(async () => {});
+    expect(screen.queryByRole('dialog', { name: 'Discard changes?' })).toBeNull();
+
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => resolve());
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('open_orders'));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
