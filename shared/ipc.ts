@@ -12,6 +12,7 @@ import type {
   UndoResult,
   CollectionCreateInput,
   CollectionDropInput,
+  CollectionModifyInput,
   CollectionRenameInput,
   CollectionTab,
   CollectionTabState,
@@ -200,6 +201,8 @@ export interface IpcApi {
   conn: {
     list: () => Promise<ConnectionSummary[]>;
     get: (id: string) => Promise<Connection>;
+    /** The saved connection's URI, built in main without its password. */
+    getUri: (id: string) => Promise<{ uri: string }>;
     create: (input: ConnectionInput) => Promise<Connection>;
     update: (id: string, patch: ConnectionUpdate) => Promise<Connection>;
     delete: (id: string) => Promise<{ id: string }>;
@@ -263,6 +266,8 @@ export interface IpcApi {
     create: (input: CollectionCreateInput) => Promise<{ name: string }>;
     drop: (input: CollectionDropInput) => Promise<{ dropped: boolean }>;
     rename: (input: CollectionRenameInput) => Promise<{ name: string; auditId?: string }>;
+    /** `collMod`: a collection's validation rules, or a view's source and pipeline. */
+    modify: (input: CollectionModifyInput) => Promise<{ ok: true }>;
   };
 
   database: {
@@ -487,6 +492,7 @@ export const IPC_CHANNELS = {
   // Connection CRUD -----------------------------------------
   connList:      'conn:list',
   connGet:       'conn:get',
+  connGetUri:    'conn:getUri',
   connCreate:    'conn:create',    // SECRET_INPUT
   connUpdate:    'conn:update',    // SECRET_INPUT
   connDelete:    'conn:delete',
@@ -537,6 +543,7 @@ export const IPC_CHANNELS = {
   collectionCreate: 'collection:create',
   collectionDrop:   'collection:drop',
   collectionRename: 'collection:rename',
+  collectionModify: 'collection:modify',
   databaseDrop:     'database:drop',
 
   // Users -----------------------------------------

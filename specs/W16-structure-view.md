@@ -95,7 +95,9 @@ Structure is a single vertically scrolling pane holding sections in order:
 
 1. **Statistics** — one collection's counts and sizes (§13).
 2. **Indexes** — the list, with create and drop.
-3. **Schema** — today's `SchemaView`, demoted from a view to a section, with
+3. **Validation** — the validation rules, level and action, editable (§15).
+   Plain collections only.
+4. **Schema** — today's `SchemaView`, demoted from a view to a section, with
    per-field depth (§14).
 
 The statistics section and the schema depth arrived after Tiers 1–4 without a
@@ -682,6 +684,7 @@ are specified but untracked") is what that failure looks like once it has aged:
 | Collection stats header | shipped as a Structure section, §13 (not as a navigation change: a nav click still opens a tab on Documents) |
 | Schema depth — cardinality, numeric stats | shipped inside the schema section, §14 |
 | Schema sample values and value distributions | out of scope, §14.3 |
+| Validation rules | shipped as a Structure section, §15 |
 | Composition-time index marking | W15 §14.2; sequence after Tier 1 and reuse its collection-scoped list (§5) |
 | Suggesting an extension to an existing index | §4.4; no issue yet — file if it survives first use |
 | Cross-collection index overview | §2; no issue, and no demand |
@@ -861,3 +864,104 @@ an empty sample. A tab persisted with a larger size samples at the bound.
   loses `numeric` and keeps `distinct`; a `price` field keeps both.
 - Component, `StructureView`: the Distinct and Range cells; the three sample
   sizes; a restored size above the bound.
+
+---
+
+## 15. Validation rules (Tier 7)
+
+### 15.1 Where it lives
+
+A collection's validator is collection-scoped admin state, so under the §2
+rule it lives in Structure, not in the Connection Manager or a dialog off the
+navigator. It sits **between Indexes and Schema**: the shape the server
+enforces next to the shape the sample observed.
+
+### 15.2 What it shows and edits
+
+A `Validation` region. Read mode shows the validator pretty-printed as
+readable JSON (`"minimum": 0`, not `{"$numberInt":"0"}`; only wrappers that
+re-parse to the same BSON are dropped), or `No validation rules` when there is
+none (an empty `{}` validator counts as none), then `Level: <level>` and
+`Action: <action>`. `listCollections` reports
+the level and action only once they were set, so an absent one shows the
+server default, `strict` and `error`.
+
+`Edit rules` swaps in a `Validator` textarea prefilled with the same readable
+rules, so saving them unchanged sends the same BSON, a `Validation level`
+select (off, strict, moderate) and a `Validation action` select (error, warn,
+errorAndLog), with Save and Cancel. `errorAndLog` round-trips when the server
+reports it; MongoDB 8.0.5 refuses it in `collMod`, and that refusal shows
+inline like any other. Save requires the text to parse as
+a JSON document (not an array, not `null`) and says so inline otherwise, with
+no call. An emptied textarea saves `{}`, which clears the rules. The region
+renders for a plain collection only: a view has no validation rules, and the
+server refuses `collMod` validation options on a time-series collection
+(MongoDB 8.0.5 answers `InvalidOptions`, code 72, for both `validator` and
+`validationLevel`).
+
+Save calls `collection:modify` with `{ validator, validationLevel,
+validationAction }` and then reads the details again; the button stays in its
+submitting state and the editor stays open until that read is in, so the old
+rules never flash back. A refusal, a read-only
+connection's included, is a `role="alert"` in the section and the editor stays
+open; like the indexes section, nothing is greyed out up front, and main is the
+guard (ADR 0005).
+
+The region reads `CollectionDetails.options` from the same
+`meta:collectionDetails` reply the statistics section shows: Structure reads it
+once on entry and hands it to both, so a save refreshes the figures too. While
+that read is pending or has failed, the region is not rendered, and the
+statistics section carries the alert.
+
+### 15.3 `collection:modify`
+
+A write channel taking `{ connectionId, dbName, collection, options }` and
+returning `{ ok: true }`. It runs `collMod` on the metadata budget. The options
+are either validation keys (`validator`, `validationLevel`,
+`validationAction`) or a view's definition (`viewOn` and `pipeline`, together),
+never both: the router refuses an empty `options`, half a view definition and a
+mix as `VALIDATION` before the service runs. Main parses `validator` as an EJSON
+document and `pipeline` as an EJSON array of single-operator stages with no
+`$out` or `$merge`, and refuses anything else as `VALIDATION` naming the field.
+A missing collection is `NOT_FOUND`, and a read-only connection is refused by
+the write grant. W02's Modify view is the channel's other caller.
+
+### 15.4 Acceptance criteria
+
+- Structure renders a Validation region after Indexes and before the schema
+  section.
+- The region shows the validator, level and action from
+  `meta:collectionDetails`; with none set it says `No validation rules`,
+  `Level: strict`, `Action: error`.
+- Edit rules, a changed level, Save calls `collection:modify` with the
+  validator, level and action, then reads the details again, and read mode
+  shows the new level only once that read is in.
+- Rules are shown and edited as readable JSON, and saving them unchanged
+  sends an equivalent validator.
+- The action select offers `errorAndLog`, and a reported `errorAndLog` shows.
+- An emptied validator saves `{}`; text that is not a JSON document is refused
+  inline with no call.
+- A refused save shows inline and keeps the editor open.
+- A view, a time-series collection and a failed details read render no
+  Validation region.
+- Entering Structure still reads `meta:collectionDetails` once.
+- `collection:modify` sets a validator the server then enforces, clears it with
+  `{}`, updates level and action alone, and replaces a view's definition;
+  invalid EJSON, a non-document validator and a write stage are `VALIDATION`;
+  a missing collection is `NOT_FOUND`; a read-only connection is refused; the
+  command carries `maxTimeMS`.
+- `collection:modify` has its schema, preload binding, handler registration and
+  shared type, is classified as a write channel, and carries no `SECRET_INPUT`
+  tag.
+
+### 15.5 Test cases
+
+- Integration, `CollectionAdminService.modify` and view create: the cases in
+  §15.4 against the memory server.
+- Integration, router: empty options, half a view, mixed keys and an unknown
+  action are `VALIDATION`; valid payloads of both kinds reach the service.
+- Component, `StructureView`: placement, read mode, `{}` as no rules, edit and
+  save with refetch, `{}` on an empty textarea, invalid input, a refused save,
+  a view.
+- E2E, `w02-views-validation.e2e.ts`: Edit rules saves a `$jsonSchema` that the
+  section then shows.

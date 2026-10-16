@@ -29,6 +29,7 @@ const WRITE_CHANNELS = new Set<string>([
   IPC_CHANNELS.collectionCreate,
   IPC_CHANNELS.collectionDrop,
   IPC_CHANNELS.collectionRename,
+  IPC_CHANNELS.collectionModify,
   IPC_CHANNELS.databaseDrop,
   IPC_CHANNELS.indexCreate,
   IPC_CHANNELS.indexDrop,
@@ -77,6 +78,8 @@ const READ_CHANNELS = new Set<string>([
 const NON_MONGO_CHANNELS = new Set<string>([
   IPC_CHANNELS.connList,
   IPC_CHANNELS.connGet,
+  // Builds a URI from the saved row; never reaches a MongoDB deployment.
+  IPC_CHANNELS.connGetUri,
   IPC_CHANNELS.connCreate,
   // Connection Export touches SQLite and files only, never a MongoDB deployment.
   IPC_CHANNELS.connExport,
@@ -161,7 +164,7 @@ describe('read-only guard — IPC channel classification is exhaustive', () => {
   });
 
   it('every write channel name actually looks write-shaped', () => {
-    const writeVerb = /insert|update|replace|delete|drop|create|rename|runAndSave|write|import/i;
+    const writeVerb = /insert|update|replace|delete|drop|create|rename|modify|runAndSave|write|import/i;
     // These don't carry a write verb in their name because they're not
     // unconditional writes: agg:run is conditional on pipeline content
     // (guarded inline via isWriteStage), and mshell:start/script:run are the

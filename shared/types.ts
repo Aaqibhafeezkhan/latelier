@@ -1131,7 +1131,8 @@ export interface IndexDropInput {
 // ─── Collection / database admin (T1.1) ──────────────────────────────────────
 
 export type ValidationLevel = 'off' | 'strict' | 'moderate';
-export type ValidationAction = 'error' | 'warn';
+/** `errorAndLog` is newer than MongoDB 8.0: 8.0.5 refuses it in `collMod` as an invalid enum value. */
+export type ValidationAction = 'error' | 'warn' | 'errorAndLog';
 
 export interface CollectionCreateOptions {
   capped?: boolean;
@@ -1152,6 +1153,10 @@ export interface CollectionCreateOptions {
   validator?: string;
   validationLevel?: ValidationLevel;
   validationAction?: ValidationAction;
+  /** Makes a view on this collection of the same database; `pipeline` needs it. */
+  viewOn?: string;
+  /** EJSON canonical array of stages; write stages are refused. */
+  pipeline?: string;
 }
 
 export interface CollectionCreateInput {
@@ -1159,6 +1164,27 @@ export interface CollectionCreateInput {
   dbName: string;
   collection: string;
   options: CollectionCreateOptions;
+}
+
+/**
+ * `collMod` on an existing collection: either its validation rules or, for a
+ * view, its definition (`viewOn` and `pipeline` together), never both at once.
+ */
+export interface CollectionModifyOptions {
+  /** EJSON canonical document; `'{}'` clears the rules. */
+  validator?: string;
+  validationLevel?: ValidationLevel;
+  validationAction?: ValidationAction;
+  viewOn?: string;
+  /** EJSON canonical array of stages. */
+  pipeline?: string;
+}
+
+export interface CollectionModifyInput {
+  connectionId: string;
+  dbName: string;
+  collection: string;
+  options: CollectionModifyOptions;
 }
 
 export interface CollectionDropInput {

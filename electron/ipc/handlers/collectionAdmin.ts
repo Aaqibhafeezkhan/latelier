@@ -19,11 +19,44 @@ const CreateOptions = z.object({
   collation: z.string().optional(),
   validator: z.string().optional(),
   validationLevel: z.enum(['off', 'strict', 'moderate']).optional(),
-  validationAction: z.enum(['error', 'warn']).optional(),
+  validationAction: z.enum(['error', 'warn', 'errorAndLog']).optional(),
+  viewOn: NonEmpty.optional(),
+  pipeline: z.string().optional(),
+}).refine((o) => o.pipeline === undefined || o.viewOn !== undefined, {
+  message: 'pipeline requires viewOn',
+  path: ['pipeline'],
 });
 
 const CreateInput = CollectionTargetSchema.extend({
   options: CreateOptions,
+});
+
+const ModifyOptions = z
+  .object({
+    validator: z.string().optional(),
+    validationLevel: z.enum(['off', 'strict', 'moderate']).optional(),
+    validationAction: z.enum(['error', 'warn', 'errorAndLog']).optional(),
+    viewOn: NonEmpty.optional(),
+    pipeline: z.string().optional(),
+  })
+  .superRefine((o, ctx) => {
+    const isView = o.viewOn !== undefined || o.pipeline !== undefined;
+    const isValidation =
+      o.validator !== undefined || o.validationLevel !== undefined || o.validationAction !== undefined;
+    if (!isView && !isValidation) {
+      ctx.addIssue({ code: 'custom', message: 'nothing to modify' });
+    }
+    // collMod rewrites a view's definition whole, so half of one is refused here.
+    if ((o.viewOn === undefined) !== (o.pipeline === undefined)) {
+      ctx.addIssue({ code: 'custom', message: 'viewOn and pipeline go together', path: ['viewOn'] });
+    }
+    if (isView && isValidation) {
+      ctx.addIssue({ code: 'custom', message: 'a view has no validation rules' });
+    }
+  });
+
+const ModifyInput = CollectionTargetSchema.extend({
+  options: ModifyOptions,
 });
 
 const DropInput = CollectionTargetSchema;
@@ -57,6 +90,12 @@ export function registerCollectionAdminChannels(
     IPC_CHANNELS.collectionRename,
     zodValidator(RenameInput),
     (input) => svc.rename(input),
+  );
+
+  router.register(
+    IPC_CHANNELS.collectionModify,
+    zodValidator(ModifyInput),
+    (input) => svc.modify(input),
   );
 
   router.register(

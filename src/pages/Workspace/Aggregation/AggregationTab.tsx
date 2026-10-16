@@ -37,6 +37,7 @@ import type { SuggestionContext } from '../../../features/fieldSuggestions/types
 import { invalidateSampleSchemaCache } from '../../../features/fieldSuggestions/sources/sampleSchemaSource';
 import { ExplainDrawer } from './ExplainDrawer';
 import { SaveAsCollectionModal } from './SaveAsCollectionModal';
+import { SaveAsViewModal } from './SaveAsViewModal';
 import { saveResultMessage } from './saveResultMessage';
 import { SavePipelineModal } from './SavePipelineModal';
 
@@ -66,6 +67,8 @@ export function AggregationTab({
   const [explainOpen, setExplainOpen] = React.useState(false);
   const [saveOpen, setSaveOpen] = React.useState(false);
   const [saveAsCollectionOpen, setSaveAsCollectionOpen] = React.useState(false);
+  // The repaired stages the view is saved from, or null while the dialog is closed.
+  const [saveAsViewStages, setSaveAsViewStages] = React.useState<Stage[] | null>(null);
   const [writeWarning, setWriteWarning] = React.useState<{
     op: string;
     target?: string;
@@ -445,6 +448,9 @@ export function AggregationTab({
     setSaveAsCollectionOpen(true);
   };
 
+  // The repaired array, not `stages`: the repair patch has not round-tripped yet.
+  const onSaveAsView = () => setSaveAsViewStages(repairStageBodies());
+
   // ── Palette commands + keyboard handlers ───────────────────────
   // The latest-ref pattern keeps the keyboard handler (registered once via
   // useEffect with [] dep array) reading current callback identities. Without
@@ -649,6 +655,7 @@ export function AggregationTab({
             onHeightCommit={onHeightCommit}
             onViewChange={onViewChange}
             onSaveAsCollection={onSaveAsCollection}
+            onSaveAsView={onSaveAsView}
           />
         </div>
       </div>
@@ -696,6 +703,17 @@ export function AggregationTab({
           stages={stages}
           onClose={() => setSaveAsCollectionOpen(false)}
           onWritten={(info) => notify.success(saveResultMessage(info))}
+        />
+      )}
+
+      {saveAsViewStages && (
+        <SaveAsViewModal
+          connectionId={connectionId}
+          dbName={dbName}
+          collection={collection}
+          stages={saveAsViewStages}
+          onClose={() => setSaveAsViewStages(null)}
+          onCreated={(name) => notify.success(`Created view “${name}”`)}
         />
       )}
     </div>

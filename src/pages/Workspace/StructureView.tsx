@@ -2,6 +2,8 @@ import type { SchemaTabState } from '@shared/types';
 import { IndexesTab, type IndexCreateRequest } from '../IndexesTab';
 import { CollectionStatsSection } from './CollectionStatsSection';
 import { SchemaView } from './SchemaView';
+import { ValidationSection } from './ValidationSection';
+import { useCollectionDetails } from './useCollectionDetails';
 
 interface Props {
   connectionId: string;
@@ -16,8 +18,9 @@ interface Props {
 
 /**
  * The collection tab's Structure sub-view (W16 Tier 2, ADR 0003): the
- * statistics header and the namespace-scoped indexes stacked above the
- * sampled schema, in one
+ * statistics header, the namespace-scoped indexes and the validation rules
+ * stacked above the sampled schema, so the enforced shape sits next to the
+ * observed one, in one
  * scrolling pane rather than a fourth tab. `IndexesTab` and `SchemaView`
  * each used to own their own `flex:1; overflow:auto` scroller, sized by a
  * flex parent with a definite height (the collection tab's result panel).
@@ -37,9 +40,10 @@ export function StructureView({
   initialCreate,
   onInitialCreateConsumed,
 }: Props) {
+  const { details, error, loading, reload } = useCollectionDetails(connectionId, dbName, collection);
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
-      <CollectionStatsSection connectionId={connectionId} dbName={dbName} collection={collection} />
+      <CollectionStatsSection details={details} error={error} loading={loading} onRefresh={() => void reload()} />
       <IndexesTab
         connectionId={connectionId}
         dbName={dbName}
@@ -47,6 +51,16 @@ export function StructureView({
         initialCreate={initialCreate}
         onInitialCreateConsumed={onInitialCreateConsumed}
       />
+      {/* The server refuses collMod rules on a view and on a time-series collection. */}
+      {details?.type === 'collection' && (
+        <ValidationSection
+          connectionId={connectionId}
+          dbName={dbName}
+          collection={collection}
+          details={details}
+          onSaved={reload}
+        />
+      )}
       <SchemaView
         connectionId={connectionId}
         dbName={dbName}

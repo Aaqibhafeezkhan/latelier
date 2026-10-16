@@ -10,6 +10,26 @@ describe('buildCreateCollectionOptions', () => {
     expect(buildCreateCollectionOptions({})).toEqual({});
   });
 
+  it('refuses a pipeline without viewOn as VALIDATION on pipeline', () => {
+    expect(() => buildCreateCollectionOptions({ pipeline: '[]' })).toThrow(ValidationError);
+    expect(() => buildCreateCollectionOptions({ pipeline: '[]' })).toThrow(
+      expect.objectContaining({ code: 'VALIDATION', details: { field: 'pipeline' } }),
+    );
+  });
+
+  it('builds a view from viewOn and its pipeline', () => {
+    expect(buildCreateCollectionOptions({ viewOn: 'src', pipeline: '[{"$limit":1}]' })).toEqual({
+      viewOn: 'src',
+      pipeline: [{ $limit: 1 }],
+    });
+  });
+
+  it('accepts the errorAndLog validation action', () => {
+    expect(buildCreateCollectionOptions({ validationAction: 'errorAndLog' })).toEqual({
+      validationAction: 'errorAndLog',
+    });
+  });
+
   it('throws VALIDATION when capped is set without a size', () => {
     expect(() => buildCreateCollectionOptions({ capped: true })).toThrow(ValidationError);
     try {
