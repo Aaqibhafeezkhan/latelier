@@ -85,7 +85,10 @@ Server implementation:
 
 - Slide-in from the right, 520 px wide, full height.
 - Header: title, verbosity selector, close.
-- Body: syntax-highlighted EJSON of the explain plan, with expand/collapse buttons for nested sections.
+- Body: a stage tree above the syntax-highlighted EJSON of the explain plan, which has expand/collapse buttons for nested sections.
+- Stage tree: one row per stage of the winning plan (`buildPlanTree`), with the index name and key pattern on an `IXSCAN`. At `executionStats` and above each row carries the figures its own stage reported (`nReturned`, `docsExamined`, `keysExamined`, `~Nms`); at `queryPlanner` the rows have no figures. A `COLLSCAN` row uses the warning treatment. An aggregation shows a `pipeline` root: the `$cursor` subtree first, then one row per later `$`-operator. A plan the builder does not recognize shows no tree; the EJSON view is still there.
+- Ceiling: a slot-based (SBE) plan shows its classic stage names from `queryPlan`, with no per-stage figures, because the executed slot tree uses different names. Mapping them by `planNodeId` would lift it.
+- A caller that already holds a plan (the result bar's plan badge) passes it as `initialPlan`: the drawer shows it without fetching, and a verbosity change fetches.
 - Footer: `Copy` (clipboard), `Download` (save JSON file).
 - A small "Stages with write ops were omitted" notice if applicable.
 
@@ -116,6 +119,11 @@ Server implementation:
 - **save-as-collection-modal.spec.tsx**: require name typed to enable Confirm; submitting calls `api.agg.runAndSave`.
 - **explain-drawer.spec.tsx**: click Explain → drawer opens; verbosity toggle re-fetches.
 - **explain-copy-download.spec.tsx**: Copy writes to clipboard; Download calls `app:saveFile`.
+- **explain-drawer.spec.tsx**: the stage tree renders a row per stage with its figures, a `COLLSCAN` row says so, an unrecognized plan shows no tree; with `initialPlan` the drawer does not fetch on open (StrictMode included) and fetches once on a verbosity change.
+
+### Unit
+- **explain-summary.spec.ts**: `buildPlanTree` for classic, `inputStages`, queryPlanner-only, aggregation, SBE and sharded plans; non-numeric figures are not copied; unrecognized input gives `null`.
 
 ### E2E
 - **agg-full-flow.e2e.ts**: open agg tab → build pipeline → Run → Save (enters modal) → Save as collection → verify new collection exists → Explain → drawer visible with plan.
+- **a06-explain-plan.e2e.ts**: at `executionStats` the drawer's stage tree shows the stage name and its figures.

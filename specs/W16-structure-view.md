@@ -1,6 +1,6 @@
 # W16 — Structure: the collection's shape and access paths
 
-> **Status: Accepted.** Tiers 1, 2 and 4 shipped. Tier 3, the plan badge, is not built.
+> **Status: Implemented.**
 
 ## Purpose
 
@@ -221,7 +221,9 @@ omitting the execution metrics rather than throwing:
 
 The badge is a button. Activating it opens `ExplainDrawer` on the plan already
 fetched, from which the user can request a heavier verbosity or, per §4,
-create the index.
+create the index. The plan reaches the drawer as `initialPlan`: opening it
+makes no request, and only changing the verbosity fetches. The plan lives on
+`lastRun.plan` in renderer memory, never persisted with the tab.
 
 **The explain never blocks or fails the run.** It is issued after the find
 resolves; if it errors or is cancelled, the rows still render and the badge is
