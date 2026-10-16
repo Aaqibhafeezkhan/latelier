@@ -225,6 +225,12 @@ create the index. The plan reaches the drawer as `initialPlan`: opening it
 makes no request, and only changing the verbosity fetches. The plan lives on
 `lastRun.plan` in renderer memory, never persisted with the tab.
 
+While the badge is stale (§3.4) the drawer's title reads *Explain plan (not
+current)* and it offers no create-index action, since a suggestion built from
+the query now on screen would not be about the plan being read. Changing the
+verbosity there still explains the query as it is now, not the run that
+produced the plan.
+
 **The explain never blocks or fails the run.** It is issued after the find
 resolves; if it errors or is cancelled, the rows still render and the badge is
 simply absent. A diagnostic must not be able to break the thing it diagnoses.

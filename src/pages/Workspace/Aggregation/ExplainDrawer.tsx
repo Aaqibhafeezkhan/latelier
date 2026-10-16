@@ -74,6 +74,8 @@ interface Props {
    * instead of fetching on open; changing the verbosity fetches as usual.
    */
   initialPlan?: unknown;
+  /** The plan describes an earlier run than the query now on screen; the title says so. */
+  stale?: boolean;
 }
 
 export function ExplainDrawer({
@@ -83,6 +85,7 @@ export function ExplainDrawer({
   onCancelToken,
   onCreateIndex,
   initialPlan,
+  stale,
 }: Props) {
   const T = themeVars;
   const [verbosity, setVerbosity] = React.useState<ExplainVerbosity>(
@@ -117,9 +120,9 @@ export function ExplainDrawer({
   // The drawer has nothing to save, so every close is a dismiss.
   const close = useDialogFocusReturn(onClose);
 
-  // A boolean, not `initialPlan` itself: a re-run replacing the badge's plan
-  // while the drawer is open must not restart the fetch.
-  const hasInitialPlan = initialPlan !== undefined;
+  // Fixed at mount: a re-run replacing the badge's plan (even with none, until
+  // its own explain lands) while the drawer is open must not start a fetch.
+  const [hasInitialPlan] = React.useState(initialPlan !== undefined);
   React.useEffect(() => {
     if (hasInitialPlan && !verbosityTouched) return;
     const token = crypto.randomUUID();
@@ -195,7 +198,7 @@ export function ExplainDrawer({
       onClose={close}
       position="right"
       size={520}
-      title="Explain plan"
+      title={stale ? 'Explain plan (not current)' : 'Explain plan'}
       // Mantine's body is a plain padded block, so the `flex: 1` on the
       // scrolling plan output below has no flex context to resolve against: it
       // would collapse to its intrinsic height and the Copy/Download footer

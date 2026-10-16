@@ -285,10 +285,16 @@ export function ResultBar() {
           type="button"
           data-testid="plan-badge"
           aria-label={`Query plan: ${planLabel}${isStale ? ' (not current)' : ''}`}
+          title={planLabel}
           onClick={() => setPlanOpen(true)}
           style={{
             fontSize: 10,
             padding: '1px 6px',
+            maxWidth: 220,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
             borderRadius: T.rs,
             cursor: 'pointer',
             ...(isStale
@@ -384,7 +390,10 @@ export function ResultBar() {
           initialPlan={lastRun?.plan}
           initialVerbosity="queryPlanner"
           runExplain={runExplain}
-          onCreateIndex={onCreateIndex}
+          stale={isStale}
+          // A suggestion built from the query now on screen would not be about
+          // the plan being read.
+          onCreateIndex={isStale ? undefined : onCreateIndex}
         />
       )}
 

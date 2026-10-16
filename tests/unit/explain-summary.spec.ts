@@ -511,6 +511,140 @@ describe('buildPlanTree', () => {
     expect(root?.children.map((c) => c.stage)).toEqual(['COLLSCAN', '$sort']);
   });
 
+  // `agg:explain` sends the plan through canonical EJSON, so every number in a
+  // real aggregation explain arrives as `{ $numberInt: '2' }` (find:explain does
+  // not). Shape captured from MongoDB 8.0.5 for `aggregate([{ $match: {} }])`.
+  const canonicalAggStats = {
+    queryPlanner: { winningPlan: { isCached: false, stage: 'COLLSCAN', direction: 'forward' } },
+    executionStats: {
+      executionSuccess: true,
+      nReturned: { $numberInt: '2' },
+      executionTimeMillis: { $numberInt: '0' },
+      totalKeysExamined: { $numberInt: '0' },
+      totalDocsExamined: { $numberInt: '2' },
+      executionStages: {
+        isCached: false,
+        stage: 'COLLSCAN',
+        nReturned: { $numberInt: '2' },
+        executionTimeMillisEstimate: { $numberInt: '3' },
+        docsExamined: { $numberInt: '2' },
+        direction: 'forward',
+      },
+    },
+  };
+
+  it('(11) reads figures wrapped as canonical EJSON numbers, as an aggregation explain sends them', () => {
+    expect(buildPlanTree(canonicalAggStats)).toStrictEqual({
+      stage: 'COLLSCAN',
+      collscan: true,
+      nReturned: 2,
+      timeMs: 3,
+      docsExamined: 2,
+      children: [],
+    });
+    expect(summarizeExplain(canonicalAggStats)).toMatchObject({
+      nReturned: 2,
+      docsExamined: 2,
+      keysExamined: 0,
+      executionTimeMillis: 0,
+    });
+  });
+
+  it('(11b) accepts $numberLong and $numberDouble, and refuses anything that is not a lone numeric wrapper', () => {
+    const stage = (v: unknown) =>
+      buildPlanTree({ queryPlanner: { winningPlan: { stage: 'FETCH', nReturned: v } } })?.nReturned;
+    expect(stage({ $numberLong: '12' })).toBe(12);
+    expect(stage({ $numberDouble: '1.5' })).toBe(1.5);
+    expect(stage({ $numberInt: 'abc' })).toBeUndefined();
+    expect(stage({ $numberInt: '' })).toBeUndefined();
+    expect(stage({ $numberInt: '  ' })).toBeUndefined();
+    expect(stage({ $numberInt: 7 })).toBeUndefined();
+    expect(stage({ $numberInt: '1', extra: 1 })).toBeUndefined();
+    expect(stage({ $numberDecimal: '1' })).toBeUndefined();
+  });
+
+  it('(11c) shows a wrapped keyPattern as plain numbers', () => {
+    const root = buildPlanTree({
+      queryPlanner: {
+        winningPlan: {
+          stage: 'DISTINCT_SCAN',
+          indexName: 'sku_1',
+          keyPattern: { sku: { $numberInt: '1' }, tags: [{ $numberInt: '-1' }] },
+        },
+      },
+    });
+    expect(root?.keyPattern).toEqual({ sku: 1, tags: [-1] });
+  });
+
+  it('(11d) leaves non-numeric keyPattern values as they are', () => {
+    const root = buildPlanTree({
+      queryPlanner: { winningPlan: { stage: 'IXSCAN', keyPattern: { body: 'text', gone: null } } },
+    });
+    expect(root?.keyPattern).toStrictEqual({ body: 'text', gone: null });
+  });
+
+  it('(11e) the summary has no metric keys when the stats carry no numbers', () => {
+    const summary = summarizeExplain({
+      queryPlanner: { winningPlan: { stage: 'COLLSCAN' } },
+      executionStats: { nReturned: 'x', totalDocsExamined: null, totalKeysExamined: {}, executionTimeMillis: [] },
+    });
+    expect(Object.keys(summary!).sort()).toEqual(['collscan', 'stages', 'usesIndex']);
+  });
+
+  it('(12c) a shard name that is not a string is not copied', () => {
+    const root = buildPlanTree({
+      queryPlanner: { winningPlan: { stage: 'SHARD_MERGE', shards: [{ shardName: 5, winningPlan: { stage: 'COLLSCAN' } }] } },
+    });
+    expect(root?.children[0]).toStrictEqual({ stage: 'COLLSCAN', collscan: true, children: [] });
+  });
+
+  it('(12) an SBE shard builds its classic tree from queryPlan and names its shard', () => {
+    const root = buildPlanTree({
+      queryPlanner: {
+        winningPlan: {
+          stage: 'SHARD_MERGE',
+          shards: [
+            {
+              shardName: 'rs0',
+              winningPlan: {
+                queryPlan: { stage: 'FETCH', inputStage: { stage: 'IXSCAN', indexName: 'x_1' } },
+                slotBasedPlan: { stages: '[1] ...' },
+              },
+            },
+            { shardName: 'rs1', winningPlan: { stage: 'COLLSCAN' } },
+          ],
+        },
+      },
+    });
+    expect(root?.shardName).toBeUndefined();
+    expect(root?.children.map((c) => [c.shardName, c.stage])).toEqual([
+      ['rs0', 'FETCH'],
+      ['rs1', 'COLLSCAN'],
+    ]);
+    expect(root?.children[0].children[0]).toMatchObject({ stage: 'IXSCAN', indexName: 'x_1' });
+    expect(root?.children[0].children[0].shardName).toBeUndefined();
+  });
+
+  it('(12b) a shard with SBE winning plan ignores its lowercase slot-tree executionStages', () => {
+    const root = buildPlanTree({
+      queryPlanner: { winningPlan: { stage: 'SHARD_MERGE' } },
+      executionStats: {
+        executionStages: {
+          stage: 'SHARD_MERGE',
+          shards: [
+            {
+              shardName: 'rs0',
+              winningPlan: { queryPlan: { stage: 'COLLSCAN' } },
+              executionStages: { stage: 'project', nReturned: 4 },
+            },
+          ],
+        },
+      },
+    });
+    expect(root?.children[0]).toMatchObject({ stage: 'COLLSCAN', shardName: 'rs0' });
+    expect(root?.children[0].nReturned).toBeUndefined();
+  });
+
   it('(10) the badge summary names the index for IXSCAN and none for COLLSCAN', () => {
     expect(summarizeExplain(sortFetchIx)).toMatchObject({ usesIndex: true, collscan: false, indexName: 'a_1' });
     const scan = summarizeExplain({ queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } });

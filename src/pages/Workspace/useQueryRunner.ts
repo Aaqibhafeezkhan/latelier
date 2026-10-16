@@ -140,6 +140,10 @@ export function useQueryRunner({
   // The cancelToken currently owning `target.id`'s in-flight find, so
   // `cancel()` and a superseding `run()` know what to hand `query:cancel`.
   const cancelTokensRef = useRef<Map<string, string>>(new Map());
+  // The last `lastRun` the runner wrote per target. A late plan lands only on
+  // the run that wrote it: a newer run that wrote nothing (cancelled before
+  // its find settled) leaves the screen on this run, and its plan is still true.
+  const lastWrittenRef = useRef<Map<string, LastRun>>(new Map());
   const loadingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
@@ -203,7 +207,10 @@ export function useQueryRunner({
       runTokenRef.current.set(target.id, runToken);
       const cancelToken = crypto.randomUUID();
       cancelTokensRef.current.set(target.id, cancelToken);
-      const patchState = patchRef.current;
+      const patchState = (id: string, patch: Partial<CollectionTabState>) => {
+        if (patch.lastRun) lastWrittenRef.current.set(id, patch.lastRun);
+        patchRef.current(id, patch);
+      };
       const recordEvent = recordRef.current;
       const requested: CollectionTabState = override
         ? { ...target.state, ...override }
@@ -336,7 +343,7 @@ export function useQueryRunner({
             verbosity: 'queryPlanner',
           })
           .then((res) => {
-            if (runToken !== runTokenRef.current.get(target.id)) return;
+            if (lastWrittenRef.current.get(target.id) !== lastRun) return;
             patchState(target.id, { lastRun: { ...lastRun, plan: res.plan } });
           })
           .catch((err: unknown) => console.warn('[query] plan explain failed', err));

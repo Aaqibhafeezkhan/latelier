@@ -93,7 +93,7 @@ test('explain plan: drawer opens with the dialog and renders plan content', asyn
       // stage's own figures. A `$match: {}` over an unindexed collection
       // plans as a collection scan.
       await drawer.getByLabel('Verbosity').selectOption('executionStats');
-      const stageTree = drawer.getByRole('tree', { name: 'Plan stages' });
+      const stageTree = drawer.getByRole('list', { name: 'Plan stages' });
       await expect(stageTree).toBeVisible({ timeout: 8000 });
       await expect(stageTree).toContainText('COLLSCAN');
       await expect(stageTree).toContainText('docsExamined: 2');

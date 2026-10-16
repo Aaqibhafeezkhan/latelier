@@ -585,6 +585,46 @@ describe('useQueryRunner', () => {
       expect(planPatches[0][1].lastRun.plan).not.toBe(plan);
     });
 
+    it('keeps run N\'s plan when the run that followed it was cancelled before it wrote anything', async () => {
+      let resolveExplain1: ((v: { plan: unknown; verbosity: string }) => void) | undefined;
+      const explain1 = new Promise<{ plan: unknown; verbosity: string }>((res) => {
+        resolveExplain1 = res;
+      });
+      const explainSpy = vi.fn<IpcApi['query']['explain']>().mockImplementationOnce(() => explain1);
+      const documents = [{ _id: 1 }];
+      const findSpy = vi
+        .fn<IpcApi['query']['find']>()
+        .mockImplementationOnce(async () => ({ documents, durationMs: 1, hasMore: false }))
+        .mockImplementationOnce(() => new Promise<never>(() => {}));
+      installAtelierMock({
+        query: { find: findSpy, count: async () => ({ count: 1 }), explain: explainSpy, cancel: async () => {} },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({ active: makeTarget(), patchCollectionState: patch, loadingDelayMs: 0 }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(1));
+      // Run N+1 starts (its find never settles) and is cancelled: it wrote no lastRun.
+      act(() => {
+        void result.current.run();
+      });
+      await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(2));
+      act(() => result.current.cancel());
+
+      await act(async () => {
+        resolveExplain1!({ plan, verbosity: 'queryPlanner' });
+        await explain1;
+      });
+
+      const planned = patch.mock.calls.filter((c) => c[1].lastRun?.plan === plan);
+      expect(planned).toHaveLength(1);
+      expect(planned[0][1].lastRun.documents).toBe(documents);
+    });
+
     it('re-explains on a page change, with the same filter, so the badge follows every run', async () => {
       const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
       installAtelierMock({

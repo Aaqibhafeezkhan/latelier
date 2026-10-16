@@ -280,9 +280,10 @@ describe('ExplainDrawer — stage tree', () => {
     const runExplain = vi.fn(async () => ({ plan: statsPlan }));
     render(<ExplainDrawer onClose={() => {}} runExplain={runExplain} />);
 
-    const tree = await screen.findByRole('tree', { name: 'Plan stages' });
-    const items = within(tree).getAllByRole('treeitem');
+    const tree = await screen.findByRole('list', { name: 'Plan stages' });
+    const items = within(tree).getAllByRole('listitem');
     expect(items.map((i) => i.getAttribute('data-stage'))).toEqual(['FETCH', 'IXSCAN']);
+    expect(items.map((i) => i.getAttribute('data-collscan'))).toEqual(['false', 'false']);
     const ixscan = items[1];
     expect(ixscan.textContent).toContain('IXSCAN');
     expect(ixscan.textContent).toContain('a_1');
@@ -297,8 +298,29 @@ describe('ExplainDrawer — stage tree', () => {
     }));
     render(<ExplainDrawer onClose={() => {}} runExplain={runExplain} />);
 
-    const tree = await screen.findByRole('tree', { name: 'Plan stages' });
-    expect(within(tree).getByRole('treeitem').textContent).toContain('COLLSCAN');
+    const tree = await screen.findByRole('list', { name: 'Plan stages' });
+    const row = within(tree).getByRole('listitem');
+    expect(row.textContent).toContain('COLLSCAN');
+    expect(row.getAttribute('data-collscan')).toBe('true');
+  });
+
+  it('names the shard on the root row of each shard\'s plan', async () => {
+    const runExplain = vi.fn(async () => ({
+      plan: {
+        queryPlanner: {
+          winningPlan: {
+            stage: 'SHARD_MERGE',
+            shards: [{ shardName: 'rs0', winningPlan: { queryPlan: { stage: 'COLLSCAN' } } }],
+          },
+        },
+      },
+    }));
+    render(<ExplainDrawer onClose={() => {}} runExplain={runExplain} />);
+
+    const tree = await screen.findByRole('list', { name: 'Plan stages' });
+    const rows = within(tree).getAllByRole('listitem');
+    expect(rows.map((r) => r.getAttribute('data-stage'))).toEqual(['SHARD_MERGE', 'COLLSCAN']);
+    expect(rows[1].textContent).toContain('shard rs0');
   });
 
   it('an unrecognized plan renders no stage tree but still renders the JSON tree', async () => {
@@ -307,7 +329,7 @@ describe('ExplainDrawer — stage tree', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'Explain plan' });
     await waitFor(() => expect(dialog.textContent).toContain('weird'));
-    expect(screen.queryByRole('tree', { name: 'Plan stages' })).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Plan stages' })).toBeNull();
   });
 });
 
@@ -336,6 +358,31 @@ describe('ExplainDrawer — initialPlan', () => {
     await waitFor(() => expect(dialog.textContent).toContain('fresh_1'));
     expect(runExplain).toHaveBeenCalledTimes(1);
     expect(runExplain).toHaveBeenCalledWith('executionStats', expect.any(String));
+  });
+
+  it('does not fetch when the supplied plan goes away while the drawer is open', async () => {
+    const runExplain = vi.fn(async () => ({ plan }));
+    const view = render(
+      <ExplainDrawer onClose={() => {}} initialPlan={plan} runExplain={runExplain} />,
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Explain plan' });
+    expect(within(dialog).getByTestId('explain-summary-strip')).toBeTruthy();
+
+    // A re-run replaces `lastRun` (no plan yet) behind the open drawer.
+    view.rerender(
+      <ExplainDrawer onClose={() => {}} initialPlan={undefined} runExplain={runExplain} />,
+    );
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(runExplain).not.toHaveBeenCalled();
+    expect(within(dialog).getByTestId('explain-summary-strip')).toBeTruthy();
+  });
+
+  it('names itself "(not current)" when told the plan is stale', async () => {
+    render(
+      <ExplainDrawer onClose={() => {}} initialPlan={plan} stale runExplain={vi.fn(async () => ({ plan }))} />,
+    );
+    expect(await screen.findByRole('dialog', { name: 'Explain plan (not current)' })).toBeTruthy();
   });
 
   it('does not fetch on mount under StrictMode either', async () => {

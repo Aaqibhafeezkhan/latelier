@@ -89,6 +89,34 @@ function extractWinningPlan(inner: Record<string, unknown>): Record<string, unkn
   return winningPlan;
 }
 
+const CANONICAL_NUMBER_KEYS = ['$numberInt', '$numberLong', '$numberDouble'];
+
+/**
+ * A number, whether it arrived bare or as the canonical-EJSON wrapper
+ * (`{ $numberInt: '2' }`). `agg:explain` sends its plan canonical-encoded, so
+ * every figure of an aggregation explain is wrapped; `query:explain` sends it
+ * bare. Anything else, including a malformed wrapper, is not a number.
+ */
+function toNumber(v: unknown): number | undefined {
+  if (typeof v === 'number') return v;
+  if (!isRecord(v)) return undefined;
+  const keys = Object.keys(v);
+  if (keys.length !== 1 || !CANONICAL_NUMBER_KEYS.includes(keys[0])) return undefined;
+  const raw = v[keys[0]];
+  if (typeof raw !== 'string' || raw.trim() === '') return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** `v` with every canonical number wrapper replaced by the number it holds. */
+function plainNumbers(v: unknown): unknown {
+  const n = toNumber(v);
+  if (n !== undefined) return n;
+  if (Array.isArray(v)) return v.map(plainNumbers);
+  if (!isRecord(v)) return v;
+  return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, plainNumbers(x)]));
+}
+
 export function summarizeExplain(plan: unknown): ExplainSummary | null {
   if (!isRecord(plan)) return null;
 
@@ -113,12 +141,14 @@ export function summarizeExplain(plan: unknown): ExplainSummary | null {
 
   const stats = inner.executionStats;
   if (isRecord(stats)) {
-    if (typeof stats.nReturned === 'number') summary.nReturned = stats.nReturned;
-    if (typeof stats.totalDocsExamined === 'number') summary.docsExamined = stats.totalDocsExamined;
-    if (typeof stats.totalKeysExamined === 'number') summary.keysExamined = stats.totalKeysExamined;
-    if (typeof stats.executionTimeMillis === 'number') {
-      summary.executionTimeMillis = stats.executionTimeMillis;
-    }
+    const nReturned = toNumber(stats.nReturned);
+    if (nReturned !== undefined) summary.nReturned = nReturned;
+    const docsExamined = toNumber(stats.totalDocsExamined);
+    if (docsExamined !== undefined) summary.docsExamined = docsExamined;
+    const keysExamined = toNumber(stats.totalKeysExamined);
+    if (keysExamined !== undefined) summary.keysExamined = keysExamined;
+    const executionTimeMillis = toNumber(stats.executionTimeMillis);
+    if (executionTimeMillis !== undefined) summary.executionTimeMillis = executionTimeMillis;
   }
 
   return summary;
@@ -130,6 +160,8 @@ export interface PlanNode {
   stage: string;
   indexName?: string;
   keyPattern?: unknown;
+  /** Set on the root stage of one shard's plan in a sharded explain. */
+  shardName?: string;
   nReturned?: number;
   docsExamined?: number;
   keysExamined?: number;
@@ -139,46 +171,58 @@ export interface PlanNode {
   children: PlanNode[];
 }
 
-function numberField(from: Record<string, unknown>, key: string): number | undefined {
-  const v = from[key];
-  return typeof v === 'number' ? v : undefined;
+function applyMetrics(node: PlanNode, from: Record<string, unknown>): void {
+  const nReturned = toNumber(from.nReturned);
+  if (nReturned !== undefined) node.nReturned = nReturned;
+  const timeMs = toNumber(from.executionTimeMillisEstimate);
+  if (timeMs !== undefined) node.timeMs = timeMs;
+  const docsExamined = toNumber(from.docsExamined);
+  if (docsExamined !== undefined) node.docsExamined = docsExamined;
+  const keysExamined = toNumber(from.keysExamined);
+  if (keysExamined !== undefined) node.keysExamined = keysExamined;
 }
 
-function applyMetrics(node: PlanNode, from: Record<string, unknown>): void {
-  const nReturned = numberField(from, 'nReturned');
-  if (nReturned !== undefined) node.nReturned = nReturned;
-  const timeMs = numberField(from, 'executionTimeMillisEstimate');
-  if (timeMs !== undefined) node.timeMs = timeMs;
-  const docsExamined = numberField(from, 'docsExamined');
-  if (docsExamined !== undefined) node.docsExamined = docsExamined;
-  const keysExamined = numberField(from, 'keysExamined');
-  if (keysExamined !== undefined) node.keysExamined = keysExamined;
+/** One shard's plan: its executed stages when it has them, except under SBE,
+ * where `executionStages` is the lowercase slot tree and the classic stages
+ * live in `winningPlan.queryPlan`. */
+function shardStages(shard: Record<string, unknown>): unknown {
+  const winning = shard.winningPlan;
+  if (isRecord(winning) && isRecord(winning.queryPlan)) return winning;
+  return isRecord(shard.executionStages) ? shard.executionStages : winning;
 }
 
 /** Child stages of one classic stage: `inputStage`, then every `inputStages`
  * element, then each shard's own plan. */
-function childStages(stage: Record<string, unknown>): unknown[] {
+function childStages(stage: Record<string, unknown>): { raw: unknown; shardName?: string }[] {
   // `stageToNode` drops anything that is not a stage record, so the entries
   // are not pre-filtered here.
-  const out: unknown[] = [stage.inputStage];
-  if (Array.isArray(stage.inputStages)) out.push(...(stage.inputStages as unknown[]));
+  const out: { raw: unknown; shardName?: string }[] = [{ raw: stage.inputStage }];
+  if (Array.isArray(stage.inputStages)) {
+    for (const raw of stage.inputStages as unknown[]) out.push({ raw });
+  }
   if (Array.isArray(stage.shards)) {
     for (const shard of stage.shards as unknown[]) {
       if (!isRecord(shard)) continue;
-      out.push(isRecord(shard.executionStages) ? shard.executionStages : shard.winningPlan);
+      out.push({
+        raw: shardStages(shard),
+        shardName: typeof shard.shardName === 'string' ? shard.shardName : undefined,
+      });
     }
   }
   return out;
 }
 
-function stageToNode(raw: unknown): PlanNode | null {
+function stageToNode(input: unknown, shardName?: string): PlanNode | null {
+  // SBE: the classic stage tree sits under `queryPlan` (see `findRootStage`).
+  const raw = isRecord(input) && isRecord(input.queryPlan) ? input.queryPlan : input;
   if (!isRecord(raw) || typeof raw.stage !== 'string') return null;
   const node: PlanNode = { stage: raw.stage, collscan: raw.stage === 'COLLSCAN', children: [] };
+  if (shardName !== undefined) node.shardName = shardName;
   if (typeof raw.indexName === 'string') node.indexName = raw.indexName;
-  if (raw.keyPattern !== undefined) node.keyPattern = raw.keyPattern;
+  if (raw.keyPattern !== undefined) node.keyPattern = plainNumbers(raw.keyPattern);
   applyMetrics(node, raw);
   for (const child of childStages(raw)) {
-    const childNode = stageToNode(child);
+    const childNode = stageToNode(child.raw, child.shardName);
     if (childNode) node.children.push(childNode);
   }
   return node;

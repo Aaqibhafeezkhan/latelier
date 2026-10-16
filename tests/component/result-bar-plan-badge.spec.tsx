@@ -39,18 +39,19 @@ function makeState(plan: unknown, queryRaw = '{"status":"a"}'): CollectionTabSta
 }
 
 function renderBar(plan: unknown, queryRaw?: string) {
+  const openCreateIndex = vi.fn();
   const explain = vi.fn(async () => ({ plan: collscanPlan, verbosity: 'queryPlanner' }));
   installAtelierMock({ query: { explain } });
   render(
     <CollectionWorkspaceProvider
       state={makeState(plan, queryRaw)}
-      actions={emptyWorkspaceActions()}
+      actions={emptyWorkspaceActions({ openCreateIndex })}
       meta={emptyWorkspaceMeta()}
     >
       <ResultBar />
     </CollectionWorkspaceProvider>,
   );
-  return { explain };
+  return { explain, openCreateIndex };
 }
 
 describe('ResultBar plan badge', () => {
@@ -92,5 +93,32 @@ describe('ResultBar plan badge', () => {
     expect(
       screen.getByRole('button', { name: 'Query plan: status_1 (not current)' }),
     ).toBeTruthy();
+  });
+
+  it('truncates a long index name inside the bar and keeps it readable on hover', () => {
+    const name = 'a_1_b_1_c_1_d_1_e_1_f_1_g_1_h_1_i_1_j_1_k_1_l_1_m_1';
+    renderBar({ queryPlanner: { winningPlan: { stage: 'IXSCAN', indexName: name } } });
+    const badge = screen.getByTestId('plan-badge');
+    expect(badge.getAttribute('title')).toBe(name);
+    expect(badge.style.maxWidth).not.toBe('');
+    expect(badge.style.textOverflow).toBe('ellipsis');
+    expect(badge.style.overflow).toBe('hidden');
+  });
+
+  it('opens a stale plan as "(not current)" and offers no index suggestion for it', async () => {
+    renderBar(collscanPlan, 'not json');
+    fireEvent.click(screen.getByTestId('plan-badge'));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Explain plan (not current)' });
+    await waitFor(() => expect(dialog.textContent).toContain('COLLSCAN'));
+    expect(screen.queryByTestId('explain-create-index')).toBeNull();
+  });
+
+  it('offers the index suggestion for a current COLLSCAN plan', async () => {
+    renderBar(collscanPlan);
+    fireEvent.click(screen.getByTestId('plan-badge'));
+
+    await screen.findByRole('dialog', { name: 'Explain plan' });
+    await waitFor(() => expect(screen.getByTestId('explain-create-index')).toBeTruthy());
   });
 });
