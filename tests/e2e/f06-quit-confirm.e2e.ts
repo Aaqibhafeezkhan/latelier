@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import type { ElectronApplication } from 'playwright';
+import type { ElectronApplication, Page } from 'playwright';
 import {
   baseConnInput,
   startMemoryServer,
@@ -38,17 +38,81 @@ const requestQuit = (app: ElectronApplication): Promise<void> =>
     setTimeout(() => electronApp.quit(), 0);
   });
 
-const exited = (app: ElectronApplication): Promise<unknown> =>
-  new Promise((resolve) => app.process().once('exit', resolve));
+/** Close the main window the way the user's X does, on the next tick. */
+const requestWindowClose = (app: ElectronApplication): Promise<void> =>
+  app.evaluate(({ BrowserWindow }) => {
+    setTimeout(() => BrowserWindow.getAllWindows()[0]?.close(), 0);
+  });
+
+const windowCount = (app: ElectronApplication): Promise<number> =>
+  app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+
+/** Resolves with the exit code once the app's process is gone. */
+const exited = (app: ElectronApplication): Promise<number | null> =>
+  new Promise((resolve) => app.process().once('exit', (code) => resolve(code)));
+
+type Api = {
+  conn: { create: (input: unknown) => Promise<{ id: string }> };
+  mongo: { connect: (id: string) => Promise<{ status: string }> };
+  script: { run: (input: { connectionId: string; source: string }) => Promise<{ valueJson: string }> };
+  mshell: {
+    start: (input: { connectionId: string }) => Promise<{ sessionId: string }>;
+    write: (input: { sessionId: string; data: string }) => Promise<void>;
+  };
+};
+
+async function connect(win: Page, host: string, port: number): Promise<void> {
+  await win.evaluate(
+    async ({ host, port, conn }) => {
+      const w = window as unknown as { atelier: Api; __connId: string };
+      const created = await w.atelier.conn.create({ ...conn, host, port });
+      await w.atelier.mongo.connect(created.id);
+      w.__connId = created.id;
+    },
+    { host, port, conn: baseConnInput(host, port) },
+  );
+}
+
+/** Leaves a script awaiting forever, and returns once it has started. */
+async function startLongScript(win: Page): Promise<void> {
+  await win.evaluate(() => {
+    const w = window as unknown as { atelier: Api; __connId: string; __longRun: Promise<unknown> };
+    // Not awaited: the script is meant to still be running when the app is asked to quit.
+    w.__longRun = w.atelier.script
+      .run({
+        connectionId: w.__connId,
+        source: 'await db.quit_marker.insertOne({ started: 1 }); await new Promise(() => {})',
+      })
+      .then(
+        () => 'finished',
+        () => 'stopped',
+      );
+  });
+  // The marker is written once the script has started, so it is surely in flight.
+  await expect
+    .poll(
+      () =>
+        win.evaluate(async () => {
+          const w = window as unknown as { atelier: Api; __connId: string };
+          const r = await w.atelier.script.run({
+            connectionId: w.__connId,
+            source: 'await db.quit_marker.countDocuments({})',
+          });
+          return r.valueJson;
+        }),
+      { timeout: 15_000 },
+    )
+    .toBe('1');
+}
 
 test('quitting with nothing running does not ask', async () => {
   await withApp(async (app) => {
     await stubQuitDialog(app, 0);
     const gone = exited(app);
     await requestQuit(app);
-    await gone;
-    // The process is gone, so the stub's record cannot be read: that the app
-    // left although the stub would have answered Cancel is the proof.
+    // The stub would have answered Cancel and kept the app alive: that the
+    // process left, cleanly, is the proof that no question was put.
+    expect(await gone).toBe(0);
   });
 });
 
@@ -57,51 +121,8 @@ test('quitting with a script running asks, stays open on Cancel, and quits on Qu
   await withApp(async (app) => {
     const win = await app.firstWindow();
     await win.waitForLoadState('domcontentloaded');
-
-    await win.evaluate(
-      async ({ host, port, conn }) => {
-        const api = (window as unknown as {
-          atelier: {
-            conn: { create: (input: unknown) => Promise<{ id: string }> };
-            mongo: { connect: (id: string) => Promise<{ status: string }> };
-            script: { run: (input: { connectionId: string; source: string }) => Promise<unknown> };
-          };
-        }).atelier;
-        const created = await api.conn.create({ ...conn, host, port });
-        await api.mongo.connect(created.id);
-        // Not awaited: the script is meant to still be running when the app is asked to quit.
-        (window as unknown as { __longRun: Promise<unknown> }).__longRun = api
-          .script.run({
-            connectionId: created.id,
-            source:
-              'await db.quit_marker.insertOne({ started: 1 }); await new Promise(() => {})',
-          })
-          .then(() => 'finished', () => 'stopped');
-        (window as unknown as { __connId: string }).__connId = created.id;
-      },
-      { host, port, conn: baseConnInput(host, port) },
-    );
-
-    // The marker is written once the script has started, so it is surely in flight.
-    await expect
-      .poll(
-        () =>
-          win.evaluate(async () => {
-            const w = window as unknown as {
-              __connId: string;
-              atelier: {
-                script: { run: (i: { connectionId: string; source: string }) => Promise<{ valueJson: string }> };
-              };
-            };
-            const r = await w.atelier.script.run({
-              connectionId: w.__connId,
-              source: 'await db.quit_marker.countDocuments({})',
-            });
-            return r.valueJson;
-          }),
-        { timeout: 15_000 },
-      )
-      .toBe('1');
+    await connect(win, host, port);
+    await startLongScript(win);
 
     await stubQuitDialog(app, 0);
     await requestQuit(app);
@@ -113,6 +134,61 @@ test('quitting with a script running asks, stays open on Cancel, and quits on Qu
     await stubQuitDialog(app, 1);
     const gone = exited(app);
     await requestQuit(app);
-    await gone;
+    expect(await gone).toBe(0);
+  });
+});
+
+test('quitting with a shell command running asks, naming it', async () => {
+  const { host, port } = await startMemoryServer();
+  await withApp(async (app) => {
+    const win = await app.firstWindow();
+    await win.waitForLoadState('domcontentloaded');
+    await connect(win, host, port);
+    // A line the shell never finishes. Main counts it from the write, so the
+    // write having returned means the shell is already busy.
+    await win.evaluate(async () => {
+      const w = window as unknown as { atelier: Api; __connId: string };
+      const session = await w.atelier.mshell.start({ connectionId: w.__connId });
+      await w.atelier.mshell.write({ sessionId: session.sessionId, data: 'await new Promise(() => {})\n' });
+    });
+
+    await stubQuitDialog(app, 0);
+    await requestQuit(app);
+    await expect.poll(() => dialogMessages(app), { timeout: 10_000 }).toHaveLength(1);
+    expect((await dialogMessages(app))[0]).toContain('1 running shell command');
+    expect(await win.evaluate(() => 1 + 1)).toBe(2);
+
+    await stubQuitDialog(app, 1);
+    const gone = exited(app);
+    await requestQuit(app);
+    expect(await gone).toBe(0);
+  });
+});
+
+// Closing the last window quits the app off macOS, where the question has to
+// come before the window goes: after, a Cancel would leave an app with no
+// window. On macOS closing the window leaves the app running and stops nothing.
+test('closing the window with a script running asks once, keeps the window on Cancel, and quits on Quit', async () => {
+  test.skip(process.platform === 'darwin', 'closing the last window does not quit the app on macOS');
+  const { host, port } = await startMemoryServer();
+  await withApp(async (app) => {
+    const win = await app.firstWindow();
+    await win.waitForLoadState('domcontentloaded');
+    await connect(win, host, port);
+    await startLongScript(win);
+
+    await stubQuitDialog(app, 0);
+    await requestWindowClose(app);
+    await expect.poll(() => dialogMessages(app), { timeout: 10_000 }).toHaveLength(1);
+    // Give a second, wrongly raised question the time to show up.
+    await new Promise((r) => setTimeout(r, 500));
+    expect(await dialogMessages(app)).toHaveLength(1);
+    expect(await windowCount(app)).toBe(1);
+
+    await stubQuitDialog(app, 1);
+    const gone = exited(app);
+    await requestWindowClose(app);
+    expect(await gone).toBe(0);
+    // Asked once for this close, not again when the app quit that followed it.
   });
 });

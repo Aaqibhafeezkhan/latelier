@@ -116,6 +116,7 @@ Before the sequence above starts, `before-quit` checks for work that quitting wo
 
 - **Counted:** script runs in flight (`ScriptService.runningCount()`) and shell sessions with a command still running (`ShellService.busyCount()`, W11 section 3). An idle shell is not counted.
 - **Not counted:** imports, aggregations and plain finds. They run in main with no handle the check can read, so quitting still cuts them off without asking.
+- **Where it is asked:** off macOS, closing the last window quits the app, so the window's `close` event is held and the question is asked there, before the window goes; a Cancel then leaves the window as it was. On macOS closing the window stops nothing, so it is not asked. Any other quit (`Cmd/Ctrl+Q`, `app.quit()`) is held in `before-quit` the same way. A Quit answer lets the close and the app quit that follows it through without a second question, and a quit or close requested while the question is open is not asked again. The decisions live in `createQuitGate` (`electron/quitGuard.ts`).
 - **Prompt:** when something is counted, the quit is held and a native warning dialog names what stops, for example `This will stop 1 running script and 2 running shell commands.`, with `Cancel` (default) and `Quit`. Cancel leaves the app running. Quit quits again, past the check, into the sequence above. A second quit request while the dialog is open is the same question.
 - **Bypass:** a system shutdown, restart or log-off is not asked about, since the work goes with it either way: Electron's `powerMonitor` `shutdown` event (macOS and Linux) and the window's `session-end` event (Windows) set a flag that skips the check.
 
@@ -157,9 +158,9 @@ Before the sequence above starts, `before-quit` checks for work that quitting wo
 - **boot-order.spec.ts** (with stubbed Electron `app`/`BrowserWindow`): assert registration order is DB → services → IPC → window.
 - **single-instance.spec.ts**: second `app.requestSingleInstanceLock` returns false → the test harness observes a quit call and a `second-instance` event emission on the first.
 - **shutdown-budget.spec.ts**: stub `pool.disconnectAll` to hang; total shutdown time is ≤ 8s.
-- **quit-guard.spec.ts** (unit): the sentence for each mix of running scripts and shell commands, none when idle, and that nothing is asked when idle.
+- **quit-guard.spec.ts** (unit): the sentence for each mix of running scripts and shell commands, none when idle, and the gate: asked once per close, a request while the question is open, the shutdown bypass, and Cancel followed by a later quit asking again.
 
 ### E2E
 - **first-run.e2e.ts**: delete the userData dir; launch; assert the connections page renders empty state and the DB file exists on disk.
 - **crash-reload.e2e.ts**: force a renderer crash via `window.location = 'about:crash'`; assert the window reloads once.
-- **f06-quit-confirm.e2e.ts**: with the dialog stubbed in main, quitting idle exits without asking; with a script running it asks, names the script, stays open on Cancel and exits on Quit.
+- **f06-quit-confirm.e2e.ts**: with the dialog stubbed in main, quitting idle exits without asking; with a script or a shell command running it asks, names it, stays open on Cancel and exits on Quit; off macOS, closing the window with work running asks once, keeps the window on Cancel and exits on Quit.
