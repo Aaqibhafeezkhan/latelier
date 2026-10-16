@@ -249,3 +249,105 @@ describe('ExplainDrawer — Create an index for this query (W16 Tier 4)', () => 
     expect(onCreateIndex).toHaveBeenCalledTimes(1);
   });
 });
+
+// #507 — the stage tree between the summary strip and the raw plan.
+describe('ExplainDrawer — stage tree', () => {
+  const statsPlan = {
+    queryPlanner: {
+      winningPlan: {
+        stage: 'FETCH',
+        inputStage: { stage: 'IXSCAN', indexName: 'a_1', keyPattern: { a: 1 } },
+      },
+    },
+    executionStats: {
+      executionStages: {
+        stage: 'FETCH',
+        nReturned: 7,
+        docsExamined: 7,
+        inputStage: {
+          stage: 'IXSCAN',
+          nReturned: 7,
+          keysExamined: 7,
+          executionTimeMillisEstimate: 4,
+          indexName: 'a_1',
+          keyPattern: { a: 1 },
+        },
+      },
+    },
+  };
+
+  it('renders one row per stage with its own figures', async () => {
+    const runExplain = vi.fn(async () => ({ plan: statsPlan }));
+    render(<ExplainDrawer onClose={() => {}} runExplain={runExplain} />);
+
+    const tree = await screen.findByRole('tree', { name: 'Plan stages' });
+    const items = within(tree).getAllByRole('treeitem');
+    expect(items.map((i) => i.getAttribute('data-stage'))).toEqual(['FETCH', 'IXSCAN']);
+    const ixscan = items[1];
+    expect(ixscan.textContent).toContain('IXSCAN');
+    expect(ixscan.textContent).toContain('a_1');
+    expect(ixscan.textContent).toContain('keysExamined: 7');
+    expect(ixscan.textContent).toContain('~4ms');
+    expect(items[0].textContent).toContain('docsExamined: 7');
+  });
+
+  it('a COLLSCAN row says COLLSCAN', async () => {
+    const runExplain = vi.fn(async () => ({
+      plan: { queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } },
+    }));
+    render(<ExplainDrawer onClose={() => {}} runExplain={runExplain} />);
+
+    const tree = await screen.findByRole('tree', { name: 'Plan stages' });
+    expect(within(tree).getByRole('treeitem').textContent).toContain('COLLSCAN');
+  });
+
+  it('an unrecognized plan renders no stage tree but still renders the JSON tree', async () => {
+    const runExplain = vi.fn(async () => ({ plan: { weird: 1 } }));
+    render(<ExplainDrawer onClose={() => {}} runExplain={runExplain} />);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Explain plan' });
+    await waitFor(() => expect(dialog.textContent).toContain('weird'));
+    expect(screen.queryByRole('tree', { name: 'Plan stages' })).toBeNull();
+  });
+});
+
+// #160 — the plan badge opens the drawer on the plan it already holds.
+describe('ExplainDrawer — initialPlan', () => {
+  const plan = { queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } };
+
+  it('shows the supplied plan without fetching, then fetches once when the verbosity changes', async () => {
+    const runExplain = vi.fn(async () => ({
+      plan: { queryPlanner: { winningPlan: { stage: 'IXSCAN', indexName: 'fresh_1' } } },
+    }));
+    render(
+      <ExplainDrawer
+        onClose={() => {}}
+        initialPlan={plan}
+        initialVerbosity="queryPlanner"
+        runExplain={runExplain}
+      />,
+    );
+
+    const dialog = await screen.findByRole('dialog', { name: 'Explain plan' });
+    expect(within(dialog).getByTestId('explain-summary-strip').textContent).toContain('COLLSCAN');
+    expect(runExplain).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Verbosity'), { target: { value: 'executionStats' } });
+    await waitFor(() => expect(dialog.textContent).toContain('fresh_1'));
+    expect(runExplain).toHaveBeenCalledTimes(1);
+    expect(runExplain).toHaveBeenCalledWith('executionStats', expect.any(String));
+  });
+
+  it('does not fetch on mount under StrictMode either', async () => {
+    const runExplain = vi.fn(async () => ({ plan }));
+    render(
+      <React.StrictMode>
+        <ExplainDrawer onClose={() => {}} initialPlan={plan} runExplain={runExplain} />
+      </React.StrictMode>,
+    );
+
+    const dialog = await screen.findByRole('dialog', { name: 'Explain plan' });
+    expect(within(dialog).getByTestId('explain-summary-strip')).toBeTruthy();
+    expect(runExplain).not.toHaveBeenCalled();
+  });
+});

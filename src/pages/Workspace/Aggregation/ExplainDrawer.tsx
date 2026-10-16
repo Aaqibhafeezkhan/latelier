@@ -8,6 +8,7 @@ import { copyToClipboard } from '../../../utils/clipboard';
 import { useLatest } from '../../../commands/useLatest';
 import { summarizeExplain } from '../../../utils/explainSummary';
 import { JsonTree } from './JsonTree';
+import { PlanTree } from './PlanTree';
 import type { ExplainVerbosity } from '@shared/types';
 
 /** Keys visually emphasized in the plan tree — the fields the summary strip
@@ -68,6 +69,11 @@ interface Props {
    * drawer and hands control back.
    */
   onCreateIndex?: () => void;
+  /**
+   * A plan the caller already holds (the result bar's plan badge). Shown
+   * instead of fetching on open; changing the verbosity fetches as usual.
+   */
+  initialPlan?: unknown;
 }
 
 export function ExplainDrawer({
@@ -76,13 +82,17 @@ export function ExplainDrawer({
   runExplain,
   onCancelToken,
   onCreateIndex,
+  initialPlan,
 }: Props) {
   const T = themeVars;
   const [verbosity, setVerbosity] = React.useState<ExplainVerbosity>(
     initialVerbosity ?? 'queryPlanner',
   );
   const [loading, setLoading] = React.useState(false);
-  const [plan, setPlan] = React.useState<unknown | null>(null);
+  const [plan, setPlan] = React.useState<unknown | null>(initialPlan ?? null);
+  // State, not a ref flipped inside the effect: StrictMode double-invokes the
+  // effect on mount, and a ref set by the first run would let the second fetch.
+  const [verbosityTouched, setVerbosityTouched] = React.useState(false);
   const [writeOmitted, setWriteOmitted] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const [viewMode, setViewMode] = React.useState<'tree' | 'raw'>('tree');
@@ -107,7 +117,11 @@ export function ExplainDrawer({
   // The drawer has nothing to save, so every close is a dismiss.
   const close = useDialogFocusReturn(onClose);
 
+  // A boolean, not `initialPlan` itself: a re-run replacing the badge's plan
+  // while the drawer is open must not restart the fetch.
+  const hasInitialPlan = initialPlan !== undefined;
   React.useEffect(() => {
+    if (hasInitialPlan && !verbosityTouched) return;
     const token = crypto.randomUUID();
     let cancelled = false;
     // Snapshot at effect-setup time (not read live inside cleanup) so
@@ -134,7 +148,7 @@ export function ExplainDrawer({
       cancelled = true;
       onCancelTokenSnapshot?.(token);
     };
-  }, [verbosity, runExplainRef, onCancelTokenRef]);
+  }, [verbosity, verbosityTouched, hasInitialPlan, runExplainRef, onCancelTokenRef]);
 
   const summary = React.useMemo(() => summarizeExplain(plan), [plan]);
 
@@ -209,7 +223,10 @@ export function ExplainDrawer({
         >
           <select
             value={verbosity}
-            onChange={(e) => setVerbosity(e.target.value as ExplainVerbosity)}
+            onChange={(e) => {
+              setVerbosity(e.target.value as ExplainVerbosity);
+              setVerbosityTouched(true);
+            }}
             aria-label="Verbosity"
             style={{
               fontSize: 11,
@@ -351,6 +368,7 @@ export function ExplainDrawer({
                   </div>
                 </div>
               )}
+              <PlanTree plan={plan} />
               {viewMode === 'raw' ? (
                 <pre
                   // Handle for the raw-vs-tree assertions. They used to reach
