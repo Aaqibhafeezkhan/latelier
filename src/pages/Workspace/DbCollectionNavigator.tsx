@@ -21,6 +21,7 @@ import {
 } from '../../components/ContextMenu';
 import { CreateCollectionDrawer } from './CreateCollectionDrawer';
 import { RenameCollectionModal } from './RenameCollectionModal';
+import { ModifyViewModal } from './ModifyViewModal';
 import { ImportDialog } from './ImportDialog';
 import { DropCollectionConfirm } from './DropCollectionConfirm';
 import { DropDatabaseConfirm } from './DropDatabaseConfirm';
@@ -492,6 +493,7 @@ export function DbCollectionNavigator({
     menu,
     createCollDb,
     renameTarget,
+    modifyViewTarget,
     dropCollTarget,
     dropDbTarget,
     importTarget,
@@ -499,6 +501,7 @@ export function DbCollectionNavigator({
     setMenu,
     setCreateCollDb,
     setRenameTarget,
+    setModifyViewTarget,
     setDropCollTarget,
     setDropDbTarget,
     setImportTarget,
@@ -508,6 +511,8 @@ export function DbCollectionNavigator({
     handleCollectionCreated,
     cancelRename,
     handleCollectionRenamed,
+    cancelModifyView,
+    handleViewModified,
     cancelDropColl,
     handleCollectionDropped,
     cancelDropDb,
@@ -909,9 +914,12 @@ export function DbCollectionNavigator({
           kind: 'item',
           label: 'Modify view',
           icon: I.edit,
-          onClick: () => {},
-          disabled: true,
-          disabledTitle: 'Coming soon',
+          onClick: () =>
+            setModifyViewTarget({
+              connectionId: row.connectionId,
+              dbName: row.dbName,
+              collection: row.coll.name,
+            }),
         }
       : {
           kind: 'item',
@@ -936,7 +944,7 @@ export function DbCollectionNavigator({
         }),
       destructive: true,
     },
-  ], [openFromRow, setRenameTarget, setDropCollTarget, setImportTarget, onOpenReferences]);
+  ], [openFromRow, setRenameTarget, setModifyViewTarget, setDropCollTarget, setImportTarget, onOpenReferences]);
 
   const buildDbMenu = React.useCallback((row: Extract<TreeRow, { kind: 'db' }>): MenuItem[] => [
     {
@@ -1271,6 +1279,17 @@ export function DbCollectionNavigator({
           returnFocusTo={menuTrigger}
           onCancel={cancelRename}
           onRenamed={handleCollectionRenamed}
+        />
+      )}
+
+      {modifyViewTarget && (
+        <ModifyViewModal
+          connectionId={modifyViewTarget.connectionId}
+          dbName={modifyViewTarget.dbName}
+          collection={modifyViewTarget.collection}
+          returnFocusTo={menuTrigger}
+          onClose={cancelModifyView}
+          onSaved={handleViewModified}
         />
       )}
 
