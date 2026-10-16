@@ -158,8 +158,14 @@ export class MetaService {
     const db = client.db(input.dbName);
     let specs: CollectionSpec[];
     try {
+      // No promotion: the pipeline and validator go back to the server through
+      // Modify view and Edit rules, and a promoted whole-number Double would
+      // serialize as an Int32 or a Long (with rounded digits past 2^53).
       specs = await db
-        .listCollections<CollectionSpec>({ name: input.collection }, { nameOnly: false, maxTimeMS: STATS_TIMEOUT_MS })
+        .listCollections<CollectionSpec>(
+          { name: input.collection },
+          { nameOnly: false, maxTimeMS: STATS_TIMEOUT_MS, promoteValues: false },
+        )
         .toArray();
     } catch (err) {
       throw classifyMongoOpError(err);

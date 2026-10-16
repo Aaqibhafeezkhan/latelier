@@ -3,6 +3,9 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Collection, Db, MongoClient } from 'mongodb';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { MetaService } from '../../electron/mongo/MetaService';
+import { CollectionAdminService } from '../../electron/mongo/CollectionAdminService';
+import { Double, EJSON } from 'bson';
+import { ejsonParse as rendererEjsonParse, ejsonStringifyReadable } from '../../src/utils/ejson';
 import { QUERY_TIMEOUT_MS } from '../../electron/mongo/timeouts';
 import { SecretsVault } from '../../electron/secrets/SecretsVault';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
@@ -269,6 +272,76 @@ describe('MetaService', () => {
       expect(d.options.viewOn).toBe('src');
       // Canonical EJSON on the wire: the number keeps its BSON type.
       expect(JSON.parse(d.options.pipeline!)).toEqual([{ $match: { a: { $numberInt: '1' } } }]);
+    });
+
+    // A whole-number Double reads back from the driver as a JS number, and the
+    // canonical writer then guesses its type from the value: 2^31 becomes a
+    // Long, 1e18+128 a Long with rounded digits. Modify view and Edit rules
+    // prefill from this text, so saving it unchanged would rewrite the stored
+    // definition with other types and other values.
+    describe('keeps whole-number Doubles in an editable definition', () => {
+      const BIG = new Double(1e18 + 128);
+      const INT32_EDGE = new Double(2147483648);
+      const docWithDoubles = () => ({ big: BIG, edge: INT32_EDGE });
+
+      /** The stored options read with no promotion, as canonical EJSON. */
+      async function storedOptions(name: string): Promise<string> {
+        return withDetailsDb(async (db) => {
+          const [spec] = await db
+            .listCollections({ name }, { nameOnly: false, promoteValues: false })
+            .toArray();
+          const opts = (spec as { options: Record<string, unknown> }).options;
+          return EJSON.stringify({ pipeline: opts.pipeline, validator: opts.validator }, { relaxed: false });
+        });
+      }
+
+      const DOUBLES = { big: { $numberDouble: '1000000000000000128.0' }, edge: { $numberDouble: '2147483648.0' } };
+
+      it('returns a view pipeline with its Doubles as Doubles, and saving it unchanged rewrites nothing', async () => {
+        await setup();
+        await withDetailsDb(async (db) => {
+          await db.dropCollection('vdbl').catch(() => undefined);
+          await db.dropCollection('src').catch(() => undefined);
+          await db.createCollection('src');
+          await db.createCollection('vdbl', { viewOn: 'src', pipeline: [{ $match: docWithDoubles() }] });
+        });
+        const before = await storedOptions('vdbl');
+
+        const d = await svc.collectionDetails({ connectionId: connId, dbName: DETAILS_DB, collection: 'vdbl' });
+        expect(JSON.parse(d.options.pipeline!)).toEqual([{ $match: DOUBLES }]);
+
+        // What Modify view prefills and sends back when nothing is edited.
+        const prefill = ejsonStringifyReadable(rendererEjsonParse(d.options.pipeline!), 2);
+        await new CollectionAdminService(pool).modify({
+          connectionId: connId,
+          dbName: DETAILS_DB,
+          collection: 'vdbl',
+          options: { viewOn: 'src', pipeline: prefill },
+        });
+        expect(await storedOptions('vdbl')).toBe(before);
+      });
+
+      it('returns a validator with its Doubles as Doubles, and saving it unchanged rewrites nothing', async () => {
+        await setup();
+        await withDetailsDb(async (db) => {
+          await db.dropCollection('valdbl').catch(() => undefined);
+          await db.createCollection('valdbl', { validator: docWithDoubles() });
+        });
+        const before = await storedOptions('valdbl');
+
+        const d = await svc.collectionDetails({ connectionId: connId, dbName: DETAILS_DB, collection: 'valdbl' });
+        expect(JSON.parse(d.options.validator!)).toEqual(DOUBLES);
+
+        // What Edit rules prefills and sends back when nothing is edited.
+        const prefill = ejsonStringifyReadable(rendererEjsonParse(d.options.validator!), 2);
+        await new CollectionAdminService(pool).modify({
+          connectionId: connId,
+          dbName: DETAILS_DB,
+          collection: 'valdbl',
+          options: { validator: prefill },
+        });
+        expect(await storedOptions('valdbl')).toBe(before);
+      });
     });
 
     it('lists a view without reading its storage stats or logging a warning for it', async () => {
