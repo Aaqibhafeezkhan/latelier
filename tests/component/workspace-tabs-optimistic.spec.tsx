@@ -233,4 +233,35 @@ describe('useWorkspaceTabs — tab state that could not be saved says so', () =>
     expect(errorSpy).toHaveBeenCalledTimes(1);
     expect(screen.getAllByText('Tab changes could not be saved')).toHaveLength(1);
   });
+
+  it('toasts again for a second outage after a flush succeeded in between', async () => {
+    const errorSpy = vi.spyOn(notify, 'error');
+    let failing = true;
+    let updates = 0;
+    installAtelierMock({
+      tabs: {
+        list: async () => [collectionTab({ id: 't1' })],
+        update: (async () => {
+          updates += 1;
+          if (failing) throw { code: 'SYSTEM_ERROR', message: 'disk full' };
+          return collectionTab({ id: 't1' });
+        }) as never,
+      },
+    });
+    const { result } = renderHook(() => useWorkspaceTabs());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => result.current.patchCollectionState('t1', { page: 1 }));
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledTimes(1));
+
+    failing = false;
+    act(() => result.current.patchCollectionState('t1', { page: 2 }));
+    await waitFor(() => expect(updates).toBe(2));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+
+    failing = true;
+    act(() => result.current.patchCollectionState('t1', { page: 3 }));
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledTimes(2));
+  });
 });

@@ -229,4 +229,48 @@ describe('useSuggestions — a rejecting async source still settles', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items.map((i) => (i as FieldSuggestion).path)).toEqual(['z']);
   });
+
+  it('clears loading when the context goes away while an async source is pending', async () => {
+    const never: FieldSource = () => new Promise<FieldSuggestion[]>(() => undefined);
+    const { result, rerender } = renderHook(
+      ({ c }: { c: SuggestionContext | null }) =>
+        useSuggestions(c, '', { fieldSources: [never], valueSources: [] }),
+      { initialProps: { c: ctx() as SuggestionContext | null } },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(true));
+
+    rerender({ c: null });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
+  it('clears loading when the new context has only sync sources', async () => {
+    const never: FieldSource = (c) =>
+      c.collection === 'a' ? new Promise<FieldSuggestion[]>(() => undefined) : [];
+    const { result, rerender } = renderHook(
+      ({ coll }: { coll: string }) =>
+        useSuggestions(ctx({ collection: coll }), '', { fieldSources: [never], valueSources: [] }),
+      { initialProps: { coll: 'a' } },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(true));
+
+    rerender({ coll: 'b' });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
+  it('reports each rejected source instead of dropping it silently', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const boom = new Error('source down');
+    const failing: FieldSource = async () => {
+      throw boom;
+    };
+    const { result } = renderHook(() =>
+      useSuggestions(ctx(), '', { fieldSources: [failing], valueSources: [] }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(warn).toHaveBeenCalledWith('[suggestions] source failed', boom);
+    warn.mockRestore();
+  });
 });

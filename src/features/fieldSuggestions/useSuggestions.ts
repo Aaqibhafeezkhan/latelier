@@ -128,9 +128,13 @@ export function useSuggestions(
     reqId.current += 1;
     const myReq = reqId.current;
     void (async () => {
+      // A superseded request's `finally` below skips `setLoading`, so the
+      // paths that end this request without starting a new async batch clear
+      // it themselves — else a context that goes away mid-load sticks it on.
       if (!context) {
         if (myReq === reqId.current) {
           setAsyncItems((prev) => (prev.length === 0 ? prev : []));
+          setLoading(false);
         }
         return;
       }
@@ -145,6 +149,7 @@ export function useSuggestions(
       if (asyncRuns.length === 0) {
         if (myReq === reqId.current) {
           setAsyncItems((prev) => (prev.length === 0 ? prev : []));
+          setLoading(false);
         }
         return;
       }
@@ -154,7 +159,11 @@ export function useSuggestions(
         // the healthy async sources still show, and `loading` always settles.
         const settled = await Promise.allSettled(asyncRuns);
         if (myReq !== reqId.current) return;
-        const batches = settled.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+        const batches = settled.flatMap((r) => {
+          if (r.status === 'fulfilled') return r.value;
+          console.warn('[suggestions] source failed', r.reason);
+          return [];
+        });
         setAsyncItems(batches as Suggestion[]);
       } finally {
         // A newer request owns `loading`; only the latest one may clear it.
