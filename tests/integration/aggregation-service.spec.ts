@@ -749,4 +749,17 @@ describe('AggregationService.runningCount', () => {
     await run;
     expect(svc.runningCount()).toBe(0);
   });
+
+  it('clears the cancel token when the connection cannot be opened', async () => {
+    const pool = {
+      isReadOnly: () => false,
+      readDb: async () => {
+        throw new Error('connect failed');
+      },
+    } as unknown as MongoPool;
+    const svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)));
+    await expect(svc.run(input('tok'))).rejects.toThrow('connect failed');
+    expect((svc as unknown as { active: Map<string, unknown> }).active.size).toBe(0);
+    expect(svc.runningCount()).toBe(0);
+  });
 });

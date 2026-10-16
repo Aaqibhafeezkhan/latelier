@@ -93,12 +93,19 @@ export class AggregationService {
 
     const pipeline = enabled.map((s) => parseStage(s));
     const controller = this.registerCancel(input.cancelToken);
-    const coll = await this.getCollection(
-      input.connectionId,
-      input.dbName,
-      input.collection,
-      grant,
-    );
+    let coll: Collection<Document>;
+    try {
+      coll = await this.getCollection(
+        input.connectionId,
+        input.dbName,
+        input.collection,
+        grant,
+      );
+    } catch (err) {
+      // The run never started, so the try/finally below will not clear the token.
+      this.clearCancel(input.cancelToken);
+      throw err;
+    }
     const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
     let t0 = Date.now();
 
