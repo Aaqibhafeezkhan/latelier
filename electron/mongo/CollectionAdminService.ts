@@ -137,7 +137,7 @@ export class CollectionAdminService {
 
 const VALID_GRANULARITIES = new Set(['seconds', 'minutes', 'hours']);
 const VALID_VALIDATION_LEVELS = new Set(['off', 'strict', 'moderate']);
-const VALID_VALIDATION_ACTIONS = new Set(['error', 'warn']);
+const VALID_VALIDATION_ACTIONS = new Set(['error', 'warn', 'errorAndLog']);
 
 export function validateCollectionName(name: string): void {
   if (!name || name.trim().length === 0) {
@@ -265,6 +265,8 @@ export function buildCreateCollectionOptions(
   if (options.viewOn) {
     opts.viewOn = options.viewOn;
     opts.pipeline = parsePipeline(options.pipeline ?? '[]');
+  } else if (options.pipeline !== undefined) {
+    throw new ValidationError('a pipeline needs viewOn, the collection the view reads', { field: 'pipeline' });
   }
 
   return opts;
