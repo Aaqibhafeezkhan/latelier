@@ -69,6 +69,8 @@ import type {
   ScriptTabState,
   ShellOutputEvent,
   ShellSessionInfo,
+  ValidationAction,
+  ValidationLevel,
   WorkspaceTab,
 } from './types.ts';
 
@@ -158,6 +160,30 @@ export interface CollectionInfo {
   indexCount: number;
   lastModified?: string;
   capped: boolean;
+}
+
+/** One collection's stats and `listCollections` options (W16 §13). */
+export interface CollectionDetails {
+  name: string;
+  type: 'collection' | 'view' | 'timeseries';
+  capped: boolean;
+  /** Absent for a view. The optional sizes are absent on the estimate fallback. */
+  stats?: {
+    documentCount: number;
+    sizeBytes: number;
+    indexCount: number;
+    storageSizeBytes?: number;
+    avgObjSizeBytes?: number;
+    totalIndexSizeBytes?: number;
+  };
+  /** From listCollections `options`; the documents are EJSON canonical strings. */
+  options: {
+    viewOn?: string;
+    pipeline?: string;
+    validator?: string;
+    validationLevel?: ValidationLevel;
+    validationAction?: ValidationAction;
+  };
 }
 
 /**
@@ -253,6 +279,11 @@ export interface IpcApi {
   meta: {
     listDatabases: (input: { connectionId: string; includeSystem?: boolean }) => Promise<DbInfo[]>;
     listCollections: (input: { connectionId: string; dbName: string }) => Promise<CollectionInfo[]>;
+    collectionDetails: (input: {
+      connectionId: string;
+      dbName: string;
+      collection: string;
+    }) => Promise<CollectionDetails>;
     /** Blended sample (recent by _id + random $sample) for autocomplete inference; caller treats a miss as empty. */
     sampleSchema: (input: {
       connectionId: string;
@@ -490,6 +521,7 @@ export const IPC_CHANNELS = {
   metaListDatabases:   'meta:listDatabases',
   metaListCollections: 'meta:listCollections',
   metaSampleSchema:    'meta:sampleSchema',
+  metaCollectionDetails: 'meta:collectionDetails',
 
   // Indexes -----------------------------------------
   indexList:   'index:list',

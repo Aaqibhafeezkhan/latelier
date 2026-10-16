@@ -55,6 +55,7 @@ const READ_CHANNELS = new Set<string>([
   IPC_CHANNELS.metaListDatabases,
   IPC_CHANNELS.metaListCollections,
   IPC_CHANNELS.metaSampleSchema,
+  IPC_CHANNELS.metaCollectionDetails,
   IPC_CHANNELS.indexList,
   IPC_CHANNELS.userList,
   IPC_CHANNELS.userGet,

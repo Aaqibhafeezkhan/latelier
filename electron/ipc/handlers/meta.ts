@@ -37,4 +37,10 @@ export function registerMetaChannels(router: Router, svc: MetaService): void {
     zodValidator(SampleSchemaInput),
     (input) => svc.sampleSchema(input),
   );
+
+  router.register(
+    IPC_CHANNELS.metaCollectionDetails,
+    zodValidator(CollectionTargetSchema),
+    (input) => svc.collectionDetails(input),
+  );
 }

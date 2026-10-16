@@ -13,6 +13,8 @@ import {
   connectionReader,
 } from '../../electron/mongo/ConnectionService';
 import type { ConnectionInput } from '@shared/types';
+import { ejsonParse } from '../../electron/mongo/ejson';
+import { NotFoundError } from '../../electron/errors';
 import { getSharedServer, stopSharedServer, uriToHostPort } from '../helpers/mongo';
 
 async function seedData(uri: string) {
@@ -153,6 +155,152 @@ describe('MetaService', () => {
     } finally {
       aggregate.mockRestore();
     }
+  });
+
+  describe('collectionDetails', () => {
+    const DETAILS_DB = 'detailsdb';
+
+    // Each test works on its own collection names so the shared server's
+    // other suites never see them, and re-runs start from a clean slate.
+    async function withDetailsDb<T>(fn: (db: Db) => Promise<T>): Promise<T> {
+      const c = new MongoClient(server.getUri());
+      try {
+        await c.connect();
+        return await fn(c.db(DETAILS_DB));
+      } finally {
+        await c.close();
+      }
+    }
+
+    it('reports the type, counts and sizes of a collection with an extra index', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('plain').catch(() => undefined);
+        const coll = await db.createCollection('plain');
+        await coll.insertMany([{ a: 1 }, { a: 2 }, { a: 3 }]);
+        await coll.createIndex({ a: 1 });
+      });
+
+      const d = await svc.collectionDetails({
+        connectionId: connId,
+        dbName: DETAILS_DB,
+        collection: 'plain',
+      });
+
+      expect(d.name).toBe('plain');
+      expect(d.type).toBe('collection');
+      expect(d.capped).toBe(false);
+      expect(d.stats?.documentCount).toBe(3);
+      expect(d.stats?.indexCount).toBe(2);
+      expect(d.stats?.sizeBytes).toBeGreaterThan(0);
+      expect(d.stats?.storageSizeBytes).toBeGreaterThan(0);
+      expect(d.stats?.avgObjSizeBytes).toBeGreaterThan(0);
+      expect(d.stats?.totalIndexSizeBytes).toBeGreaterThan(0);
+    });
+
+    it('reports a capped collection as capped', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('cappedc').catch(() => undefined);
+        await db.createCollection('cappedc', { capped: true, size: 4096 });
+      });
+
+      const d = await svc.collectionDetails({
+        connectionId: connId,
+        dbName: DETAILS_DB,
+        collection: 'cappedc',
+      });
+
+      expect(d.capped).toBe(true);
+    });
+
+    it('returns the validator, level and action as written', async () => {
+      await setup();
+      const validator = { $jsonSchema: { required: ['a'] } };
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('validated').catch(() => undefined);
+        await db.createCollection('validated', {
+          validator,
+          validationLevel: 'moderate',
+          validationAction: 'warn',
+        });
+      });
+
+      const d = await svc.collectionDetails({
+        connectionId: connId,
+        dbName: DETAILS_DB,
+        collection: 'validated',
+      });
+
+      expect(ejsonParse(d.options.validator!)).toEqual(validator);
+      expect(d.options.validationLevel).toBe('moderate');
+      expect(d.options.validationAction).toBe('warn');
+    });
+
+    it('returns a view as a view on its source with no figures', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('v').catch(() => undefined);
+        await db.dropCollection('src').catch(() => undefined);
+        await db.createCollection('src');
+        await db.createCollection('v', { viewOn: 'src', pipeline: [{ $match: { a: 1 } }] });
+      });
+
+      const d = await svc.collectionDetails({
+        connectionId: connId,
+        dbName: DETAILS_DB,
+        collection: 'v',
+      });
+
+      expect(d.type).toBe('view');
+      expect(d.stats).toBeUndefined();
+      expect(d.options.viewOn).toBe('src');
+      // Canonical EJSON on the wire: the number keeps its BSON type.
+      expect(JSON.parse(d.options.pipeline!)).toEqual([{ $match: { a: { $numberInt: '1' } } }]);
+    });
+
+    it('throws NotFoundError for a collection that does not exist', async () => {
+      await setup();
+      await expect(
+        svc.collectionDetails({
+          connectionId: connId,
+          dbName: DETAILS_DB,
+          collection: 'never_created',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it('falls back to the estimate, without the optional sizes, when $collStats is unauthorized', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('plain').catch(() => undefined);
+        const coll = await db.createCollection('plain');
+        await coll.insertMany([{ a: 1 }, { a: 2 }, { a: 3 }]);
+      });
+      const aggregate = vi
+        .spyOn(Collection.prototype, 'aggregate')
+        .mockImplementation((() => ({
+          next: async () => {
+            throw new Error('not authorized on detailsdb to execute command $collStats');
+          },
+        })) as never);
+
+      try {
+        const d = await svc.collectionDetails({
+          connectionId: connId,
+          dbName: DETAILS_DB,
+          collection: 'plain',
+        });
+        expect(d.stats?.documentCount).toBe(3);
+        expect(d.stats?.indexCount).toBeGreaterThanOrEqual(1);
+        expect(d.stats?.storageSizeBytes).toBeUndefined();
+        expect(d.stats?.avgObjSizeBytes).toBeUndefined();
+        expect(d.stats?.totalIndexSizeBytes).toBeUndefined();
+        expect(aggregate).toHaveBeenCalled();
+      } finally {
+        aggregate.mockRestore();
+      }
+    });
   });
 
   it('sampleSchema returns merged recent + random documents', async () => {

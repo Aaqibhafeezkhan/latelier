@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { MongoClient } from 'mongodb';
 import { IPC_CHANNELS } from '@shared/ipc';
-import type { CollectionInfo, DbInfo } from '@shared/ipc';
+import type { CollectionDetails, CollectionInfo, DbInfo } from '@shared/ipc';
 import { createRouter } from '../../electron/ipc/router';
 import { registerMetaChannels } from '../../electron/ipc/handlers/meta';
 import { MongoPool } from '../../electron/mongo/MongoPool';
@@ -145,6 +145,49 @@ describe('meta:* channels via router', () => {
       const env = await shim.invoke(IPC_CHANNELS.metaListCollections, {
         connectionId: 'no-such-conn',
         dbName: DB,
+      });
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe('NOT_FOUND');
+    });
+  });
+
+  describe('meta:collectionDetails', () => {
+    const target = { connectionId: CONN, dbName: DB, collection: 'products' };
+
+    it('returns the details of a seeded collection', async () => {
+      const env = await shim.invoke<CollectionDetails>(IPC_CHANNELS.metaCollectionDetails, target);
+      expect(env.ok).toBe(true);
+      if (!env.ok) return;
+      expect(env.data).toMatchObject({ name: 'products', type: 'collection', capped: false });
+      expect(env.data.stats?.documentCount).toBe(3);
+    });
+
+    it.each([
+      ['an empty collection', { ...target, collection: '' }],
+      ['a missing dbName', { connectionId: CONN, collection: 'products' }],
+      ['a missing connectionId', { dbName: DB, collection: 'products' }],
+    ])('rejects %s with VALIDATION', async (_what, payload) => {
+      const env = await shim.invoke(IPC_CHANNELS.metaCollectionDetails, payload);
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe('VALIDATION');
+    });
+
+    it('answers NOT_FOUND for a collection that does not exist', async () => {
+      const env = await shim.invoke(IPC_CHANNELS.metaCollectionDetails, {
+        ...target,
+        collection: 'never_created',
+      });
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe('NOT_FOUND');
+    });
+
+    it('answers NOT_FOUND for an unknown connection', async () => {
+      const env = await shim.invoke(IPC_CHANNELS.metaCollectionDetails, {
+        ...target,
+        connectionId: 'no-such-conn',
       });
       expect(env.ok).toBe(false);
       if (env.ok) return;

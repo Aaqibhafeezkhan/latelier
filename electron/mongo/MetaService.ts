@@ -1,5 +1,8 @@
-import type { CollectionInfo, DbInfo } from '@shared/ipc';
-import { ejsonEncodeArray } from './ejson.ts';
+import type { Db, Document } from 'mongodb';
+import type { CollectionDetails, CollectionInfo, DbInfo } from '@shared/ipc';
+import type { ValidationAction, ValidationLevel } from '@shared/types';
+import { NotFoundError } from '../errors.ts';
+import { ejsonEncodeArray, ejsonStringify } from './ejson.ts';
 import { classifyMongoOpError, isMaxTimeMSExpired } from './errors.ts';
 import type { MongoPool } from './MongoPool.ts';
 import { QUERY_TIMEOUT_MS, STATS_TIMEOUT_MS } from './timeouts.ts';
@@ -26,6 +29,12 @@ export interface ListDatabasesInput {
 export interface ListCollectionsInput {
   connectionId: string;
   dbName: string;
+}
+
+export interface CollectionDetailsInput {
+  connectionId: string;
+  dbName: string;
+  collection: string;
 }
 
 export interface SampleSchemaInput {
@@ -113,57 +122,59 @@ export class MetaService {
     } catch (err) {
       throw classifyMongoOpError(err);
     }
-    type Storage = {
-      count?: number;
-      size?: number;
-      nindexes?: number;
-      wiredTiger?: { creationTime?: string };
-    };
     return mapWithConcurrency(specs, LIST_COLLECTIONS_CONCURRENCY, async (s): Promise<CollectionInfo> => {
       const info: CollectionInfo = {
         name: s.name,
-        type:
-          s.type === 'view'
-            ? 'view'
-            : s.type === 'timeseries'
-              ? 'timeseries'
-              : 'collection',
+        type: collectionType(s.type),
         documentCount: 0,
         sizeBytes: 0,
         indexCount: 0,
         capped: Boolean((s.options as { capped?: boolean } | undefined)?.capped),
       };
-      try {
-        // Per-collection storage-stats lookup is bounded by the stats budget.
-        // With `LIST_COLLECTIONS_CONCURRENCY` parallel runners, the worst
-        // case is N collections / concurrency × budget, but no single Mongo
-        // round-trip can hang the IPC reply for longer than this.
-        const stats = await db.collection(s.name).aggregate(
-          [{ $collStats: { storageStats: {} } }],
-          { maxTimeMS: STATS_TIMEOUT_MS },
-        ).next();
-        const storage = (stats as { storageStats?: Storage } | null)?.storageStats;
-        if (storage) {
-          info.documentCount = storage.count ?? 0;
-          info.sizeBytes = storage.size ?? 0;
-          info.indexCount = storage.nindexes ?? 0;
-          if (storage.wiredTiger?.creationTime) {
-            info.lastModified = storage.wiredTiger.creationTime;
-          }
-        }
-      } catch {
-        // Atlas free tier / restricted user: fall back to cheap estimates.
-        // Both fallback calls share the same timeout budget so a single
-        // hung collection can't hold up the whole list.
-        const [countResult, indexesResult] = await Promise.allSettled([
-          db.collection(s.name).estimatedDocumentCount({ maxTimeMS: STATS_TIMEOUT_MS }),
-          db.collection(s.name).indexes({ maxTimeMS: STATS_TIMEOUT_MS }),
-        ]);
-        info.documentCount = countResult.status === 'fulfilled' ? countResult.value : 0;
-        info.indexCount = indexesResult.status === 'fulfilled' ? indexesResult.value.length : 0;
-      }
+      const stats = await readStorageStats(db, s.name);
+      info.documentCount = stats.documentCount;
+      info.sizeBytes = stats.sizeBytes;
+      info.indexCount = stats.indexCount;
+      if (stats.lastModified) info.lastModified = stats.lastModified;
       return info;
     });
+  }
+
+  async collectionDetails(input: CollectionDetailsInput): Promise<CollectionDetails> {
+    const client = await this.pool.readClient(input.connectionId);
+    const db = client.db(input.dbName);
+    let specs: CollectionSpec[];
+    try {
+      specs = await db
+        .listCollections<CollectionSpec>({ name: input.collection }, { nameOnly: false, maxTimeMS: STATS_TIMEOUT_MS })
+        .toArray();
+    } catch (err) {
+      throw classifyMongoOpError(err);
+    }
+    const spec = specs[0];
+    if (!spec) {
+      throw new NotFoundError(`Collection ${input.dbName}.${input.collection} does not exist`);
+    }
+    const type = collectionType(spec.type);
+    const opts = spec.options ?? {};
+    const details: CollectionDetails = {
+      name: spec.name,
+      type,
+      capped: Boolean(opts.capped),
+      options: {
+        ...(opts.viewOn !== undefined ? { viewOn: opts.viewOn } : {}),
+        ...(opts.pipeline !== undefined ? { pipeline: ejsonStringify(opts.pipeline) } : {}),
+        ...(opts.validator !== undefined ? { validator: ejsonStringify(opts.validator) } : {}),
+        ...(opts.validationLevel !== undefined ? { validationLevel: opts.validationLevel } : {}),
+        ...(opts.validationAction !== undefined ? { validationAction: opts.validationAction } : {}),
+      },
+    };
+    // A view has no storage of its own to measure.
+    if (type !== 'view') {
+      const { lastModified: _unused, ...stats } = await readStorageStats(db, spec.name);
+      details.stats = stats;
+    }
+    return details;
   }
 
   async sampleSchema(input: SampleSchemaInput): Promise<{ docs: unknown[] }> {
@@ -196,6 +207,81 @@ export class MetaService {
       return { docs: [] };
     }
   }
+}
+
+/** The slice of a `listCollections` entry that `collectionDetails` reads. */
+interface CollectionSpec {
+  name: string;
+  type?: string;
+  options?: {
+    capped?: boolean;
+    viewOn?: string;
+    pipeline?: unknown[];
+    validator?: Document;
+    validationLevel?: ValidationLevel;
+    validationAction?: ValidationAction;
+  };
+}
+
+function collectionType(t: string | undefined): CollectionInfo['type'] {
+  return t === 'view' ? 'view' : t === 'timeseries' ? 'timeseries' : 'collection';
+}
+
+interface StorageStats {
+  documentCount: number;
+  sizeBytes: number;
+  indexCount: number;
+  lastModified?: string;
+  /** The three below come from `$collStats` only; absent on the estimate fallback. */
+  storageSizeBytes?: number;
+  avgObjSizeBytes?: number;
+  totalIndexSizeBytes?: number;
+}
+
+/**
+ * One collection's storage figures. Bounded by the stats budget: with
+ * `LIST_COLLECTIONS_CONCURRENCY` parallel runners, the worst case is N
+ * collections / concurrency x budget, but no single Mongo round-trip can hang
+ * the IPC reply for longer than this.
+ */
+async function readStorageStats(db: Db, name: string): Promise<StorageStats> {
+  type Storage = {
+    count?: number;
+    size?: number;
+    nindexes?: number;
+    storageSize?: number;
+    avgObjSize?: number;
+    totalIndexSize?: number;
+    wiredTiger?: { creationTime?: string };
+  };
+  const out: StorageStats = { documentCount: 0, sizeBytes: 0, indexCount: 0 };
+  try {
+    const stats = await db
+      .collection(name)
+      .aggregate([{ $collStats: { storageStats: {} } }], { maxTimeMS: STATS_TIMEOUT_MS })
+      .next();
+    const storage = (stats as { storageStats?: Storage } | null)?.storageStats;
+    if (storage) {
+      out.documentCount = storage.count ?? 0;
+      out.sizeBytes = storage.size ?? 0;
+      out.indexCount = storage.nindexes ?? 0;
+      if (storage.storageSize !== undefined) out.storageSizeBytes = storage.storageSize;
+      if (storage.avgObjSize !== undefined) out.avgObjSizeBytes = storage.avgObjSize;
+      if (storage.totalIndexSize !== undefined) out.totalIndexSizeBytes = storage.totalIndexSize;
+      if (storage.wiredTiger?.creationTime) out.lastModified = storage.wiredTiger.creationTime;
+    }
+  } catch {
+    // Atlas free tier / restricted user: fall back to cheap estimates.
+    // Both fallback calls share the same timeout budget so a single
+    // hung collection can't hold up the whole list.
+    const [countResult, indexesResult] = await Promise.allSettled([
+      db.collection(name).estimatedDocumentCount({ maxTimeMS: STATS_TIMEOUT_MS }),
+      db.collection(name).indexes({ maxTimeMS: STATS_TIMEOUT_MS }),
+    ]);
+    out.documentCount = countResult.status === 'fulfilled' ? countResult.value : 0;
+    out.indexCount = indexesResult.status === 'fulfilled' ? indexesResult.value.length : 0;
+  }
+  return out;
 }
 
 /**

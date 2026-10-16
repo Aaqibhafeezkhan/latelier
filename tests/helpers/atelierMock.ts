@@ -67,6 +67,7 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
     meta: {
       listDatabases: async () => [],
       listCollections: async () => [],
+      collectionDetails: unused('meta.collectionDetails') as IpcApi['meta']['collectionDetails'],
       sampleSchema: async () => ({ docs: [] }),
     },
     index: {
@@ -387,6 +388,7 @@ function makePermissiveStub(): IpcApi {
     meta: {
       listDatabases: async () => [],
       listCollections: async () => [],
+      collectionDetails: noopAsync as IpcApi['meta']['collectionDetails'],
       sampleSchema: async () => ({ docs: [] }),
     },
     index: {
