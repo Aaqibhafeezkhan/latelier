@@ -34,7 +34,40 @@ const REDACTED_KEYS = new Set([
  * malformed at that point and no pattern can tell where the userinfo ends.
  */
 const URI_USERINFO = /(mongodb(?:\+srv)?:\/\/)[^/\s]*@/gi;
-const scrubString = (s: string): string => s.replace(URI_USERINFO, '$1***@');
+
+/**
+ * Query parameters of a connection string that carry a secret, lower-cased.
+ * Matches the set the import wizard masks, plus the legacy PEM-key alias.
+ */
+const SECRET_URI_PARAMS = new Set([
+  'password', 'proxypassword', 'tlscertificatekeyfilepassword', 'sslpemkeypassword',
+]);
+const URI_STRING = /mongodb(?:\+srv)?:\/\/\S*/gi;
+// The name stops at any separator, `?` included: a name that could run across
+// later `?`s rescans the rest of the string from each one when no `=` follows,
+// which is quadratic on a run of `?`. With it, the scan stays linear.
+const URI_QUERY_PARAM = /([?&])([^=&?]*)=([^&]*)/g;
+
+// An authMechanismProperties value holding the AWS session token is masked
+// whole: splitting a malformed list to find the token's end cannot be trusted.
+// The driver reads parameters through URLSearchParams, which decodes valid
+// escapes and keeps malformed ones as written, so `%70roxyPassword` is
+// `proxyPassword` and `AWS%5FSESSION%5FTOKEN` is the token's marker even next
+// to a broken escape. Name and value are compared the way the driver sees them.
+function asDriverReads(raw: string): string {
+  return new URLSearchParams(`v=${raw}`).get('v')!;
+}
+
+function scrubQueryParam(match: string, sep: string, name: string, value: string): string {
+  const key = asDriverReads(name).toLowerCase();
+  const secret = SECRET_URI_PARAMS.has(key)
+    || (key === 'authmechanismproperties' && /aws_session_token/i.test(asDriverReads(value)));
+  return secret ? `${sep}${name}=***` : match;
+}
+
+const scrubString = (s: string): string =>
+  s.replace(URI_USERINFO, '$1***@')
+    .replace(URI_STRING, (uri) => uri.replace(URI_QUERY_PARAM, scrubQueryParam));
 
 /**
  * True when a dotted field path (e.g. `user.password`) has any segment that

@@ -1,0 +1,68 @@
+{
+  "type": "Compass Connections",
+  "version": {
+    "$numberInt": "1"
+  },
+  "connections": [
+    {
+      "id": "6f1d1a62-1f0e-4c0b-9d43-0a1e2f3b4c01",
+      "favorite": {
+        "name": "Fixture favourite",
+        "color": "color3"
+      },
+      "connectionOptions": {
+        "connectionString": "mongodb://alice@db1.example.test:27017/?authSource=admin"
+      },
+      "savedConnectionType": "favorite",
+      "connectionSecrets": "AAGPyCa2mWDMU8OGDUxN9KnXjEmTdQyaefLHgzkVSar5rfvVF/B3B3zKSMA8M18VqxSSxW+UDAvsEyqTYx8zsnFdbLjOSPLE19GtenwQ/VgaVMXqbQigAV4="
+    },
+    {
+      "id": "6f1d1a62-1f0e-4c0b-9d43-0a1e2f3b4c02",
+      "favorite": {
+        "name": "Fixture SSH password"
+      },
+      "connectionOptions": {
+        "connectionString": "mongodb://bob@10.0.0.5:27017/",
+        "sshTunnel": {
+          "username": "tunnel",
+          "host": "bastion.example.test",
+          "port": {
+            "$numberInt": "22"
+          }
+        }
+      },
+      "savedConnectionType": "favorite",
+      "connectionSecrets": "AAFFKMq9PVtle4g04+gO8nRcnLNxhoscjJDT7Q/rg84n2YQlNfi+mc+3+ZHPS/nwcsIUk0nV2MqxqFLpefXW+E4Imi0jrvaXT8M5pA9f9QYK9ZINZEqv8eSjNMrZX2x/5kZV9QE7IfrYow+jOtWm7dcmUNd+EoDbB2SDKBVo"
+    },
+    {
+      "id": "6f1d1a62-1f0e-4c0b-9d43-0a1e2f3b4c03",
+      "favorite": {
+        "name": "Fixture SSH key"
+      },
+      "connectionOptions": {
+        "connectionString": "mongodb://carol@10.0.0.6:27017/",
+        "sshTunnel": {
+          "username": "tunnel",
+          "host": "bastion.example.test",
+          "port": {
+            "$numberInt": "2222"
+          },
+          "identityKeyFile": "/nonexistent/fixture_id_ed25519"
+        }
+      },
+      "savedConnectionType": "favorite",
+      "connectionSecrets": "AAGc1TjcdTtDZdspt8WU86jD6/9eH8CgPDsbPntBRPq08Fkdb82fLEvtPe4E3rqMYNJMQKIakl4qogqwgFotsKTN2ubViSIb5QzSAMh7e8PXYhPU9aRgYojvz6V/JWLXdn1bRN0JSYkWk+YunRKN3g3ZVKEkxYewrQHDEJY33IqsMA=="
+    },
+    {
+      "id": "6f1d1a62-1f0e-4c0b-9d43-0a1e2f3b4c04",
+      "favorite": {
+        "name": "Fixture OIDC"
+      },
+      "connectionOptions": {
+        "connectionString": "mongodb+srv://cluster0.example.test/?authMechanism=MONGODB-OIDC"
+      },
+      "savedConnectionType": "favorite",
+      "connectionSecrets": "AAExqzE9sHqEKbM7sp2GYq/bsdbZQgIbEFJjTZEuIc/fgq02Y1O2jFkPf1UiyClwTMePibyz2cDpl560jIL7Wg=="
+    }
+  ]
+}

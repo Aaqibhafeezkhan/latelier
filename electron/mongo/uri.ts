@@ -1,3 +1,4 @@
+import { domainToASCII, domainToUnicode } from 'node:url';
 import type { MongoClientOptions } from 'mongodb';
 import type { Connection } from '@shared/types';
 
@@ -111,6 +112,31 @@ export function buildUri(c: Connection, password?: string): string {
  * URI syntax and must be passed here.
  */
 /**
+ * A non-special URL scheme percent-encodes a non-ASCII host, and the driver
+ * decodes that again for a standard connection but not for SRV, where the
+ * lookup would ask for `m%C3%BCnchen.example`. Such a host goes to the driver
+ * as its punycode, which both forms resolve. Anything else (a Unix-socket host
+ * keeps its escapes) is left as it is.
+ */
+// Stryker disable BlockStatement: emptying the catch leaves `decoded` undefined, and `.test(undefined)` is false (it tests the ASCII string 'undefined'), so the next line returns the same hostname. Verified with node.
+function toDriverHost(hostname: string): string {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(hostname);
+  } catch {
+    // A malformed escape is not an encoded name; the driver gets it as written.
+    return hostname;
+  }
+  if (!/[\u0080-\uFFFF]/.test(decoded)) return hostname;
+  // domainToASCII cuts a name at `/`, `?` or `#` and folds look-alike dots, so
+  // the punycode is used only when it names exactly the decoded host; any other
+  // host goes on as written rather than as a different name.
+  const ascii = domainToASCII(decoded);
+  return domainToUnicode(ascii) === decoded.toLowerCase() ? ascii : hostname;
+}
+// Stryker restore BlockStatement
+
+/**
  * Extract just the host from whatever the user typed into the Host field.
  * Input like `mongodb+srv://user@cluster.mongodb.net:27017/db?opt=1`
  * becomes `cluster.mongodb.net`.
@@ -135,7 +161,7 @@ function sanitizeHost(raw: string): string {
   if (!trimmed) return trimmed;
   const hasScheme = /^mongodb(\+srv)?:\/\//.test(trimmed);
   try {
-    return new URL(hasScheme ? trimmed : `mongodb://${trimmed}`).hostname;
+    return toDriverHost(new URL(hasScheme ? trimmed : `mongodb://${trimmed}`).hostname);
   } catch {
     // Not parseable as a URL at all (e.g. stray whitespace). Fall back to
     // manual stripping, still cutting `/?#` before splitting on the LAST

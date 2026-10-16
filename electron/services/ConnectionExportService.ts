@@ -1,15 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
   ConnectionExportInput,
   ConnectionExportResult,
   ExportSecretField,
-  ImportCommitInput,
-  ImportCommitResult,
-  ImportPreview,
-  UriCommitInput,
-  UriPreview,
 } from '@shared/types';
 import { AppError, SystemError, ValidationError } from '../errors.ts';
 import type { ConnectionService } from '../mongo/ConnectionService.ts';
@@ -17,24 +11,12 @@ import type { Logger } from '../log.ts';
 import type { SecretsVault } from '../secrets/SecretsVault.ts';
 import {
   buildConnectionExport,
-  decryptSelected,
-  entryToConnectionInput,
-  MAX_FILE_BYTES,
-  parseConnectionExport,
-  planNames,
   toExportEntry,
   type ExportItem,
-  type ParsedExport,
   type ScryptParams,
   type SecretValues,
 } from './connectionExportFormat.ts';
-import {
-  lineInputProblem,
-  lineToInput,
-  parseLine,
-  planLineNames,
-  previewEntry,
-} from './connectionBulkAdd.ts';
+import { checkFileSize } from './import/detect.ts';
 
 /** Vault column for each exported secret field. */
 const VAULT_FIELD = {
@@ -46,6 +28,68 @@ const VAULT_FIELD = {
 const NO_SECURE_STORAGE_REASON =
   'No secure storage on this install, and storing passwords unencrypted is off.';
 
+/**
+ * Reads a file the user picked in main's dialog; one over the import limit is
+ * refused before it is read. A file system error names the absolute path in
+ * its message, so it never reaches the renderer: it is logged by its code and
+ * reported in words.
+ */
+export async function readImportFile(file: string, log?: Logger): Promise<string> {
+  let size: number;
+  try {
+    size = (await fs.stat(file)).size;
+  } catch (err) {
+    throw unreadable(err, log);
+  }
+  checkFileSize(size);
+  try {
+    return await fs.readFile(file, 'utf8');
+  } catch (err) {
+    throw unreadable(err, log);
+  }
+}
+
+function unreadable(err: unknown, log: Logger | undefined): ValidationError {
+  log?.warn('conn-import', 'could not read the picked file', {
+    code: (err as NodeJS.ErrnoException).code ?? 'unknown',
+  });
+  return new ValidationError("This file can't be read.");
+}
+
+/**
+ * Stores an imported Connection's secrets after the row exists (C13 §4.4).
+ * Secrets never go through create(): it deletes the row again when the vault
+ * refuses them, and the Connection must be kept. A refusal is reported in
+ * `notStored` once per Connection; it never throws.
+ */
+export function storeImportedSecrets(
+  vault: SecretsVault,
+  log: Logger | undefined,
+  conn: { id: string; name: string },
+  values: SecretValues | undefined,
+  notStored: { name: string; reason: string }[],
+): void {
+  if (!values) return;
+  for (const field of Object.keys(VAULT_FIELD) as ExportSecretField[]) {
+    const value = values[field];
+    if (value === undefined) continue;
+    try {
+      vault.set(conn.id, VAULT_FIELD[field], value);
+    } catch (err) {
+      if (err instanceof AppError && err.code === 'SECRETS_UNAVAILABLE') {
+        notStored.push({ name: conn.name, reason: NO_SECURE_STORAGE_REASON });
+      } else {
+        log?.error('conn-import', 'could not store an imported secret', {
+          cause: err instanceof Error ? err.message : String(err),
+        });
+        notStored.push({ name: conn.name, reason: 'The password could not be stored.' });
+      }
+      // Every remaining secret of this Connection fails the same way; say it once.
+      return;
+    }
+  }
+}
+
 export interface ConnectionExportDialogs {
   /** Shows the save dialog; `null` when the user cancels. */
   savePath(defaultName: string): Promise<string | null>;
@@ -54,10 +98,9 @@ export interface ConnectionExportDialogs {
 }
 
 /**
- * Connection Export / Import (C13). Owns both dialogs and the file, so neither
- * a path nor a plaintext secret nor the derived key ever reaches the renderer;
- * the only thing carried between preview and commit is a token for the parsed
- * file held here.
+ * Connection Export (C13). Owns the save dialog and the file, so neither a path
+ * nor a plaintext secret nor the derived key ever reaches the renderer. Import
+ * lives in `ImportWizardService`; the dialogs interface is shared with it.
  */
 export class ConnectionExportService {
   private readonly conns: ConnectionService;
@@ -65,8 +108,6 @@ export class ConnectionExportService {
   private readonly dialogs: ConnectionExportDialogs;
   private readonly now: () => Date;
   private readonly scrypt?: ScryptParams;
-  private readonly log?: Logger;
-  private readonly pending = new Map<string, ParsedExport>();
 
   constructor(opts: {
     conns: ConnectionService;
@@ -75,19 +116,12 @@ export class ConnectionExportService {
     now?: () => Date;
     /** Test hook: a cheaper scrypt cost than the default. */
     scrypt?: ScryptParams;
-    log?: Logger;
   }) {
     this.conns = opts.conns;
     this.vault = opts.vault;
     this.dialogs = opts.dialogs;
     this.now = opts.now ?? (() => new Date());
     this.scrypt = opts.scrypt;
-    this.log = opts.log;
-  }
-
-  /** Called when the window closes: a token does not outlive it. */
-  clearPending(): void {
-    this.pending.clear();
   }
 
   async export(input: ConnectionExportInput): Promise<ConnectionExportResult> {
@@ -143,170 +177,5 @@ export class ConnectionExportService {
       );
     }
     return { written: conns.length, omittedSecrets };
-  }
-
-  async importPreview(): Promise<ImportPreview> {
-    const source = await this.dialogs.openPath();
-    if (source === null) return { cancelled: true };
-    const size = (await fs.stat(source)).size;
-    if (size > MAX_FILE_BYTES) {
-      throw new ValidationError(
-        `This file is too large to be a Connection Export (${MAX_FILE_BYTES / 1024 / 1024} MB limit).`,
-      );
-    }
-    // A failure here throws before a token exists, so nothing is held or written.
-    const file = parseConnectionExport(await fs.readFile(source, 'utf8'));
-    const token = randomUUID();
-    this.pending.set(token, file);
-    const savedAs = planNames(
-      this.conns.list().map((c) => c.name),
-      file.connections.map((c) => c.name),
-    );
-    return {
-      token,
-      hasSecrets: file.connections.some((c) => c.secrets !== undefined),
-      entries: file.connections.map((c, index) => ({
-        index,
-        name: c.name,
-        savedAs: savedAs[index]!,
-        repick: c.repick ?? [],
-        hasSecrets: c.secrets !== undefined,
-      })),
-    };
-  }
-
-  async importCommit(input: ImportCommitInput): Promise<ImportCommitResult> {
-    const file = this.pending.get(input.token);
-    if (!file) throw new ValidationError('This import has expired. Choose the file again.');
-    const indices = [...input.indices].sort((a, b) => a - b);
-    if (new Set(indices).size !== indices.length) {
-      throw new ValidationError('Each connection can only be imported once.');
-    }
-    if (indices.some((i) => !Number.isInteger(i) || i < 0 || i >= file.connections.length)) {
-      throw new ValidationError('The selection includes a connection that is not in the file.');
-    }
-
-    // Single-use even under concurrent commits: take the file out before the
-    // first await. A failed decrypt (wrong passphrase, damaged file, missing
-    // passphrase) puts it back, so a retry or "without passwords" still works.
-    this.pending.delete(input.token);
-    let secrets: Map<number, SecretValues>;
-    try {
-      secrets = input.withoutSecrets
-        ? new Map<number, SecretValues>()
-        : await decryptSelected(file, input.passphrase, indices);
-    } catch (err) {
-      this.pending.set(input.token, file);
-      throw err;
-    }
-
-    // The preview was a forecast; clashes are resolved against what exists now.
-    // Planned over every entry in the file, as the preview did, so unticking an
-    // entry cannot move another one's name.
-    const names = planNames(
-      this.conns.list().map((c) => c.name),
-      file.connections.map((c) => c.name),
-    );
-    const result: ImportCommitResult = { created: [], failed: [], secretsNotStored: [] };
-    for (const i of indices) {
-      const entry = file.connections[i]!;
-      let created;
-      try {
-        // Secrets never go through create(): it deletes the row again when the
-        // vault refuses them, and §4.4 wants the Connection kept.
-        created = await this.conns.create({ ...entryToConnectionInput(entry), name: names[i]! });
-      } catch (err) {
-        // Carry on: the rows already created stay, so the result must say which did not.
-        this.log?.error('conn-import', 'could not create an imported connection', {
-          index: i,
-          cause: err instanceof Error ? err.message : String(err),
-        });
-        result.failed.push({
-          index: i,
-          name: entry.name,
-          reason: err instanceof AppError ? err.message : 'Unexpected error',
-        });
-        continue;
-      }
-      result.created.push({ index: i, id: created.id, name: created.name });
-      this.storeSecrets(created.id, created.name, secrets.get(i), result);
-    }
-    return result;
-  }
-
-  /** C13 §7.1 — nothing is written; a line's password is reported as present, never returned. */
-  previewUris(uris: readonly string[]): UriPreview {
-    const lines = uris.map(parseLine);
-    const names = planLineNames(this.conns.list().map((c) => c.name), lines);
-    return { entries: lines.map((l, i) => previewEntry(l, i, names[i]!)) };
-  }
-
-  /**
-   * C13 §7.1 — re-parses and re-plans against what exists now, like
-   * `importCommit`, and keeps a Connection whose password the vault refuses.
-   */
-  async createFromUris(input: UriCommitInput): Promise<ImportCommitResult> {
-    const lines = input.uris.map(parseLine);
-    const names = planLineNames(this.conns.list().map((c) => c.name), lines);
-    const creds = new Map(input.credentials.map((c) => [c.index, c]));
-    const result: ImportCommitResult = { created: [], failed: [], secretsNotStored: [] };
-    for (const [i, line] of lines.entries()) {
-      const label = `Line ${i + 1}`;
-      if (!line.ok) {
-        result.failed.push({ index: i, name: label, reason: line.reason });
-        continue;
-      }
-      const { password, ...conn } = lineToInput(line, names[i]!, input.defaults, creds.get(i));
-      const problem = lineInputProblem({ ...conn, ...(password ? { password } : {}) });
-      if (problem) {
-        result.failed.push({ index: i, name: names[i]!, reason: problem });
-        continue;
-      }
-      let created;
-      try {
-        created = await this.conns.create(conn);
-      } catch (err) {
-        this.log?.error('conn-add', 'could not create a connection from a connection string', {
-          index: i,
-          cause: err instanceof Error ? err.message : String(err),
-        });
-        result.failed.push({
-          index: i,
-          name: names[i]!,
-          reason: err instanceof AppError ? err.message : 'Unexpected error',
-        });
-        continue;
-      }
-      result.created.push({ index: i, id: created.id, name: created.name });
-      this.storeSecrets(created.id, created.name, password ? { password } : undefined, result);
-    }
-    return result;
-  }
-
-  private storeSecrets(
-    id: string,
-    name: string,
-    values: SecretValues | undefined,
-    result: ImportCommitResult,
-  ): void {
-    if (!values) return;
-    for (const field of Object.keys(VAULT_FIELD) as ExportSecretField[]) {
-      const value = values[field];
-      if (value === undefined) continue;
-      try {
-        this.vault.set(id, VAULT_FIELD[field], value);
-      } catch (err) {
-        if (err instanceof AppError && err.code === 'SECRETS_UNAVAILABLE') {
-          result.secretsNotStored.push({ name, reason: NO_SECURE_STORAGE_REASON });
-        } else {
-          this.log?.error('conn-import', 'could not store an imported secret', {
-            cause: err instanceof Error ? err.message : String(err),
-          });
-          result.secretsNotStored.push({ name, reason: 'The password could not be stored.' });
-        }
-        // Every remaining secret of this Connection fails the same way; say it once.
-        return;
-      }
-    }
   }
 }
