@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, emptyWorkspaceActions, emptyWorkspaceMeta } from '../helpers/render';
-import { installAtelierMock } from '../helpers/atelierMock';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { notifications } from '@mantine/notifications';
+import { render, screen, fireEvent, waitFor, emptyWorkspaceActions, emptyWorkspaceMeta } from '../helpers/render';
+import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { ResultBar } from '../../src/pages/Workspace/ResultBar';
 import { CollectionWorkspaceProvider } from '../../src/pages/Workspace/CollectionWorkspaceProvider';
 import type { CollectionTabState } from '@shared/types';
@@ -218,5 +219,26 @@ describe('ResultBar - page size selector (T0.5 / W07)', () => {
     expect(actions.patch).not.toHaveBeenCalled();
     expect(actions.run).not.toHaveBeenCalled();
     expect(setSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('ResultBar - a page size that could not be remembered says so', () => {
+  afterEach(() => {
+    uninstallAtelierMock();
+    notifications.clean();
+  });
+
+  it('toasts once when persisting the sticky default fails, and still applies the size', async () => {
+    const set = async () => {
+      throw { code: 'SYSTEM_ERROR', message: 'disk full' };
+    };
+    installAtelierMock({ prefs: { set: set as never } });
+    const { actions } = renderBar({ page: 0, pageSize: 50 });
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Rows per page' }));
+    fireEvent.click(screen.getByRole('option', { name: '100' }));
+
+    expect(actions.run).toHaveBeenCalledWith({ pageSize: 100, page: 0 });
+    await waitFor(() => expect(screen.getAllByText('Could not save the rows-per-page default')).toHaveLength(1));
   });
 });

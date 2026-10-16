@@ -1,6 +1,7 @@
 import React from 'react';
 import { themeVars } from '../theme/themeVars';
 import { api } from '../api/atelier';
+import { notify } from '../theme/notifications';
 import { parseInline } from './parseInline';
 
 /**
@@ -54,7 +55,9 @@ export function InlineMarkdown({ source }: { source: string }) {
                 href={n.href}
                 onClick={(e) => {
                   e.preventDefault();
-                  void api.app.openExternal(n.href).catch(() => {});
+                  void api.app.openExternal(n.href).catch(() => {
+                    notify.error('Could not open the link');
+                  });
                 }}
                 style={{ color: T.accent, textDecoration: 'underline' }}
               >

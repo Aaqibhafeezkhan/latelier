@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import React from 'react';
-import { render, waitFor, act } from '../helpers/render';
+import { notifications } from '@mantine/notifications';
+import { render, waitFor, act, screen } from '../helpers/render';
 import { useTheme, type ThemeMode } from '../../src/ThemeContext';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 
@@ -70,5 +71,31 @@ describe('useTheme (renderer)', () => {
     await waitFor(() => {
       expect(states.at(-1)?.dark).toBe(true);
     });
+  });
+});
+
+describe('useTheme — a theme that could not be saved says so', () => {
+  afterEach(() => {
+    uninstallAtelierMock();
+    notifications.clean();
+  });
+
+  it('toasts when persisting the toggled theme fails', async () => {
+    let toggle!: () => void;
+    installAtelierMock({
+      prefs: {
+        getTheme: async () => 'light',
+        setTheme: async () => {
+          throw { code: 'SYSTEM_ERROR', message: 'disk full' };
+        },
+        onThemeChanged: () => () => {},
+      },
+    });
+    render(<Probe onChange={(s) => (toggle = s.toggle)} />);
+    await waitFor(() => expect(toggle).toBeDefined());
+
+    act(() => toggle());
+
+    expect(await screen.findByText('Could not save the theme')).toBeTruthy();
   });
 });

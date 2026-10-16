@@ -1,5 +1,6 @@
 import React from 'react';
 import { api } from './api/atelier';
+import { notify } from './theme/notifications';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -90,7 +91,9 @@ export function useTheme(): [boolean, () => void] {
       const effectiveDark = resolveDark(prev);
       const next: ThemeMode = effectiveDark ? 'light' : 'dark';
       void api.prefs.setTheme(next).catch(() => {
-        /* ignore */
+        // The switch already took effect for this session; say it will not
+        // survive a relaunch instead of letting it silently revert.
+        notify.error('Could not save the theme', { id: 'theme-save-failed' });
       });
       return next;
     });

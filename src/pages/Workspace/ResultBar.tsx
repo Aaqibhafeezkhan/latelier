@@ -5,6 +5,7 @@ import { I } from '../../icons';
 import type { ResultViewMode } from '@shared/types';
 import { useCollectionWorkspace } from './context';
 import { api } from '../../api/atelier';
+import { notify } from '../../theme/notifications';
 import { DEFAULT_PAGE_SIZE_PREF_KEY, PAGE_SIZE_OPTIONS } from '../../state/workspaceTabs';
 import { FieldsControl } from './FieldsControl';
 import { ExportDialog } from './ExportDialog';
@@ -99,7 +100,9 @@ export function ResultBar() {
     actions.patch(patch);
     actions.run(patch);
     void api.prefs.set(DEFAULT_PAGE_SIZE_PREF_KEY, n).catch(() => {
-      // best-effort; the tab's own pageSize already persisted via patch.
+      // The tab's own pageSize already persisted via patch; only the sticky
+      // default for new tabs is lost, which the user is told.
+      notify.error('Could not save the rows-per-page default', { id: 'pref-save-failed' });
     });
   };
 
