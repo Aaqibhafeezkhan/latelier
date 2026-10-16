@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { act, render, screen, waitFor, within } from '../helpers/render';
+import { act, fireEvent, render, screen, waitFor, within } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
@@ -351,6 +351,189 @@ describe('StructureView — statistics section', () => {
     await waitFor(() => expect(collectionDetails).toHaveBeenCalledTimes(1));
     await userEvent.click(screen.getByRole('button', { name: 'Refresh statistics' }));
     await waitFor(() => expect(collectionDetails).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('StructureView — validation rules', () => {
+  const RULES = '{"$jsonSchema":{"required":["name"]}}';
+  const withRules = (options: CollectionDetails['options']): CollectionDetails => ({ ...DETAILS, options });
+
+  it('renders a Validation region between the indexes and the schema', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails: async () => withRules({ validator: RULES }), sampleSchema: async () => ({ docs: [] }) },
+    });
+
+    renderStructure();
+
+    const validation = await screen.findByRole('region', { name: 'Validation' });
+    const indexes = screen.getByRole('region', { name: 'Indexes' });
+    const schema = screen.getByLabelText('Sample size');
+    expect(indexes.compareDocumentPosition(validation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(validation.compareDocumentPosition(schema) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('shows the rules, the level and the action from the details', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: {
+        collectionDetails: async () =>
+          withRules({ validator: RULES, validationLevel: 'moderate', validationAction: 'warn' }),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+
+    const validation = await screen.findByRole('region', { name: 'Validation' });
+    await waitFor(() => expect(within(validation).getByText(/"required"/)).toBeTruthy());
+    expect(within(validation).getByText(/"\$jsonSchema"/).textContent).toBe(
+      JSON.stringify(JSON.parse(RULES), null, 2),
+    );
+    expect(within(validation).getByText('Level: moderate')).toBeTruthy();
+    expect(within(validation).getByText('Action: warn')).toBeTruthy();
+  });
+
+  it('says there are no rules, with the server defaults, when none are set', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails: async () => DETAILS, sampleSchema: async () => ({ docs: [] }) },
+    });
+
+    renderStructure();
+
+    const validation = await screen.findByRole('region', { name: 'Validation' });
+    expect(await within(validation).findByText('No validation rules')).toBeTruthy();
+    expect(within(validation).getByText('Level: strict')).toBeTruthy();
+    expect(within(validation).getByText('Action: error')).toBeTruthy();
+  });
+
+  it('reads a cleared validator ({}) as no rules', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails: async () => withRules({ validator: '{}' }), sampleSchema: async () => ({ docs: [] }) },
+    });
+
+    renderStructure();
+
+    const validation = await screen.findByRole('region', { name: 'Validation' });
+    expect(await within(validation).findByText('No validation rules')).toBeTruthy();
+  });
+
+  it('Edit rules, a new level, Save: modifies the collection, then reads the details again', async () => {
+    const collectionDetails = vi.fn(async () => withRules({ validator: RULES }));
+    const modify = vi.fn(async () => ({ ok: true as const }));
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
+      collection: { modify },
+    });
+
+    renderStructure();
+
+    const validation = await screen.findByRole('region', { name: 'Validation' });
+    await userEvent.click(await within(validation).findByRole('button', { name: 'Edit rules' }));
+    const callsBeforeSave = collectionDetails.mock.calls.length;
+    await userEvent.selectOptions(within(validation).getByLabelText('Validation level'), 'moderate');
+    await userEvent.click(within(validation).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(modify).toHaveBeenCalledTimes(1));
+    const [input] = modify.mock.calls[0] as unknown as [
+      { connectionId: string; dbName: string; collection: string; options: Record<string, string> },
+    ];
+    expect(input).toMatchObject({
+      connectionId: 'c1',
+      dbName: 'shop',
+      collection: 'orders',
+      options: { validationLevel: 'moderate', validationAction: 'error' },
+    });
+    expect(JSON.parse(input.options.validator!)).toEqual(JSON.parse(RULES));
+    await waitFor(() => expect(collectionDetails.mock.calls.length).toBeGreaterThan(callsBeforeSave));
+    expect(within(validation).queryByLabelText('Validator')).toBeNull();
+  });
+
+  it('saves an emptied textarea as {}, which clears the rules', async () => {
+    const modify = vi.fn(async () => ({ ok: true as const }));
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails: async () => withRules({ validator: RULES }), sampleSchema: async () => ({ docs: [] }) },
+      collection: { modify },
+    });
+
+    renderStructure();
+
+    const validation = await screen.findByRole('region', { name: 'Validation' });
+    await userEvent.click(await within(validation).findByRole('button', { name: 'Edit rules' }));
+    await userEvent.clear(within(validation).getByLabelText('Validator'));
+    await userEvent.click(within(validation).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(modify).toHaveBeenCalledWith(expect.objectContaining({ options: expect.objectContaining({ validator: '{}' }) })),
+    );
+  });
+
+  it.each([
+    ['invalid JSON', '{"$jsonSchema":'],
+    ['an array', '[1]'],
+  ])('refuses %s inline without a call', async (_label, text) => {
+    const modify = vi.fn(async () => ({ ok: true as const }));
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails: async () => DETAILS, sampleSchema: async () => ({ docs: [] }) },
+      collection: { modify },
+    });
+
+    renderStructure();
+
+    const validation = await screen.findByRole('region', { name: 'Validation' });
+    await userEvent.click(await within(validation).findByRole('button', { name: 'Edit rules' }));
+    fireEvent.change(within(validation).getByLabelText('Validator'), { target: { value: text } });
+    await userEvent.click(within(validation).getByRole('button', { name: 'Save' }));
+
+    expect((await within(validation).findByRole('alert')).textContent).toMatch(/JSON document/);
+    expect(modify).not.toHaveBeenCalled();
+  });
+
+  it('shows a refused save inline and stays in edit mode', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails: async () => DETAILS, sampleSchema: async () => ({ docs: [] }) },
+      collection: {
+        modify: async () => {
+          throw { code: 'READ_ONLY', message: 'This connection is read-only.' };
+        },
+      },
+    });
+
+    renderStructure();
+
+    const validation = await screen.findByRole('region', { name: 'Validation' });
+    await userEvent.click(await within(validation).findByRole('button', { name: 'Edit rules' }));
+    await userEvent.click(within(validation).getByRole('button', { name: 'Save' }));
+
+    expect((await within(validation).findByRole('alert')).textContent).toMatch(/read-only/);
+    expect(within(validation).getByLabelText('Validator')).toBeTruthy();
+  });
+
+  it('renders no Validation region for a view', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: {
+        collectionDetails: async () => ({
+          name: 'orders',
+          type: 'view' as const,
+          capped: false,
+          options: { viewOn: 'src', pipeline: '[]' },
+        }),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('View on src')).toBeTruthy());
+    expect(screen.queryByRole('region', { name: 'Validation' })).toBeNull();
   });
 });
 

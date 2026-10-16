@@ -1,63 +1,24 @@
-import React from 'react';
 import { Button } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
-import { api, getErrorMessage } from '../../api/atelier';
 import type { CollectionDetails } from '@shared/ipc';
 import { humanBytes } from '../../utils/humanBytes';
 
 interface Props {
-  connectionId: string;
-  dbName: string;
-  collection: string;
+  details: CollectionDetails | null;
+  error: string | null;
+  loading: boolean;
+  onRefresh: () => void;
 }
 
 /**
  * Structure's statistics header (W16 §13): one collection's counts and sizes,
- * read through `meta:collectionDetails` on entry and on Refresh. Natural
- * height and `flex: 'none'` like its siblings, because StructureView's single
- * scroller sizes them (see StructureView's comment).
+ * from the `meta:collectionDetails` read StructureView owns. Natural height and
+ * `flex: 'none'` like its siblings, because StructureView's single scroller
+ * sizes them (see StructureView's comment).
  */
-export function CollectionStatsSection({ connectionId, dbName, collection }: Props) {
+export function CollectionStatsSection({ details, error, loading, onRefresh }: Props) {
   const T = themeVars;
-  // Keyed by target so a reply (or an error) is only ever shown for the
-  // collection it was read for: switching collections shows Loading, not the
-  // previous collection's figures.
-  const targetKey = `${connectionId}|${dbName}|${collection}`;
-  const [fetched, setFetched] = React.useState<{ key: string; details: CollectionDetails } | null>(null);
-  const details = fetched?.key === targetKey ? fetched.details : null;
-  const [error, setError] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  // Only the latest request may write state: a slow reply for a collection the
-  // tab has since left must not overwrite the one now on screen.
-  const latest = React.useRef(0);
-
-  const load = React.useCallback(async () => {
-    const id = ++latest.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const d = await api.meta.collectionDetails({ connectionId, dbName, collection });
-      if (id === latest.current) setFetched({ key: targetKey, details: d });
-    } catch (e) {
-      if (id === latest.current) {
-        setFetched(null);
-        setError(getErrorMessage(e, String(e)));
-      }
-    } finally {
-      if (id === latest.current) setLoading(false);
-    }
-  }, [connectionId, dbName, collection, targetKey]);
-
-  /* eslint-disable react-hooks/set-state-in-effect */
-  React.useEffect(() => {
-    void load();
-    return () => {
-      latest.current++;
-    };
-  }, [load]);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
   const stats = details?.stats;
   const size = (n: number | undefined) => (n === undefined ? '—' : humanBytes(n));
 
@@ -82,7 +43,7 @@ export function CollectionStatsSection({ connectionId, dbName, collection }: Pro
           size="compact-xs"
           variant="subtle"
           aria-label="Refresh statistics"
-          onClick={() => void load()}
+          onClick={onRefresh}
           leftSection={I.sync}
           disabled={loading}
         >
