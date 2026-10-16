@@ -57,15 +57,15 @@ const expectNoneChecked = () => {
 afterEach(uninstallAtelierMock);
 
 describe('Connections table: adding', () => {
-  it('stacks Paste URIs on the table', async () => {
+  it('stacks the Import Wizard on the table from Paste URIs', async () => {
     mount([row('c1', 'Prod')]);
     const table = await openTable();
     await userEvent.click(within(table).getByRole('button', { name: 'Paste URIs' }));
-    expect(await screen.findByRole('dialog', { name: 'Paste URIs' })).toBeTruthy();
+    expect(await screen.findByRole('dialog', { name: 'Import Connections' })).toBeTruthy();
     expect(screen.getByRole('dialog', { name: 'Connections' })).toBeTruthy();
   });
 
-  it('Import leaves the table for the file import', async () => {
+  it('Import leaves the table for the Import Wizard', async () => {
     mount([row('c1', 'Prod')]);
     const table = await openTable();
     await userEvent.click(within(table).getByRole('button', { name: 'Import' }));
@@ -77,11 +77,11 @@ describe('Connections table: adding', () => {
     mount([row('c1', 'Prod')]);
     const table = await openTable();
     await userEvent.click(within(table).getByRole('button', { name: 'Paste URIs' }));
-    await screen.findByRole('dialog', { name: 'Paste URIs' });
+    await screen.findByRole('dialog', { name: 'Import Connections' });
 
     await userEvent.keyboard('{Escape}');
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Paste URIs' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Import Connections' })).toBeNull());
     expect(screen.getByRole('dialog', { name: 'Connections' })).toBeTruthy();
     // With nothing stacked, the table takes Escape again.
     await userEvent.keyboard('{Escape}');

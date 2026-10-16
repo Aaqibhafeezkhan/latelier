@@ -101,79 +101,12 @@ export type ConnectionExportResult =
   | { written: number; omittedSecrets: { name: string; field: ExportSecretField }[] }
   | { cancelled: true };
 
-export type ImportPreview =
-  | {
-      /** Single-use handle to the parsed file held in main. */
-      token: string;
-      hasSecrets: boolean;
-      entries: {
-        index: number;
-        name: string;
-        savedAs: string;
-        repick: RepickFile[];
-        hasSecrets: boolean;
-      }[];
-    }
-  | { cancelled: true };
-
-export interface ImportCommitInput {
-  token: string;
-  indices: number[];
-  passphrase?: string;
-  withoutSecrets?: boolean;
-}
-
-export interface ImportCommitResult {
-  /** `index` is the entry's position in the file, which is what the preview listed. */
-  created: { index: number; id: string; name: string }[];
-  /** Entries that could not be created; the others were still imported. */
-  failed: { index: number; name: string; reason: string }[];
-  secretsNotStored: { name: string; reason: string }[];
-}
-
-// Adding Connections from pasted connection strings (C13 §7.1). Passwords go
-// in only: the preview says whether a line has one, never what it is.
-
-/** Applied to every line of a batch. */
-export interface UriBatchDefaults {
-  readOnly: boolean;
-  directConnection: boolean;
-}
-
 /** What the user typed for one line in the credentials step. */
 export interface UriCredentials {
   index: number;
   /** Typed in the second step; `''` means the user cleared it: no authentication. */
   username?: string;
   password?: string;
-}
-
-export type UriPreviewEntry =
-  | {
-      index: number;
-      ok: true;
-      /** The name it will be saved under, after clash renaming. */
-      savedAs: string;
-      host: string;
-      port: number;
-      srv: boolean;
-      authUsername?: string;
-      hasPassword: boolean;
-      /** Missing a username or a password, so the credentials step lists it. */
-      needsCredentials: boolean;
-      repick: RepickFile[];
-      warnings: string[];
-    }
-  | { index: number; ok: false; reason: string };
-
-export interface UriPreview {
-  entries: UriPreviewEntry[];
-}
-
-export interface UriCommitInput {
-  uris: string[];
-  defaults: UriBatchDefaults;
-  credentials: UriCredentials[];
 }
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -255,13 +188,126 @@ export type ConnectionUpdate = Partial<ConnectionInput> & {
  * dropped).
  */
 export interface ParsedUriWarning {
-  code: 'MULTI_HOST_TRUNCATED' | 'OPTION_DROPPED' | 'TLS_VERIFY_DISABLED';
+  code: 'MULTI_HOST_TRUNCATED' | 'OPTION_DROPPED' | 'TLS_VERIFY_DISABLED' | 'PROXY_DROPPED';
   detail?: string;
 }
 
 export interface ParsedUri {
   input: Partial<ConnectionInput>;
   warnings: ParsedUriWarning[];
+  /** tlsCAFile -> 'tlsCa', tlsCertificateKeyFile -> 'tlsClientCert'; never a path. */
+  repick?: RepickFile[];
+  /** The string set directConnection itself (any value). */
+  directConnectionExplicit?: boolean;
+}
+
+// ─── Import wizard (C14) ────────────────────────────────────────────────────
+
+// shared/ is types-only: the runtime target list lives in unknownJson.ts (main) and mapTargets.ts (renderer).
+export type MapTarget =
+  | 'name' | 'connectionString' | 'host' | 'port' | 'username'
+  | 'password' | 'authDatabase' | 'defaultDb' | 'tls';
+
+export type ImportSource = 'latelier' | 'compass' | 'uris' | 'unknown';
+
+export type ReviewRow =
+  | {
+      index: number;
+      ok: true;
+      savedAs: string;
+      /** The name the row asked for, when a clash renamed it to savedAs. */
+      renamedFrom?: string;
+      host: string;
+      /** Absent on SRV. */
+      port?: number;
+      srv: boolean;
+      authUsername?: string;
+      /** A password exists, plaintext or sealed. */
+      hasPassword: boolean;
+      /** The password only exists sealed (needs the passphrase). */
+      passwordSealed: boolean;
+      /** Missing a username or a password (plaintext or sealed), so the review asks for both; never X.509 or AWS. */
+      needsCredentials: boolean;
+      /** Null on SRV. */
+      directConnection: boolean | null;
+      defaultTicked: boolean;
+      repick: RepickFile[];
+      warnings: string[];
+      tls: boolean;
+      defaultDb?: string;
+      ssh: boolean;
+    }
+  | { index: number; ok: false; reason: string };
+
+export interface Review {
+  hasEncryptedSecrets: boolean;
+  rows: ReviewRow[];
+}
+
+export interface MappingField {
+  path: string;
+  sample: string;
+  masked: boolean;
+  suggested?: MapTarget;
+}
+
+export interface MappingCollection {
+  at: string;
+  rows: number;
+  fields: MappingField[];
+  truncatedRows?: number;
+  /** Field paths left out because two leaves of a row share them (C14 §5.2). */
+  ambiguousFields?: number;
+}
+
+export type ImportOpenResult =
+  | { cancelled: true }
+  | { token: string; source: 'latelier' | 'compass'; review: Review }
+  | {
+      token: string;
+      source: 'unknown';
+      collections: MappingCollection[];
+      /** Paths left out because two lists share them (C14 §5.1). */
+      ambiguousCollections?: number;
+    };
+
+export interface ImportMapInput {
+  token: string;
+  at: string;
+  mapping: Partial<Record<MapTarget, string>>;
+}
+export interface ImportMapResult {
+  review: Review;
+}
+
+export interface ImportUrisInput {
+  uris: string[];
+}
+export interface ImportUrisResult {
+  token: string;
+  review: Review;
+}
+
+export interface ImportCommitInput {
+  token: string;
+  indices: number[];
+  passphrase?: string;
+  withoutSecrets?: boolean;
+  readOnly: boolean;
+  credentials: { index: number; username?: string; password?: string }[];
+  /** One per ticked non-SRV row. */
+  directConnection: { index: number; value: boolean }[];
+}
+
+export interface ImportCommitResult {
+  created: { index: number; id: string; name: string }[];
+  renamed: { index: number; from: string; to: string }[];
+  /** Validation/create failures. */
+  skipped: { index: number; name: string; reason: string }[];
+  repick: { name: string; files: RepickFile[] }[];
+  secretsNotStored: { name: string; reason: string }[];
+  /** e.g. Compass secret fields dropped after decryption. */
+  warnings: { name: string; message: string }[];
 }
 
 // ─── Workspace tabs (W01) ───────────────────────────────────────────────────

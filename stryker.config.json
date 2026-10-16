@@ -19,6 +19,7 @@
     "electron/services/UpdateService.ts",
     "electron/services/connectionExportFormat.ts",
     "electron/services/connectionBulkAdd.ts",
+    "electron/services/import/unknownJson.ts",
     "src/utils/ejson.ts",
     "src/utils/bigIntJson.ts",
     "electron/mongo/uri-parse.ts",
@@ -92,6 +93,11 @@
     "electron/script-runner/rpcSurface.ts",
     "electron/script-runner/rpcCodec.ts",
     "electron/script-runner/rpcHost.ts",
-    "electron/services/runner/spawner.ts"
+    "electron/services/runner/spawner.ts",
+    "electron/services/import/compassCrypto.ts",
+    "electron/services/import/compassReader.ts",
+    "electron/services/import/detect.ts",
+    "electron/services/import/review.ts",
+    "electron/services/import/latelierSource.ts"
   ]
 }

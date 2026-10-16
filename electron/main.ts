@@ -27,7 +27,9 @@ import {
 } from './mongo/ConnectionService.ts';
 import { registerConnChannels } from './ipc/handlers/conn.ts';
 import { registerConnExportChannels } from './ipc/handlers/connExport.ts';
-import { ConnectionExportService } from './services/ConnectionExportService.ts';
+import { registerConnImportChannels } from './ipc/handlers/connImport.ts';
+import { ConnectionExportService, type ConnectionExportDialogs } from './services/ConnectionExportService.ts';
+import { ImportWizardService } from './services/ImportWizardService.ts';
 import { createPickedCredentialPaths } from './security/credentialPaths.ts';
 import { registerAppChannels, saveFilters } from './ipc/handlers/app.ts';
 import { registerMongoChannels } from './ipc/handlers/mongo.ts';
@@ -172,6 +174,7 @@ let mshellSvc: ShellService | null = null;
 let scriptSvc: ScriptService | null = null;
 let log: Logger | null = null;
 let connExportSvc: ConnectionExportService | null = null;
+let importWizardSvc: ImportWizardService | null = null;
 let renderCrashesInWindow = 0;
 let firstCrashAt = 0;
 
@@ -377,7 +380,7 @@ function createWindow(): void {
   win.on('closed', () => {
     win = null;
     // An import token does not outlive the window that asked for it.
-    connExportSvc?.clearPending();
+    importWizardSvc?.clearPending();
   });
 
   win.on('resize', scheduleBoundsWrite);
@@ -603,26 +606,32 @@ app.whenReady().then(() => {
     { name: 'JSON', extensions: ['json'] },
     { name: 'All files', extensions: ['*'] },
   ];
+  const transferDialogs: ConnectionExportDialogs = {
+    savePath: async (defaultName) => {
+      const options = { defaultPath: defaultName, filters: jsonFilters };
+      const result = await (win
+        ? dialog.showSaveDialog(win, options)
+        : dialog.showSaveDialog(options));
+      return result.canceled || !result.filePath ? null : result.filePath;
+    },
+    openPath: async () => {
+      const options = { properties: ['openFile' as const], filters: jsonFilters };
+      const result = await (win
+        ? dialog.showOpenDialog(win, options)
+        : dialog.showOpenDialog(options));
+      return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]!;
+    },
+  };
   connExportSvc = new ConnectionExportService({
     conns: connSvc,
     vault,
+    dialogs: transferDialogs,
+  });
+  importWizardSvc = new ImportWizardService({
+    conns: connSvc,
+    vault,
     log: log ?? undefined,
-    dialogs: {
-      savePath: async (defaultName) => {
-        const options = { defaultPath: defaultName, filters: jsonFilters };
-        const result = await (win
-          ? dialog.showSaveDialog(win, options)
-          : dialog.showSaveDialog(options));
-        return result.canceled || !result.filePath ? null : result.filePath;
-      },
-      openPath: async () => {
-        const options = { properties: ['openFile' as const], filters: jsonFilters };
-        const result = await (win
-          ? dialog.showOpenDialog(win, options)
-          : dialog.showOpenDialog(options));
-        return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]!;
-      },
-    },
+    dialogs: transferDialogs,
   });
 
   // 5. IPC router + channels
@@ -679,6 +688,7 @@ app.whenReady().then(() => {
   const pickedCredentialPaths = createPickedCredentialPaths();
   registerConnChannels(router, connSvc, pickedCredentialPaths);
   registerConnExportChannels(router, connExportSvc);
+  registerConnImportChannels(router, importWizardSvc);
   // Filled by the open dialog, read by the data channels: the only files an
   // import may read are ones the user picked in main's own dialog.
   const pickedImports = new Set<string>();

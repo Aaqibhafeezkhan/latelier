@@ -53,7 +53,7 @@ for (const f of files) {
     if (!line.includes('SECRET_INPUT')) continue;
     // Find channel strings on the same or previous few lines: 'conn:test' style.
     const window = lines.slice(Math.max(0, i - 2), i + 1).join('\n');
-    const channels = [...window.matchAll(/['"`]([a-z]+:[a-zA-Z]+)['"`]/g)].map((m) => m[1]);
+    const channels = [...window.matchAll(/['"`]([a-z]+:[a-zA-Z0-9]+)['"`]/g)].map((m) => m[1]);
     if (channels.length === 0) {
       violations.push(`${path.relative(repoRoot, f)}:${i + 1}: SECRET_INPUT without a nearby channel string`);
       continue;

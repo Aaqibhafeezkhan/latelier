@@ -19,6 +19,7 @@ const { createRouter } = await import('../../electron/ipc/router');
 const { IPC_CHANNELS } = await import('../../shared/ipc');
 const { registerConnChannels } = await import('../../electron/ipc/handlers/conn');
 const { registerConnExportChannels } = await import('../../electron/ipc/handlers/connExport');
+const { registerConnImportChannels } = await import('../../electron/ipc/handlers/connImport');
 const { registerAppChannels } = await import('../../electron/ipc/handlers/app');
 const { registerMongoChannels } = await import('../../electron/ipc/handlers/mongo');
 const { registerMetaChannels } = await import('../../electron/ipc/handlers/meta');
@@ -111,6 +112,7 @@ describe('IPC channel registration — full router coverage', () => {
 
     registerConnChannels(router, stubSvc<Parameters<typeof registerConnChannels>[1]>(), createPickedCredentialPaths());
     registerConnExportChannels(router, stubSvc<Parameters<typeof registerConnExportChannels>[1]>());
+    registerConnImportChannels(router, stubSvc<Parameters<typeof registerConnImportChannels>[1]>());
     // appDiagnosticBundle's `diagnostic` param is left undefined on purpose:
     // it's optional, and the handler already treats "no diagnostic service"
     // as a controlled INTERNAL error — that still exercises registration +

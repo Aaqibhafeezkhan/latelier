@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseConnectionUri } from '../../electron/mongo/uri-parse';
+import { parseConnectionUri, parseHostPort } from '../../electron/mongo/uri-parse';
 import { ValidationError } from '../../electron/errors';
 
 describe('parseConnectionUri', () => {
@@ -163,8 +163,63 @@ describe('parseConnectionUri', () => {
     expect(() => parseConnectionUri('   ')).toThrow('URI is empty');
   });
 
-  it('rejects unparseable URI, wrapping the underlying message', () => {
-    expect(() => parseConnectionUri('mongodb://')).toThrow(/^could not parse URI:/);
+  it('rejects unparseable URI with a fixed sentence, never the library message', () => {
+    expect(() => parseConnectionUri('mongodb://')).toThrow(/^This isn't a valid connection string\.$/);
+  });
+
+  it('never quotes the userinfo when it cannot parse the string', () => {
+    for (const uri of [
+      'mongodb+srv://alice:2024/hunter2@cluster.example.net',
+      'mongodb://alice:2024/hunter2@h',
+      'mongodb://alice/hunter2:x@h',
+    ]) {
+      expect(() => parseConnectionUri(uri)).toThrow("This isn't a valid connection string.");
+    }
+  });
+
+  it('strips the port from an SRV host with nothing after it', () => {
+    const { input, warnings } = parseConnectionUri('mongodb+srv://u:p@c.example.net:27017');
+    expect(input.host).toBe('c.example.net');
+    expect(warnings.find((w) => w.code === 'OPTION_DROPPED')?.detail).toBe(
+      'SRV URIs cannot include a port; stripped: c.example.net:27017',
+    );
+  });
+
+  it.each([
+    ['db.example.com:27018', { host: 'db.example.com', port: 27018 }],
+    ['[::1]:27019', { host: '[::1]', port: 27019 }],
+    ['[::1]', { host: '[::1]' }],
+    ['[::1]x', { problem: "The host has characters a host name can't contain." }],
+    ['a[1.2]', { problem: "The host has characters a host name can't contain." }],
+    ['[1.2]a', { problem: "The host has characters a host name can't contain." }],
+    ['m\u00fcnchen.example:27018', { host: 'm\u00fcnchen.example', port: 27018 }],
+    ['a b', { problem: "The host has characters a host name can't contain." }],
+    ['a/b', { problem: "The host has characters a host name can't contain." }],
+    ['a?b', { problem: "The host has characters a host name can't contain." }],
+    ['a#b', { problem: "The host has characters a host name can't contain." }],
+    ['a@b', { problem: "The host has characters a host name can't contain." }],
+    ['h:0', { problem: 'Port must be a number from 1 to 65535.' }],
+    ['h:', { problem: 'Port must be a number from 1 to 65535.' }],
+  ])('parseHostPort(%j) follows the host rules', (authority, expected) => {
+    expect(parseHostPort(authority, true)).toEqual(expected);
+  });
+
+  it('parseHostPort keeps a colon in the host when no port is allowed', () => {
+    expect(parseHostPort('h:1', false)).toEqual({ problem: "The host has characters a host name can't contain." });
+    expect(parseHostPort('h', false)).toEqual({ host: 'h' });
+  });
+
+  it('does not read an SRV userinfo holding "/" and ":digits" as the host', () => {
+    // An escaped password with '/' must reach the host list intact.
+    const { input, warnings } = parseConnectionUri('mongodb+srv://alice:2024%2Fhunter2@cluster.example.net:27017/db?tls=true');
+    expect(input).toMatchObject({ host: 'cluster.example.net', password: '2024/hunter2', defaultDb: 'db' });
+    expect(warnings.find((w) => w.code === 'OPTION_DROPPED')?.detail).toBe(
+      'SRV URIs cannot include a port; stripped: cluster.example.net:27017',
+    );
+    // An '@' in the query is not the end of the userinfo.
+    expect(parseConnectionUri('mongodb+srv://u:p@c.example.net:1/?appName=a@b').input).toMatchObject({
+      host: 'c.example.net', authUsername: 'u', advanced: { appName: 'a@b' },
+    });
   });
 
   it('the scheme check is anchored to the start, not found anywhere in the string', () => {
@@ -245,13 +300,6 @@ describe('parseConnectionUri', () => {
   it('a host with no port keeps the 27017 default', () => {
     const { input } = parseConnectionUri('mongodb://localhost/');
     expect(input.host).toBe('localhost');
-    expect(input.port).toBe(27017);
-  });
-
-  it('a port of exactly 0 is rejected as invalid, keeping the default', () => {
-    // `p > 0` — a URI with `:0` is syntactically a port but not a usable one.
-    const { input } = parseConnectionUri('mongodb://localhost:0/');
-    expect(input.host).toBe('localhost:0');
     expect(input.port).toBe(27017);
   });
 
@@ -363,7 +411,7 @@ describe('parseConnectionUri', () => {
       parseConnectionUri(
         'mongodb+srv://a.example.com:27017,b.example.com:27018/mydb',
       ),
-    ).toThrow(/multiple service names/);
+    ).toThrow("This isn't a valid connection string.");
   });
 
   it('a numeric-only host with no port is not misread as a bare port number', () => {
@@ -374,5 +422,167 @@ describe('parseConnectionUri', () => {
     const { input } = parseConnectionUri('mongodb://12345/db');
     expect(input.host).toBe('12345');
     expect(input.port).toBe(27017);
+  });
+});
+
+describe('parseConnectionUri: C14 import markers', () => {
+  it('tlsCAFile and tlsCertificateKeyFile become re-pick markers, in any casing, and no path is kept', () => {
+    for (const q of [
+      'tlsCAFile=/etc/ca.pem&tlsCertificateKeyFile=/etc/client.pem',
+      'TLSCAFILE=/etc/ca.pem&TlsCertificateKeyFile=/etc/client.pem',
+    ]) {
+      const { input, repick } = parseConnectionUri(`mongodb://h/?tls=true&${q}`);
+      expect(repick).toEqual(['tlsCa', 'tlsClientCert']);
+      expect(JSON.stringify(input)).not.toContain('/etc/');
+      expect(input.tls).toEqual({ enabled: true, verify: true });
+    }
+  });
+
+  it('marks only the file the string names', () => {
+    expect(parseConnectionUri('mongodb://h/?tlsCAFile=/a.pem').repick).toEqual(['tlsCa']);
+    expect(parseConnectionUri('mongodb://h/?tlsCertificateKeyFile=/a.pem').repick).toEqual(['tlsClientCert']);
+    expect(parseConnectionUri('mongodb://h/').repick).toEqual([]);
+  });
+
+  it('ignores a file param with no value', () => {
+    expect(parseConnectionUri('mongodb://h/?tlsCAFile=&tlsCertificateKeyFile=').repick).toEqual([]);
+  });
+
+  it('X.509 needs the client certificate re-picked once, even when the string names the file too', () => {
+    expect(parseConnectionUri('mongodb://h/?authMechanism=MONGODB-X509&tls=true').repick).toEqual(['tlsClientCert']);
+    expect(
+      parseConnectionUri('mongodb://h/?authMechanism=MONGODB-X509&tlsCertificateKeyFile=/c.pem&tlsCAFile=/a.pem').repick,
+    ).toEqual(['tlsCa', 'tlsClientCert']);
+  });
+
+  it('reports directConnectionExplicit for any value and casing, never for SRV or an absent param', () => {
+    expect(parseConnectionUri('mongodb://h/?directConnection=true').directConnectionExplicit).toBe(true);
+    expect(parseConnectionUri('mongodb://h/?DirectConnection=false').directConnectionExplicit).toBe(true);
+    expect(parseConnectionUri('mongodb://h/?appName=x').directConnectionExplicit).toBe(false);
+    expect(parseConnectionUri('mongodb+srv://c.example.net/?directConnection=true').directConnectionExplicit).toBe(false);
+  });
+
+  it('leaves input.advanced.directConnection as it was: false unless the string says true', () => {
+    const adv = (u: string) => parseConnectionUri(u).input.advanced?.directConnection;
+    expect(adv('mongodb://h/?directConnection=false')).toBe(false);
+    expect(adv('mongodb://h/?directConnection=true')).toBe(true);
+    expect(adv('mongodb://h/')).toBe(false);
+  });
+
+  it('refuses MONGODB-OIDC with its own message, in any casing, without echoing the string', () => {
+    for (const mech of ['MONGODB-OIDC', 'mongodb-oidc']) {
+      expect(() => parseConnectionUri(`mongodb://u:s3cret@h/?authMechanism=${mech}`)).toThrow(
+        new ValidationError("OIDC sign-in isn't supported yet."),
+      );
+    }
+  });
+
+  it('warns once when the string carries proxy options, without any of their values', () => {
+    const { warnings } = parseConnectionUri(
+      'mongodb://h/?proxyHost=socks.corp&proxyPort=1080&proxyUsername=bob&PROXYPASSWORD=hunter2',
+    );
+    const proxy = warnings.filter((w) => w.code === 'PROXY_DROPPED');
+    expect(proxy).toHaveLength(1);
+    expect(proxy[0]!.detail).toMatch(/^Proxy options/);
+    for (const v of ['socks.corp', '1080', 'bob', 'hunter2']) expect(JSON.stringify(warnings)).not.toContain(v);
+  });
+
+  it('warns for each single proxy param on its own, and not when there are none', () => {
+    for (const p of ['proxyHost=h', 'proxyPort=1', 'proxyUsername=u', 'proxyPassword=p']) {
+      const { warnings } = parseConnectionUri(`mongodb://h/?${p}`);
+      expect(warnings.map((w) => w.code), p).toEqual(['PROXY_DROPPED']);
+    }
+    expect(parseConnectionUri('mongodb://h/?appName=x').warnings).toEqual([]);
+  });
+});
+
+describe('parseConnectionUri: SRV port strip', () => {
+  it('finds userinfo only inside the authority, so an @ in the path is not one', () => {
+    const { input, warnings } = parseConnectionUri('mongodb+srv://u@good.example.net/db@x:1');
+    expect(input.host).toBe('good.example.net');
+    expect(input.defaultDb).toBe('db@x:1');
+    expect(warnings.find((w) => w.code === 'OPTION_DROPPED')).toBeUndefined();
+  });
+});
+
+describe('parseConnectionUri: host and port validation', () => {
+  const PORT_MSG = 'Port must be a number from 1 to 65535.';
+  const HOST_MSG = "The host has characters a host name can't contain.";
+
+  it.each([
+    ['mongodb://h:abc', PORT_MSG],
+    ['mongodb://u:p@h:abc/db', PORT_MSG],
+    ['mongodb://h:0', PORT_MSG],
+    ['mongodb://h:65536', PORT_MSG],
+    ['mongodb://h:1e3', PORT_MSG],
+    ['mongodb://h:', PORT_MSG],
+    ['mongodb://[::1]:abc', PORT_MSG],
+    ['mongodb://h&tls=true', HOST_MSG],
+    ['mongodb://h$x:27017', HOST_MSG],
+    ['mongodb://a:b:27017', HOST_MSG],
+    ['mongodb+srv://h&tls=true', HOST_MSG],
+    ['mongodb://a b', HOST_MSG],
+    ['mongodb://h[1]', HOST_MSG],
+    ['mongodb://m\u00fcnchen\u00a0.example', HOST_MSG],
+    ['mongodb://m\u00fcnchen\u3000.example', HOST_MSG],
+    ['mongodb://m\u00fcnchen$.example', HOST_MSG],
+    ['mongodb://good%2eexample', HOST_MSG],
+    ['mongodb://good%40evil', HOST_MSG],
+    ['mongodb://100%', HOST_MSG],
+    ['mongodb://%2Ftmp%2Fsock.sock.evil', HOST_MSG],
+  ])('refuses %s', (uri, message) => {
+    expect(() => parseConnectionUri(uri)).toThrow(new ValidationError(message));
+  });
+
+  it.each([
+    ['mongodb://localhost', 'localhost', 27017],
+    ['mongodb://127.0.0.1:27017', '127.0.0.1', 27017],
+    ['mongodb://[::1]:27018', '[::1]', 27018],
+    ['mongodb://[::1]', '[::1]', 27017],
+    ['mongodb://my_host-1.example.com:27017', 'my_host-1.example.com', 27017],
+    ['mongodb://h:1', 'h', 1],
+    ['mongodb://h:65535', 'h', 65535],
+    ['mongodb://m\u00fcnchen.example', 'm\u00fcnchen.example', 27017],
+    ['mongodb://m\u00fcnchen.example:27018/db', 'm\u00fcnchen.example', 27018],
+    ['mongodb://\u65e5\u672c.example', '\u65e5\u672c.example', 27017],
+    ['mongodb://\ud83d\ude00.example', '\ud83d\ude00.example', 27017],
+    ['mongodb+srv://m\u00fcnchen.example', 'm\u00fcnchen.example', 27017],
+    ['mongodb://M\u00dcNCHEN.example', 'M\u00dcNCHEN.example', 27017],
+    ['mongodb://\u0430pple.example', '\u0430pple.example', 27017],
+    ['mongodb://%2Ftmp%2Fmongodb-27017.sock', '%2Ftmp%2Fmongodb-27017.sock', 27017],
+  ])('accepts %s', (uri, host, port) => {
+    const { input } = parseConnectionUri(uri);
+    expect({ host: input.host, port: input.port }).toEqual({ host, port });
+  });
+
+  // Host names whose DNS form (UTS46) is a different name than the one shown.
+  it.each([
+    ['an ideographic full stop', 'good.example\u3002evil.com'],
+    ['a fullwidth full stop', 'good.example\uFF0Eevil.com'],
+    ['a halfwidth ideographic full stop', 'good.example\uFF61evil.com'],
+    ['a zero-width space', 'go\u200Bod.example'],
+    ['a zero-width joiner', 'go\u200Dod.example'],
+    ['a soft hyphen', 'go\u00ADod.example'],
+    ['a fullwidth slash', 'good\uFF0Fevil.com'],
+    ['a fullwidth at sign', 'good\uFF20evil.com'],
+    ['a fullwidth question mark', 'good\uFF1Fevil.com'],
+    ['a fullwidth number sign', 'good\uFF03evil.com'],
+    ['a fullwidth colon', 'good\uFF1A1.com'],
+    ['a fullwidth comma', 'good\uFF0Cevil.com'],
+    ['a small commercial at', 'good\uFE6Bevil.com'],
+    ['a small number sign', 'good\uFE5Fevil.com'],
+    ['a right-to-left override', 'good\u202Eevil.com'],
+    ['a lone surrogate', 'good\uD800.example'],
+  ])('refuses a host with %s', (_name, host) => {
+    expect(parseHostPort(host, true)).toEqual({ problem: "The host has characters a host name can't contain." });
+  });
+
+  it('keeps an uppercase international host as typed, lower-casing only for the check', () => {
+    expect(parseHostPort('M\u00dcNCHEN.example', true)).toEqual({ host: 'M\u00dcNCHEN.example' });
+  });
+
+  it('keeps stripping a port from an SRV host', () => {
+    const { input } = parseConnectionUri('mongodb+srv://cluster0.abc.mongodb.net:27017/db');
+    expect(input.host).toBe('cluster0.abc.mongodb.net');
   });
 });

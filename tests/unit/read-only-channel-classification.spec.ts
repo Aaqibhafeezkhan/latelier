@@ -77,12 +77,13 @@ const NON_MONGO_CHANNELS = new Set<string>([
   IPC_CHANNELS.connList,
   IPC_CHANNELS.connGet,
   IPC_CHANNELS.connCreate,
-  // Connection Export / Import touch SQLite and files only, never a MongoDB deployment.
+  // Connection Export touches SQLite and files only, never a MongoDB deployment.
   IPC_CHANNELS.connExport,
-  IPC_CHANNELS.connImportPreview,
+  // The Import Wizard (C14) reads a picked file and writes SQLite and the vault only.
+  IPC_CHANNELS.connImportOpen,
+  IPC_CHANNELS.connImportMap,
+  IPC_CHANNELS.connImportUris,
   IPC_CHANNELS.connImportCommit,
-  IPC_CHANNELS.connPreviewUris,
-  IPC_CHANNELS.connCreateFromUris,
   IPC_CHANNELS.connUpdate,
   IPC_CHANNELS.connDelete,
   IPC_CHANNELS.connTouchUsed,

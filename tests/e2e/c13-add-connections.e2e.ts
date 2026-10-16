@@ -3,12 +3,14 @@ import { test, expect } from '@playwright/test';
 import type { ElectronApplication } from 'playwright';
 import { freshUserData, launchApp, startMemoryServer, stopAllMemoryServers } from '../helpers/e2eApp';
 import { WorkspacePage } from './pages/WorkspacePage';
+import { wizardDialog } from './helpers/importWizard';
 
 /**
- * C13 §7–8 — paste connection strings into the Connections table's "Paste
- * URIs" (one complete, one missing its credentials, one bad), type the
- * missing credentials, connect with them, then check both rows and delete
- * them in one batch without the table closing.
+ * C13 §7–8 through the C14 Import Wizard — paste connection strings into the
+ * Connections table's "Paste URIs" (one complete, one missing its credentials,
+ * one bad), type the missing credentials in the final approval, connect with
+ * them, then check both rows and delete them in one batch without the table
+ * closing.
  */
 
 type Atelier = {
@@ -63,29 +65,33 @@ test('add Connections from pasted strings, with typed credentials, then batch-de
     const table = switcher.expandedTableDialog;
     await table.getByRole('button', { name: 'Paste URIs' }).click();
 
-    const add = win.getByRole('dialog', { name: 'Paste URIs', exact: true });
-    await add.getByRole('textbox', { name: 'Connection strings' }).fill(
+    const wizard = wizardDialog(win);
+    await wizard.getByRole('textbox', { name: 'Or paste connection strings' }).fill(
       [
         `mongodb://admin:rootpw@${host}:${port}/?authSource=admin&serverSelectionTimeoutMS=5000`,
         `mongodb://${host}:${port}/?authSource=admin&serverSelectionTimeoutMS=5000`,
         'not a connection string',
       ].join('\n'),
     );
-    const preview = add.getByRole('table', { name: 'Connections to add' });
-    await expect(preview.getByText(host, { exact: true })).toBeVisible();
-    await expect(preview.getByText(`${host} (2)`, { exact: true })).toBeVisible();
-    await expect(preview.getByText('Line 3', { exact: true })).toBeVisible();
-    await add.getByRole('checkbox', { name: 'Read-only' }).check();
+    await wizard.getByRole('button', { name: 'Next' }).click();
 
-    await add.getByRole('button', { name: 'Next' }).click();
-    await add.getByRole('textbox', { name: `Username for ${host} (2)` }).fill('admin');
-    await add.getByLabel(`Password for ${host} (2)`).fill('rootpw');
-    await add.getByRole('button', { name: 'Add 2 connections' }).click();
+    // Paste URIs goes straight to the final approval, with every line listed.
+    const review = wizard.getByRole('table', { name: 'Connections to import' });
+    await expect(review.getByRole('checkbox', { name: `Import ${host}`, exact: true })).toBeChecked();
+    await expect(review.getByRole('checkbox', { name: `Import ${host} (2)`, exact: true })).toBeChecked();
+    await expect(review.getByRole('checkbox', { name: 'Import row 3' })).toBeDisabled();
+    await expect(review.getByText(/Not importable/)).toBeVisible();
+    await wizard.getByRole('checkbox', { name: 'Read-only, for all rows' }).check();
 
-    await expect(add.getByRole('status')).toHaveText('2 Connections added.');
-    await expect(add.getByLabel('Secrets not stored')).toHaveCount(0);
-    await add.getByRole('button', { name: 'Done' }).click();
-    await expect(add).toBeHidden();
+    // The second string has no credentials, so its row asks for them inline.
+    await wizard.getByRole('textbox', { name: `Username for ${host} (2)` }).fill('admin');
+    await wizard.getByLabel(`Password for ${host} (2)`).fill('rootpw');
+    await wizard.getByRole('button', { name: 'Import 2 Connections' }).click();
+
+    await expect(wizard.getByRole('status')).toHaveText('2 Connections imported.');
+    await expect(wizard.getByLabel('Secrets not stored')).toHaveCount(0);
+    await wizard.getByRole('button', { name: 'Done' }).click();
+    await expect(wizard).toBeHidden();
 
     // The table stayed open underneath, and now lists both.
     await expect(table.getByText(`${host} (2)`, { exact: true })).toBeVisible();

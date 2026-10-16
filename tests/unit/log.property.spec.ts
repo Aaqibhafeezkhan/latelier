@@ -139,3 +139,37 @@ describe('redactSecrets property: URI userinfo in strings', () => {
     );
   });
 });
+
+describe('redactSecrets property: URI query secrets', () => {
+  const secretValue = fc.stringMatching(/^[A-Za-z0-9_.~%-]{4,24}$/);
+  const secretParam = fc.constantFrom(
+    'password', 'proxyPassword', 'tlsCertificateKeyFilePassword', 'sslPEMKeyPassword',
+  ).chain((n) => fc.constantFrom(n, n.toUpperCase(), n.toLowerCase()));
+  const scheme = fc.constantFrom('mongodb', 'mongodb+srv', 'MONGODB');
+  // Percent-encode a random subset of the name's characters: the driver decodes them.
+  const encoded = (name: string) =>
+    fc.array(fc.boolean(), { minLength: name.length, maxLength: name.length }).map((flips) =>
+      [...name].map((c, i) => (flips[i] ? `%${c.charCodeAt(0).toString(16).padStart(2, '0')}` : c)).join(''));
+
+  it('never lets a secret parameter value through, however its name is percent-encoded', () => {
+    fc.assert(
+      fc.property(scheme, secretParam.chain(encoded), secretValue, (sch, name, value) => {
+        const out = JSON.stringify(redactSecrets({ k: `${sch}://h/?${name}=${value}&tls=true` }));
+        expect(out).not.toContain(value);
+        expect(out).toContain('tls=true');
+      }),
+    );
+  });
+
+  it('never lets a secret parameter value through, wherever it sits in the query', () => {
+    fc.assert(
+      fc.property(scheme, secretParam, secretValue, fc.boolean(), fc.boolean(), (sch, name, value, first, aws) => {
+        const secret = aws ? `authMechanismProperties=AWS_SESSION_TOKEN:${value}` : `${name}=${value}`;
+        const query = first ? `${secret}&tls=true` : `tls=true&${secret}`;
+        const out = JSON.stringify(redactSecrets({ k: `see ${sch}://h/?${query} end` }));
+        expect(out).not.toContain(value);
+        expect(out).toContain('tls=true');
+      }),
+    );
+  });
+});

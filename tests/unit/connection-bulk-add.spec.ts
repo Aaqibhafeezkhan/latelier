@@ -1,15 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import fc from 'fast-check';
 import {
   baseNames,
   lineInputProblem,
   lineToInput,
-  needsCredentials,
   parseLine,
-  planLineNames,
-  previewEntry,
   repickFor,
-  type Line,
   type ParsedLine,
 } from '../../electron/services/connectionBulkAdd';
 
@@ -68,7 +63,7 @@ describe('parseLine', () => {
   });
 });
 
-describe('baseNames / planLineNames', () => {
+describe('baseNames', () => {
   it('names a line by its host, or host:port when the batch has that host on another port', () => {
     const lines = ['mongodb://localhost:27017', 'mongodb://localhost:27018', 'mongodb://db.example.com']
       .map(parseLine);
@@ -78,81 +73,62 @@ describe('baseNames / planLineNames', () => {
   it('keeps the bare host when the same host and port repeat, leaving the clash rule to number them', () => {
     const lines = ['mongodb://h:1', 'mongodb://h:1'].map(parseLine);
     expect(baseNames(lines)).toEqual(['h', 'h']);
-    expect(planLineNames([], lines)).toEqual(['h', 'h (2)']);
   });
 
-  it('numbers clashes with existing names, and leaves bad lines an empty slot', () => {
+  it('leaves a bad line an empty slot', () => {
     const lines = ['mongodb://prod', 'nope', 'mongodb://prod'].map(parseLine);
     expect(baseNames(lines)).toEqual(['prod', '', 'prod']);
-    expect(planLineNames(['prod'], lines)).toEqual(['prod (2)', '', 'prod (3)']);
   });
 
   it('names an SRV line by its cluster host', () => {
-    expect(planLineNames([], [parseLine('mongodb+srv://u:p@c0.ab.mongodb.net/db')])).toEqual([
-      'c0.ab.mongodb.net',
-    ]);
-  });
-
-  it('property: every planned name is unique against existing names and each other', () => {
-    const host = fc.constantFrom('a', 'b', 'db.example.com');
-    const port = fc.integer({ min: 1, max: 4 });
-    fc.assert(
-      fc.property(
-        fc.array(fc.tuple(host, port), { maxLength: 12 }),
-        fc.uniqueArray(fc.constantFrom('a', 'b', 'a:1', 'b (2)', 'db.example.com'), { maxLength: 5 }),
-        (pairs, existing) => {
-          const lines = pairs.map(([h, p]) => parseLine(`mongodb://${h}:${p}`));
-          const names = planLineNames(existing, lines);
-          expect(new Set(names).size).toBe(names.length);
-          for (const n of names) expect(existing).not.toContain(n);
-        },
-      ),
-    );
+    expect(baseNames([parseLine('mongodb+srv://u:p@c0.ab.mongodb.net/db')])).toEqual(['c0.ab.mongodb.net']);
   });
 });
 
-describe('needsCredentials / repickFor', () => {
-  it('asks for credentials unless the string has both a username and a password', () => {
-    expect(needsCredentials(ok('mongodb://u:p@h').input)).toBe(false);
-    expect(needsCredentials(ok('mongodb://u@h').input)).toBe(true);
-    expect(needsCredentials(ok('mongodb://h').input)).toBe(true);
+describe('parseLine: multiHost and repick', () => {
+  it('flags a string that named several hosts, and only that', () => {
+    expect(ok('mongodb://a:1,b:2/').multiHost).toBe(true);
+    expect(ok('mongodb://a:1/').multiHost).toBe(false);
+    expect(ok('mongodb://a:1/?w=1').multiHost).toBe(false);
   });
 
-  it('never asks an X.509 line, which instead needs its certificate re-picked', () => {
+  it('carries the files the parser says to pick again, with no path in the line', () => {
+    const l = ok('mongodb://h/?tls=true&tlsCAFile=/etc/ca.pem&tlsCertificateKeyFile=/etc/c.pem');
+    expect(l.repick).toEqual(['tlsCa', 'tlsClientCert']);
+    expect(JSON.stringify(l)).not.toContain('/etc/');
+    expect(ok('mongodb://h/').repick).toEqual([]);
+  });
+
+  it('takes explicitDirect from the parser: an explicit false counts, an absent param does not', () => {
+    expect(ok('mongodb://h/?directConnection=false').explicitDirect).toBe(true);
+    expect(ok('mongodb://h/').explicitDirect).toBe(false);
+  });
+
+  it('reports a proxy drop as words without the proxy password', () => {
+    const l = ok('mongodb://h/?proxyHost=p&proxyPassword=hunter2');
+    expect(l.warnings).toHaveLength(1);
+    expect(JSON.stringify(l)).not.toContain('hunter2');
+  });
+
+  it('turns an OIDC string into a refusal reason', () => {
+    expect(parseLine('mongodb://h/?authMechanism=MONGODB-OIDC')).toEqual({
+      ok: false,
+      reason: "OIDC sign-in isn't supported yet.",
+    });
+  });
+});
+
+describe('repickFor', () => {
+  it('asks an X.509 line to re-pick its certificate', () => {
     const x509 = ok('mongodb://h/?authMechanism=MONGODB-X509&tls=true').input;
-    expect(needsCredentials(x509)).toBe(false);
     expect(repickFor(x509)).toEqual(['tlsClientCert']);
     expect(repickFor(ok('mongodb://h').input)).toEqual([]);
   });
-});
 
-describe('previewEntry', () => {
-  it('says whether a line has a password without ever returning it', () => {
-    const e = previewEntry(ok('mongodb://alice:s3cret@h:2000/?w=1'), 3, 'h');
-    expect(e).toEqual({
-      index: 3,
-      ok: true,
-      savedAs: 'h',
-      host: 'h',
-      port: 2000,
-      srv: false,
-      authUsername: 'alice',
-      hasPassword: true,
-      needsCredentials: false,
-      repick: [],
-      warnings: ['w'],
-    });
-    expect(JSON.stringify(e)).not.toContain('s3cret');
-  });
-
-  it('omits authUsername when the string has none, and marks SRV', () => {
-    const e = previewEntry(ok('mongodb+srv://c.example.net'), 0, 'c.example.net');
-    expect(e).toMatchObject({ srv: true, hasPassword: false, needsCredentials: true });
-    expect(e).not.toHaveProperty('authUsername');
-  });
-
-  it('passes a bad line through as its reason', () => {
-    expect(previewEntry({ ok: false, reason: 'bad' } as Line, 1, '')).toEqual({ index: 1, ok: false, reason: 'bad' });
+  it('adds the files it is handed without repeating the X.509 one', () => {
+    const x509 = ok('mongodb://h/?authMechanism=MONGODB-X509&tls=true').input;
+    expect(repickFor(x509, ['tlsClientCert', 'tlsCa'])).toEqual(['tlsClientCert', 'tlsCa']);
+    expect(repickFor(ok('mongodb://h').input, ['tlsCa'])).toEqual(['tlsCa']);
   });
 });
 
@@ -186,14 +162,20 @@ describe('lineToInput', () => {
 
   it('leaves optional fields out rather than setting them undefined', () => {
     const c = lineToInput(ok('mongodb://h'), 'h', DEFAULTS, undefined);
-    for (const k of ['defaultDb', 'authUsername', 'authDatabase', 'password']) expect(c).not.toHaveProperty(k);
+    for (const k of ['defaultDb', 'authUsername', 'authDatabase', 'password', 'ssh']) expect(c).not.toHaveProperty(k);
     expect(c.authMech).toBe('none');
   });
 
-  it("keeps the string's own directConnection over the batch default", () => {
+  it('applies the chosen directConnection, whatever the string said', () => {
     const on = { readOnly: false, directConnection: true };
-    expect(lineToInput(ok('mongodb://h/?directConnection=false'), 'h', on, undefined).advanced.directConnection).toBe(false);
-    expect(lineToInput(ok('mongodb://h/?directConnection=true'), 'h', DEFAULTS, undefined).advanced.directConnection).toBe(true);
+    expect(lineToInput(ok('mongodb://h/?directConnection=false'), 'h', on, undefined).advanced.directConnection).toBe(true);
+    expect(lineToInput(ok('mongodb://h/?directConnection=true'), 'h', DEFAULTS, undefined).advanced.directConnection).toBe(false);
+  });
+
+  it("keeps the row's own colour and SSH settings", () => {
+    const ssh = { enabled: true, host: 'bastion', port: 22, username: 'tunnel', authMethod: 'key' as const };
+    const c = lineToInput({ input: { ...ok('mongodb://h').input, color: '#123456', ssh } }, 'h', DEFAULTS, undefined);
+    expect(c).toMatchObject({ color: '#123456', ssh });
   });
 
   it('never sets directConnection on an SRV line, whatever asks for it', () => {
@@ -215,6 +197,18 @@ describe('lineToInput', () => {
 
   it("a username cleared in the second step saves without authentication, dropping the string's", () => {
     const c = lineToInput(ok('mongodb://u:pw@h/?authMechanism=SCRAM-SHA-256'), 'h', DEFAULTS, { index: 0, username: '' });
+    expect(c.authMech).toBe('none');
+    expect(c).not.toHaveProperty('authUsername');
+    expect(c).not.toHaveProperty('password');
+    expect(lineInputProblem(c)).toBeNull();
+  });
+
+  it.each([
+    ['left blank', { index: 0, username: '', password: '' }],
+    ['not sent', undefined],
+  ])('a password from the file with the username %s saves without authentication', (_, creds) => {
+    const fromFile = { input: { ...ok('mongodb://h').input, password: 'pw' } };
+    const c = lineToInput(fromFile, 'h', DEFAULTS, creds);
     expect(c.authMech).toBe('none');
     expect(c).not.toHaveProperty('authUsername');
     expect(c).not.toHaveProperty('password');
@@ -257,22 +251,14 @@ describe('lineInputProblem', () => {
   });
 });
 
-describe('planLineNames: long hostnames', () => {
+describe('long hostnames', () => {
   // A valid hostname runs to 253 characters; a Connection name stops at 64.
   const host = 'production-documentdb-cluster.cluster-abcdefghijkl.us-east-1.docdb.amazonaws.com';
 
-  it('clamps the name, keeps the full host, and still saves', () => {
+  it('keeps the full host under a clamped name, and still saves', () => {
     const line = ok(`mongodb://${host}:27017`);
-    const [name] = planLineNames([], [line]);
-    expect(name).toBe(host.slice(0, 64));
-    const input = lineToInput(line, name!, DEFAULTS, undefined);
+    const input = lineToInput(line, host.slice(0, 64), DEFAULTS, undefined);
     expect(input.host).toBe(host);
     expect(lineInputProblem(input)).toBeNull();
-  });
-
-  it('two such lines still get distinct names within the limit', () => {
-    const names = planLineNames([], [ok(`mongodb://${host}:1`), ok(`mongodb://${host}:1`)]);
-    expect(names[0]).not.toBe(names[1]);
-    for (const n of names) expect(n.length).toBeLessThanOrEqual(64);
   });
 });
