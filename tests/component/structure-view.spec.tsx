@@ -727,24 +727,18 @@ describe('Structure view — header count on return to Documents', () => {
   // PanelBody only mounts `CollectionHeader` inside `view === 'documents'`
   // (it dims-not-unmounts the builder pane for agg/structure, but the
   // header itself is conditional). Leaving Structure and coming back to
-  // Documents therefore remounts it, which re-fetches `meta.listCollections`
+  // Documents therefore remounts it, which re-fetches `meta.collectionDetails`
   // for free — no dedicated refresh signal needed. This proves that claim
   // rather than assuming it.
   it('re-fetches the header count after Structure → Documents, with no signal wired up', async () => {
-    let call = 0;
-    const listCollections = vi.fn(async () => {
-      call += 1;
-      return [
-        {
-          name: 'coll',
-          type: 'collection' as const,
-          documentCount: call === 1 ? 10 : 25,
-          sizeBytes: 0,
-          indexCount: 1,
-          capped: false,
-        },
-      ];
-    });
+    let docCount = 10;
+    const collectionDetails = vi.fn(async () => ({
+      name: 'coll',
+      type: 'collection' as const,
+      capped: false,
+      stats: { documentCount: docCount, indexCount: 1 },
+      options: {},
+    }));
     installAtelierMock({
       tabs: {
         list: async () => [collectionTab()],
@@ -764,7 +758,7 @@ describe('Structure view — header count on return to Documents', () => {
           },
         ],
       },
-      meta: { listCollections, sampleSchema: async () => ({ docs: [] }) },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
       index: { list: async () => [] },
     });
 
@@ -774,23 +768,20 @@ describe('Structure view — header count on return to Documents', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => expect(screen.getByText('10')).toBeTruthy());
+    // Matched by the header's own text: Structure's statistics also print the count.
+    const headerStats = (n: number) =>
+      screen.getByText((_, el) => el?.textContent?.startsWith(`${n} docs in collection`) ?? false);
+    await waitFor(() => expect(headerStats(10)).toBeTruthy());
 
     await userEvent.click(screen.getByRole('tab', { name: /Structure/i }));
-    await waitFor(() => expect(screen.queryByText('10')).toBeNull());
-
-    // The navigator (DbCollectionNavigator) also fetches listCollections once,
-    // independently, to auto-expand the focused tab's db — its timing floats
-    // relative to these clicks (a 300ms empty-db retry can land it anywhere
-    // in this test), so the total call count isn't deterministic. Snapshot
-    // here and assert only that the Documents click itself caused a further
-    // call — that's the behaviour this test is about.
-    const callsBeforeReturn = listCollections.mock.calls.length;
+    await screen.findByRole('region', { name: 'Statistics' });
+    docCount = 25;
+    const callsBeforeReturn = collectionDetails.mock.calls.length;
 
     await userEvent.click(screen.getByRole('tab', { name: /Documents/i }));
 
-    await waitFor(() => expect(screen.getByText('25')).toBeTruthy());
-    expect(listCollections.mock.calls.length).toBeGreaterThan(callsBeforeReturn);
+    await waitFor(() => expect(headerStats(25)).toBeTruthy());
+    expect(collectionDetails.mock.calls.length).toBeGreaterThan(callsBeforeReturn);
   });
 });
 

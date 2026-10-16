@@ -11,8 +11,8 @@ interface CollectionHeaderProps {
    * `useDocumentDialogs`'s write-completion counter — bumps once per
    * finished insert/edit/delete/delete-many. Reusing that existing signal
    * (rather than the query re-run itself) keeps this effect from firing on
-   * every sort/filter/page re-run too: `listCollections` fans out a
-   * per-collection stats call across the whole database, so it isn't free.
+   * every sort/filter/page re-run too: `collectionDetails` runs a stats
+   * aggregation on the server, so it isn't free.
    */
   refreshSignal?: number;
 }
@@ -46,16 +46,14 @@ export function CollectionHeader({
     let cancelled = false;
     void (async () => {
       try {
-        const rows = await api.meta.listCollections({ connectionId, dbName });
+        const { stats: figures } = await api.meta.collectionDetails({ connectionId, dbName, collection });
         if (cancelled) return;
-        const info = rows.find((r) => r.name === collection);
-        if (info) {
-          setStats({
-            key: cacheKey,
-            docCount: info.documentCount ?? null,
-            indexCount: info.indexCount ?? null,
-          });
-        }
+        // A figure the server did not report (every one, for a view) stays absent rather than 0.
+        setStats({
+          key: cacheKey,
+          docCount: figures?.documentCount ?? null,
+          indexCount: figures?.indexCount ?? null,
+        });
       } catch {
         // Best-effort — but a failed refresh must not leave a pre-write count
         // on screen looking current, so clear rather than hold the last value.
