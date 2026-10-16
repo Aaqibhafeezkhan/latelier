@@ -1,11 +1,12 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '../helpers/render';
+import { act, render, screen, waitFor, within } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { StructureView } from '../../src/pages/Workspace/StructureView';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { DEFAULT_SCHEMA_TAB_STATE } from '@shared/defaults';
+import type { CollectionDetails } from '@shared/ipc';
 import type { CollectionTab, IndexInfo, SchemaSampleEntry } from '@shared/types';
 
 afterEach(() => {
@@ -105,6 +106,314 @@ describe('StructureView — indexes above schema, one pane', () => {
     await userEvent.click(refreshButtons[refreshButtons.length - 1]!);
 
     await waitFor(() => expect(sampleSchema).toHaveBeenCalledTimes(1));
+  });
+});
+
+const DETAILS: CollectionDetails = {
+  name: 'orders',
+  type: 'collection',
+  capped: false,
+  stats: {
+    documentCount: 42,
+    sizeBytes: 1536,
+    indexCount: 2,
+    storageSizeBytes: 4096,
+    avgObjSizeBytes: 512,
+    totalIndexSizeBytes: 8192,
+  },
+  options: {},
+};
+
+describe('StructureView — statistics section', () => {
+  it('renders a Statistics region above the Indexes region', async () => {
+    installAtelierMock({
+      index: { list: async () => [ID_INDEX] },
+      meta: { collectionDetails: async () => DETAILS, sampleSchema: async () => ({ docs: [] }) },
+    });
+
+    renderStructure();
+
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    const indexes = screen.getByRole('region', { name: 'Indexes' });
+    expect(stats.compareDocumentPosition(indexes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('fetches the details once on entry for the open collection', async () => {
+    const collectionDetails = vi.fn(async () => DETAILS);
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
+    });
+
+    renderStructure();
+
+    await waitFor(() => expect(collectionDetails).toHaveBeenCalledTimes(1));
+    expect(collectionDetails).toHaveBeenCalledWith({
+      connectionId: 'c1',
+      dbName: 'shop',
+      collection: 'orders',
+    });
+  });
+
+  it('shows the document count, the sizes and whether the collection is capped', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails: async () => DETAILS, sampleSchema: async () => ({ docs: [] }) },
+    });
+
+    renderStructure();
+
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('42')).toBeTruthy());
+    expect(within(stats).getByText('1.5 KB')).toBeTruthy();
+    expect(within(stats).getByText('4.0 KB')).toBeTruthy();
+    expect(within(stats).getByText('512 B')).toBeTruthy();
+    expect(within(stats).getByText('2 · 8.0 KB')).toBeTruthy();
+    expect(within(stats).getByText('No')).toBeTruthy();
+  });
+
+  it('shows a dash for a size the server did not report', async () => {
+    const bare = { documentCount: 42, sizeBytes: 1536, indexCount: 2 };
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: {
+        collectionDetails: async () => ({ ...DETAILS, stats: bare }),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('42')).toBeTruthy());
+    expect(within(stats).getAllByText('—').length).toBe(2);
+    expect(within(stats).getByText('2 · —')).toBeTruthy();
+  });
+
+  it('shows a view as a view on its source with no figures', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: {
+        collectionDetails: async () => ({
+          name: 'orders',
+          type: 'view' as const,
+          capped: false,
+          options: { viewOn: 'src', pipeline: '[]' },
+        }),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('View on src')).toBeTruthy());
+    expect(within(stats).queryByText('Documents')).toBeNull();
+  });
+
+  it('shows a failed fetch inline while the indexes still render', async () => {
+    installAtelierMock({
+      index: { list: async () => [ID_INDEX] },
+      meta: {
+        collectionDetails: async () => {
+          throw new Error('not authorized');
+        },
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByRole('alert').textContent).toContain('not authorized'));
+    await waitFor(() => expect(screen.getByText('_id_')).toBeTruthy());
+  });
+
+  it('shows a dash for a document or index count the server did not report', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: {
+        collectionDetails: async () => ({
+          ...DETAILS,
+          type: 'timeseries' as const,
+          stats: { sizeBytes: 1536, storageSizeBytes: 4096 },
+        }),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('1.5 KB')).toBeTruthy());
+    const documents = within(stats).getByText('Documents').parentElement!;
+    expect(within(documents).getByText('—')).toBeTruthy();
+    expect(within(stats).queryByText('0')).toBeNull();
+    expect(within(stats).getByText('— · —')).toBeTruthy();
+  });
+
+  it('says Loading until the first reply arrives', async () => {
+    let resolve!: (d: CollectionDetails) => void;
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: {
+        collectionDetails: () => new Promise<CollectionDetails>((r) => (resolve = r)),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    expect(within(stats).getByText('Loading…')).toBeTruthy();
+    await act(async () => resolve(DETAILS));
+    await waitFor(() => expect(within(stats).getByText('42')).toBeTruthy());
+    expect(within(stats).queryByText('Loading…')).toBeNull();
+  });
+
+  it('drops the previous collection\'s figures while the next one loads', async () => {
+    const collectionDetails = vi.fn(({ collection }: { collection: string }) =>
+      collection === 'orders'
+        ? Promise.resolve(DETAILS)
+        : new Promise<CollectionDetails>(() => undefined),
+    );
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
+    });
+    const view = (collection: string) => (
+      <StructureView
+        connectionId="c1"
+        dbName="shop"
+        collection={collection}
+        state={DEFAULT_SCHEMA_TAB_STATE}
+        onPatch={vi.fn()}
+      />
+    );
+
+    const { rerender } = render(view('orders'));
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('42')).toBeTruthy());
+
+    rerender(view('customers'));
+
+    await waitFor(() => expect(within(stats).getByText('Loading…')).toBeTruthy());
+    expect(within(stats).queryByText('42')).toBeNull();
+  });
+
+  it('ignores a slow reply for a collection the tab has since left', async () => {
+    let resolveOrders!: (d: CollectionDetails) => void;
+    const collectionDetails = vi.fn(({ collection }: { collection: string }) =>
+      collection === 'orders'
+        ? new Promise<CollectionDetails>((resolve) => {
+            resolveOrders = resolve;
+          })
+        : Promise.resolve({ ...DETAILS, name: collection, stats: { ...DETAILS.stats!, documentCount: 7 } }),
+    );
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
+    });
+    const view = (collection: string) => (
+      <StructureView
+        connectionId="c1"
+        dbName="shop"
+        collection={collection}
+        state={DEFAULT_SCHEMA_TAB_STATE}
+        onPatch={vi.fn()}
+      />
+    );
+
+    const { rerender } = render(view('orders'));
+    await waitFor(() => expect(collectionDetails).toHaveBeenCalledTimes(1));
+    rerender(view('customers'));
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('7')).toBeTruthy());
+
+    await act(async () => {
+      resolveOrders(DETAILS);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(within(stats).getByText('7')).toBeTruthy();
+    expect(within(stats).queryByText('42')).toBeNull();
+  });
+
+  it('Refresh fetches the details again', async () => {
+    const collectionDetails = vi.fn(async () => DETAILS);
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
+    });
+
+    renderStructure();
+
+    await waitFor(() => expect(collectionDetails).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh statistics' }));
+    await waitFor(() => expect(collectionDetails).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('SchemaView — distinct values and numeric range', () => {
+  it('renders the Distinct and Range cells of an entry that carries them', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails: async () => DETAILS, sampleSchema: async () => ({ docs: [] }) },
+    });
+    const entries: SchemaSampleEntry[] = [
+      { path: 'qty', frequency: 1, types: { number: 4 }, distinct: 2, numeric: { min: 1, max: 9, avg: 4.5 } },
+      { path: 'note', frequency: 1, types: { string: 4 } },
+    ];
+
+    renderStructure({
+      ...DEFAULT_SCHEMA_TAB_STATE,
+      entries,
+      sampledCount: 4,
+      ranAt: '2026-04-21T00:00:00.000Z',
+    });
+
+    expect(await screen.findByRole('columnheader', { name: 'Distinct' })).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: 'Range' })).toBeTruthy();
+    const qtyRow = screen.getByText('qty').closest('tr')!;
+    expect(within(qtyRow).getByText('2')).toBeTruthy();
+    expect(within(qtyRow).getByText('1 – 9 · avg 4.5')).toBeTruthy();
+    const noteRow = screen.getByText('note').closest('tr')!;
+    expect(within(noteRow).getAllByText('—').length).toBe(2);
+  });
+});
+
+describe('SchemaView — sample size is bounded by what meta:sampleSchema accepts', () => {
+  it('offers exactly 50, 100 and 200', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { sampleSchema: async () => ({ docs: [] }) },
+    });
+    renderStructure();
+
+    const select = (await screen.findByLabelText('Sample size')) as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['50', '100', '200']);
+  });
+
+  it('samples at the bound when a restored tab carries a size the channel would refuse', async () => {
+    const sampleSchema = vi.fn(async () => ({ docs: [{ sku: 'a' }] }));
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { sampleSchema },
+    });
+    const entries: SchemaSampleEntry[] = [{ path: 'sku', frequency: 1, types: { string: 3 } }];
+    renderStructure({
+      ...DEFAULT_SCHEMA_TAB_STATE,
+      sampleSize: 500,
+      entries,
+      sampledCount: 3,
+      ranAt: '2026-04-21T00:00:00.000Z',
+    });
+
+    const refreshButtons = await screen.findAllByRole('button', { name: 'Refresh' });
+    await userEvent.click(refreshButtons[refreshButtons.length - 1]!);
+
+    await waitFor(() => expect(sampleSchema).toHaveBeenCalledTimes(1));
+    expect(sampleSchema).toHaveBeenCalledWith(expect.objectContaining({ size: 200 }));
   });
 });
 

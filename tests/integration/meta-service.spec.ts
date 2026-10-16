@@ -13,7 +13,27 @@ import {
   connectionReader,
 } from '../../electron/mongo/ConnectionService';
 import type { ConnectionInput } from '@shared/types';
+import { ejsonParse } from '../../electron/mongo/ejson';
+import { NotFoundError } from '../../electron/errors';
 import { getSharedServer, stopSharedServer, uriToHostPort } from '../helpers/mongo';
+
+/** What the server sends when a role lacks `collStats`: code 13, `Unauthorized`. */
+function unauthorized(ns: string): Error {
+  return Object.assign(new Error(`not authorized on ${ns} to execute command $collStats`), {
+    code: 13,
+    codeName: 'Unauthorized',
+  });
+}
+
+/** Stands in for the `$collStats` aggregate: every way of reading it rejects with `err`. */
+function mockCollStatsFailure(err: Error) {
+  const reject = async () => {
+    throw err;
+  };
+  return vi
+    .spyOn(Collection.prototype, 'aggregate')
+    .mockImplementation((() => ({ next: reject, toArray: reject })) as never);
+}
 
 async function seedData(uri: string) {
   const c = new MongoClient(uri);
@@ -134,13 +154,7 @@ describe('MetaService', () => {
   // driver and never reached MetaService at all.
   it('listCollections falls back to cheap estimates when $collStats is unauthorized', async () => {
     await setup();
-    const aggregate = vi
-      .spyOn(Collection.prototype, 'aggregate')
-      .mockImplementation((() => ({
-        next: async () => {
-          throw new Error('not authorized on shopdb to execute command $collStats');
-        },
-      })) as never);
+    const aggregate = mockCollStatsFailure(unauthorized('shopdb'));
 
     try {
       const cols = await svc.listCollections({ connectionId: connId, dbName: 'shopdb' });
@@ -150,6 +164,262 @@ describe('MetaService', () => {
       expect(products!.documentCount).toBe(3);
       expect(products!.indexCount).toBeGreaterThanOrEqual(1);
       expect(aggregate).toHaveBeenCalled();
+    } finally {
+      aggregate.mockRestore();
+    }
+  });
+
+  describe('collectionDetails', () => {
+    const DETAILS_DB = 'detailsdb';
+
+    // Each test works on its own collection names so the shared server's
+    // other suites never see them, and re-runs start from a clean slate.
+    async function withDetailsDb<T>(fn: (db: Db) => Promise<T>): Promise<T> {
+      const c = new MongoClient(server.getUri());
+      try {
+        await c.connect();
+        return await fn(c.db(DETAILS_DB));
+      } finally {
+        await c.close();
+      }
+    }
+
+    it('reports the type, counts and sizes of a collection with an extra index', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('plain').catch(() => undefined);
+        const coll = await db.createCollection('plain');
+        await coll.insertMany([{ a: 1 }, { a: 2 }, { a: 3 }]);
+        await coll.createIndex({ a: 1 });
+      });
+
+      const d = await svc.collectionDetails({
+        connectionId: connId,
+        dbName: DETAILS_DB,
+        collection: 'plain',
+      });
+
+      expect(d.name).toBe('plain');
+      expect(d.type).toBe('collection');
+      expect(d.capped).toBe(false);
+      expect(d.stats?.documentCount).toBe(3);
+      expect(d.stats?.indexCount).toBe(2);
+      expect(d.stats?.sizeBytes).toBeGreaterThan(0);
+      expect(d.stats?.storageSizeBytes).toBeGreaterThan(0);
+      expect(d.stats?.avgObjSizeBytes).toBeGreaterThan(0);
+      expect(d.stats?.totalIndexSizeBytes).toBeGreaterThan(0);
+    });
+
+    it('reports a capped collection as capped', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('cappedc').catch(() => undefined);
+        await db.createCollection('cappedc', { capped: true, size: 4096 });
+      });
+
+      const d = await svc.collectionDetails({
+        connectionId: connId,
+        dbName: DETAILS_DB,
+        collection: 'cappedc',
+      });
+
+      expect(d.capped).toBe(true);
+    });
+
+    it('returns the validator, level and action as written', async () => {
+      await setup();
+      const validator = { $jsonSchema: { required: ['a'] } };
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('validated').catch(() => undefined);
+        await db.createCollection('validated', {
+          validator,
+          validationLevel: 'moderate',
+          validationAction: 'warn',
+        });
+      });
+
+      const d = await svc.collectionDetails({
+        connectionId: connId,
+        dbName: DETAILS_DB,
+        collection: 'validated',
+      });
+
+      expect(ejsonParse(d.options.validator!)).toEqual(validator);
+      expect(d.options.validationLevel).toBe('moderate');
+      expect(d.options.validationAction).toBe('warn');
+    });
+
+    it('returns a view as a view on its source with no figures', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('v').catch(() => undefined);
+        await db.dropCollection('src').catch(() => undefined);
+        await db.createCollection('src');
+        await db.createCollection('v', { viewOn: 'src', pipeline: [{ $match: { a: 1 } }] });
+      });
+
+      const d = await svc.collectionDetails({
+        connectionId: connId,
+        dbName: DETAILS_DB,
+        collection: 'v',
+      });
+
+      expect(d.type).toBe('view');
+      expect(d.stats).toBeUndefined();
+      expect(d.options.viewOn).toBe('src');
+      // Canonical EJSON on the wire: the number keeps its BSON type.
+      expect(JSON.parse(d.options.pipeline!)).toEqual([{ $match: { a: { $numberInt: '1' } } }]);
+    });
+
+    it('throws NotFoundError for a collection that does not exist', async () => {
+      await setup();
+      await expect(
+        svc.collectionDetails({
+          connectionId: connId,
+          dbName: DETAILS_DB,
+          collection: 'never_created',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it('counts the documents of a populated time-series collection, which $collStats does not', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('readings').catch(() => undefined);
+        const coll = await db.createCollection('readings', { timeseries: { timeField: 't' } });
+        await coll.insertMany([{ t: new Date(), v: 1 }, { t: new Date(), v: 2 }, { t: new Date(), v: 3 }]);
+      });
+
+      const d = await svc.collectionDetails({
+        connectionId: connId,
+        dbName: DETAILS_DB,
+        collection: 'readings',
+      });
+      expect(d.type).toBe('timeseries');
+      expect(d.stats?.documentCount).toBe(3);
+
+      const row = (await svc.listCollections({ connectionId: connId, dbName: DETAILS_DB })).find(
+        (c) => c.name === 'readings',
+      );
+      expect(row?.documentCount).toBe(3);
+    });
+
+    it('throws the classified error when $collStats fails for a reason other than authorization', async () => {
+      await setup();
+      const aggregate = mockCollStatsFailure(
+        Object.assign(new Error('operation exceeded time limit'), { code: 50, codeName: 'MaxTimeMSExpired' }),
+      );
+      try {
+        await expect(
+          svc.collectionDetails({ connectionId: connId, dbName: 'shopdb', collection: 'products' }),
+        ).rejects.toMatchObject({ code: 'TIMEOUT' });
+      } finally {
+        aggregate.mockRestore();
+      }
+    });
+
+    it('throws, rather than report zeros, when $collStats is refused and both estimates fail too', async () => {
+      await setup();
+      const aggregate = mockCollStatsFailure(unauthorized('shopdb'));
+      const count = vi
+        .spyOn(Collection.prototype, 'estimatedDocumentCount')
+        .mockRejectedValue(Object.assign(new Error('socket closed'), { name: 'MongoNetworkError' }));
+      const indexes = vi
+        .spyOn(Collection.prototype, 'indexes')
+        .mockRejectedValue(Object.assign(new Error('socket closed'), { name: 'MongoNetworkError' }));
+      try {
+        await expect(
+          svc.collectionDetails({ connectionId: connId, dbName: 'shopdb', collection: 'products' }),
+        ).rejects.toMatchObject({ code: 'NETWORK' });
+      } finally {
+        aggregate.mockRestore();
+        count.mockRestore();
+        indexes.mockRestore();
+      }
+    });
+
+    it('leaves a figure undefined, not 0, when only its estimate fails', async () => {
+      await setup();
+      const aggregate = mockCollStatsFailure(unauthorized('shopdb'));
+      const indexes = vi.spyOn(Collection.prototype, 'indexes').mockRejectedValue(new Error('boom'));
+      try {
+        const d = await svc.collectionDetails({
+          connectionId: connId,
+          dbName: 'shopdb',
+          collection: 'products',
+        });
+        expect(d.stats?.documentCount).toBe(3);
+        expect(d.stats?.indexCount).toBeUndefined();
+        expect(d.stats?.sizeBytes).toBeUndefined();
+      } finally {
+        aggregate.mockRestore();
+        indexes.mockRestore();
+      }
+    });
+
+    it('logs the authorization failure it falls back from', async () => {
+      await setup();
+      const warn = vi.fn();
+      const logged = new MetaService(pool, { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() });
+      const aggregate = mockCollStatsFailure(unauthorized('shopdb'));
+      try {
+        await logged.collectionDetails({ connectionId: connId, dbName: 'shopdb', collection: 'products' });
+        expect(warn).toHaveBeenCalledWith(
+          'meta',
+          expect.stringContaining('$collStats'),
+          expect.objectContaining({ collection: 'products' }),
+        );
+      } finally {
+        aggregate.mockRestore();
+      }
+    });
+
+    it('falls back to the estimate, without the optional sizes, when $collStats is unauthorized', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('plain').catch(() => undefined);
+        const coll = await db.createCollection('plain');
+        await coll.insertMany([{ a: 1 }, { a: 2 }, { a: 3 }]);
+      });
+      const aggregate = mockCollStatsFailure(unauthorized('detailsdb'));
+
+      try {
+        const d = await svc.collectionDetails({
+          connectionId: connId,
+          dbName: DETAILS_DB,
+          collection: 'plain',
+        });
+        expect(d.stats?.documentCount).toBe(3);
+        expect(d.stats?.indexCount).toBeGreaterThanOrEqual(1);
+        expect(d.stats?.storageSizeBytes).toBeUndefined();
+        expect(d.stats?.avgObjSizeBytes).toBeUndefined();
+        expect(d.stats?.totalIndexSizeBytes).toBeUndefined();
+        expect(aggregate).toHaveBeenCalled();
+      } finally {
+        aggregate.mockRestore();
+      }
+    });
+  });
+
+  it('listCollections leaves a collection\'s figures out, and still lists it, when its stats read fails', async () => {
+    await setup();
+    const aggregate = mockCollStatsFailure(
+      Object.assign(new Error('operation exceeded time limit'), { code: 50, codeName: 'MaxTimeMSExpired' }),
+    );
+    const warn = vi.fn();
+    const logged = new MetaService(pool, { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() });
+    try {
+      const cols = await logged.listCollections({ connectionId: connId, dbName: 'shopdb' });
+      const products = cols.find((c) => c.name === 'products');
+      expect(products).toBeDefined();
+      expect(warn).toHaveBeenCalledWith(
+        'meta',
+        'collection stats read failed',
+        expect.objectContaining({ collection: 'products' }),
+      );
+      expect(products!.documentCount).toBeUndefined();
+      expect(products!.sizeBytes).toBeUndefined();
+      expect(products!.indexCount).toBeUndefined();
     } finally {
       aggregate.mockRestore();
     }

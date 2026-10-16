@@ -25,6 +25,7 @@ import type {
   IndexInfo,
 } from '@shared/types';
 import type { IndexSuggestion } from '../utils/indexSuggestion';
+import { humanBytes } from '../utils/humanBytes';
 
 /**
  * A one-shot request from `ExplainDrawer`'s "Create an index for this
@@ -37,18 +38,6 @@ import type { IndexSuggestion } from '../utils/indexSuggestion';
 export interface IndexCreateRequest {
   requestId: string;
   suggestion: IndexSuggestion | null;
-}
-
-function humanBytes(n: number): string {
-  if (!Number.isFinite(n) || n === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let i = 0;
-  let v = n;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 function humanCount(n: number): string {

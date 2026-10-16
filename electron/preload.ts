@@ -99,6 +99,7 @@ const api: IpcApi = {
     listDatabases: (input) => call(IPC_CHANNELS.metaListDatabases, input),
     listCollections: (input) => call(IPC_CHANNELS.metaListCollections, input),
     sampleSchema: (input) => call(IPC_CHANNELS.metaSampleSchema, input),
+    collectionDetails: (input) => call(IPC_CHANNELS.metaCollectionDetails, input),
   },
 
   index: {

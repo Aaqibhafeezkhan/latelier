@@ -183,6 +183,109 @@ describe('summarizeSchema', () => {
  * Silence is the default: it warns only when one type holds ≥90% of a
  * field's own histogram and the new value is something else.
  */
+describe('summarizeSchema — distinct values and numeric range', () => {
+  const int = (n: number) => ({ $numberInt: String(n) });
+  const byPath = (docs: unknown[], path: string) =>
+    summarizeSchema(docs).find((e) => e.path === path)!;
+
+  it('counts the unique scalar values seen on a path', () => {
+    const docs = [{ a: int(1) }, { a: int(1) }, { a: int(2) }];
+    expect(byPath(docs, 'a').distinct).toBe(2);
+  });
+
+  it('counts a string path and a null alike, one per unique value', () => {
+    const docs = [{ s: 'x' }, { s: 'x' }, { s: 'y' }, { s: null }];
+    expect(byPath(docs, 's').distinct).toBe(3);
+  });
+
+  it('tells the same digits apart across BSON types', () => {
+    const docs = [{ a: int(1) }, { a: { $numberLong: '1' } }, { a: 'x' }, { a: '1' }];
+    expect(byPath(docs, 'a').distinct).toBe(4);
+  });
+
+  it('counts an ObjectId sentinel as a scalar but gives a sub-document no distinct', () => {
+    const docs = [
+      { _id: { $oid: 'a' }, sub: { k: 1 } },
+      { _id: { $oid: 'b' }, sub: { k: 2 } },
+      { _id: { $oid: 'a' }, sub: { k: 1 } },
+    ];
+    const out = summarizeSchema(docs);
+    expect(out.find((e) => e.path === '_id')!.distinct).toBe(2);
+    expect(out.find((e) => e.path === 'sub')!.distinct).toBeUndefined();
+    expect(out.find((e) => e.path === 'sub.k')!.distinct).toBe(2);
+  });
+
+  it('treats a sentinel key mixed with others as a sub-document, not a scalar', () => {
+    const docs = [{ a: { $oid: '507f1f77bcf86cd799439011', extra: true } }];
+    expect(byPath(docs, 'a').distinct).toBeUndefined();
+  });
+
+  it('does not add the scalar elements of an array to distinct', () => {
+    const docs = [{ tags: ['a', 'b'] }, { tags: ['c'] }];
+    const tags = byPath(docs, 'tags');
+    expect(tags.distinct).toBeUndefined();
+    expect(tags.numeric).toBeUndefined();
+  });
+
+  it('still counts scalars inside the object elements of an array', () => {
+    const docs = [{ items: [{ q: int(1) }, { q: int(2) }] }, { items: [{ q: int(2) }] }];
+    expect(byPath(docs, 'items.q').distinct).toBe(2);
+  });
+
+  it('reports min, max and average over $numberInt, $numberDouble and $numberLong', () => {
+    const docs = [
+      { n: int(2) },
+      { n: { $numberDouble: '1.5' } },
+      { n: { $numberLong: '10' } },
+      { n: { $numberDecimal: '-0.5' } },
+    ];
+    expect(byPath(docs, 'n').numeric).toEqual({ min: -0.5, max: 10, avg: 3.25 });
+  });
+
+  it('reads a raw JS number too', () => {
+    expect(byPath([{ n: 4 }, { n: 8 }], 'n').numeric).toEqual({ min: 4, max: 8, avg: 6 });
+  });
+
+  it('ignores a NaN or infinite occurrence', () => {
+    const docs = [
+      { n: int(2) },
+      { n: { $numberDouble: 'NaN' } },
+      { n: { $numberDouble: 'Infinity' } },
+      { n: { $numberDouble: '-Infinity' } },
+      { n: int(4) },
+    ];
+    expect(byPath(docs, 'n').numeric).toEqual({ min: 2, max: 4, avg: 3 });
+  });
+
+  it('gives a path whose only numbers are non-finite no numeric but still a distinct', () => {
+    const docs = [{ n: { $numberDouble: 'NaN' } }];
+    const n = byPath(docs, 'n');
+    expect(n.numeric).toBeUndefined();
+    expect(n.distinct).toBe(1);
+  });
+
+  it('gives a string-only path no numeric', () => {
+    expect(byPath([{ s: '5' }, { s: '6' }], 's').numeric).toBeUndefined();
+  });
+
+  it('keeps the min and max of a negative-only path', () => {
+    expect(byPath([{ n: -3 }, { n: -7 }], 'n').numeric).toEqual({ min: -7, max: -3, avg: -5 });
+  });
+
+  it('drops numeric when the average overflows, keeping distinct', () => {
+    const big = { $numberDouble: '1.7e308' };
+    const n = byPath([{ n: big }, { n: { $numberDouble: '1.6e308' } }], 'n');
+    expect(n.numeric).toBeUndefined();
+    expect(n.distinct).toBe(2);
+  });
+
+  it('stores no sample value, only counts and aggregates', () => {
+    const entry = byPath([{ secret: 'hunter2' }, { secret: 'swordfish' }], 'secret');
+    expect(JSON.stringify(entry)).not.toContain('hunter2');
+    expect(JSON.stringify(entry)).not.toContain('swordfish');
+  });
+});
+
 describe('checkFieldType', () => {
   const entry = (path: string, types: Record<string, number>): SchemaSampleEntry => ({
     path,
