@@ -295,7 +295,7 @@ export function ResultBar() {
               ? { background: T.surface, color: T.textGhost, border: `1px solid ${T.border}` }
               : planSummary?.collscan
                 ? { background: T.warnSoft, color: T.warnText, border: `1px solid ${T.warnBorder}` }
-                : { background: T.greenSoft, color: T.greenText, border: `1px solid ${T.greenBorder}` }),
+                : { background: T.surfaceRaised, color: T.text, border: `1px solid ${T.border}` }),
           }}
         >
           {planLabel}

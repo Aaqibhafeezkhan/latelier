@@ -613,6 +613,9 @@ describe('useQueryRunner', () => {
       await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
       expect(explainSpy.mock.calls[1][0].filter).toBe('{"a":1}');
       expect(explainSpy.mock.calls[1][0]).not.toHaveProperty('skip');
+      await waitFor(() =>
+        expect(patch.mock.calls.filter((c) => c[1].lastRun?.plan === plan)).toHaveLength(2),
+      );
     });
 
     it('does not explain on the past-cap short-circuit', async () => {
