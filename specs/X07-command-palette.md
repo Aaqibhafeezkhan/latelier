@@ -74,7 +74,7 @@ export interface Command {
   group: CommandGroup;
   /** Free-text aliases that match the search query in addition to `title`. */
   keywords?: string[];
-  /** Optional pre-formatted shortcut hint, e.g. `⌘T`. Display-only. */
+  /** Optional shortcut hint, written in Mac glyphs, e.g. `⌘T`. Display-only; shown platform-aware (see §5). */
   shortcut?: string;
   /**
    * Optional dynamic gate. Defaults to `() => true`. Evaluated each time the
@@ -237,6 +237,7 @@ Empty query → render the RECENT bucket first (if non-empty), then every other 
 | ------------- | --------------------------- | --------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | general       | `theme.toggle`              | Toggle dark mode                  | always                                                                                | calls the `useTheme()` toggle from `<GlobalCommands>` in `App.tsx`     |
 | general       | `settings.open`             | Open settings                     | always                                                                                | opens `<SettingsModal>` — see §11 for the prerequisite hoist           |
+| general       | `help.shortcuts`            | Keyboard shortcuts…               | always (shortcut `⌘/`)                                                                | opens the shortcuts cheat sheet, registered and rendered by `<GlobalCommands>`; see below |
 | navigation    | ~~`nav.connections`~~       | ~~Go to connections~~             | **Removed** — `/connections` no longer has a screen to navigate to (it redirects to `/workspace`). | —                                                                       |
 | navigation    | `nav.workspace`             | Go to workspace                   | `pathname !== '/workspace'` and `connectionId` set (URL id, or the Active Connection off the deep screen) | `navigate('/workspace')`                                               |
 | connection    | `connection.new`            | New connection                    | always                                                                                | `navigate('/connections/new')`                                         |
@@ -266,6 +267,10 @@ Empty query → render the RECENT bucket first (if non-empty), then every other 
 The `activeTab?.kind === '…'` predicates above are conceptual — the implementation enforces them structurally via registration scope: the collection-tab subtree only mounts when `activeTab.kind === 'collection'`, so its `query.*` / `view.mode.*` / `references.configure` registrations only exist while the predicate would be true. The same applies to `agg.*`. No `when` clause needs to read `activeTab` at runtime, which is why `PaletteContext` doesn't carry it.
 
 `shortcut` is set on commands that already have a keyboard binding elsewhere (e.g., `tab.new` shows `⌘T`). The palette never installs shortcuts; it only displays them.
+
+Shortcuts are written once, in Mac glyphs, and shown for the platform they run on. On a Mac the label is shown as written. Elsewhere `⌘` reads `Ctrl+`, `⌥` reads `Alt+`, `⇧` reads `Shift+` and `↵` reads `Enter`, with modifiers in Ctrl, Alt, Shift order: `⌘T` shows `Ctrl+T`, `⇧⌘↵` shows `Ctrl+Shift+Enter`. The palette rows, the shortcut tooltips and the Connection Switcher legend all go through that one formatter (`formatShortcut`). The shortcuts themselves already accept either `⌘` or `Ctrl`.
+
+**Keyboard shortcuts cheat sheet.** `help.shortcuts` opens a dialog titled "Keyboard shortcuts" that lists every registered command that has a `shortcut`, grouped as the palette groups them, plus a fixed list of shortcuts that are not commands (`⌘K` palette, `⌘1`–`⌘9` switch tab, `⌘⌥←` / `⌘⌥→` cycle tabs, `⌘E` manage connections). A command without a `shortcut` is not listed. `⌘/` (`Ctrl+/` elsewhere) opens it from anywhere, except while a text field or an editor has focus, where `/` keeps its own meaning. Closing it returns focus to where it was.
 
 Commands marked "always" + `connection.new` + `nav.*` register once globally from `App.tsx`. Page- and tab-scoped commands are registered by the component that owns the action — that way `perform` is a closure over the live state setters/handlers in scope:
 

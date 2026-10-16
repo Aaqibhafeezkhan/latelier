@@ -231,6 +231,7 @@ function mount(
 }
 
 afterEach(() => {
+  delete (window as unknown as { __atelierEnv__?: unknown }).__atelierEnv__;
   uninstallAtelierMock();
   vi.restoreAllMocks();
 });
@@ -2123,6 +2124,7 @@ describe('ConnectionSwitcher keyboard contract', () => {
   });
 
   it('lists three shortcuts in a footer, the rest taught by row-action tooltips', async () => {
+    (window as unknown as { __atelierEnv__?: unknown }).__atelierEnv__ = { platform: 'darwin' };
     mount();
 
     await openSwitcher();
@@ -2142,6 +2144,18 @@ describe('ConnectionSwitcher keyboard contract', () => {
     expect(text).not.toContain('⌘↵');
     expect(text).not.toContain('disconnect');
     expect(text).not.toContain('esc close');
+  });
+
+  it('writes the footer shortcuts for Windows and Linux off a Mac', async () => {
+    (window as unknown as { __atelierEnv__?: unknown }).__atelierEnv__ = { platform: 'win32' };
+    mount();
+
+    await openSwitcher();
+
+    const text = screen.getByRole('note', { name: 'Keyboard shortcuts' }).textContent ?? '';
+    expect(text).toContain('Ctrl+E');
+    expect(text).toContain('Enter');
+    expect(text).not.toContain('⌘');
   });
 
   it('does not let a key it handles reach the Data View’s window shortcuts', async () => {

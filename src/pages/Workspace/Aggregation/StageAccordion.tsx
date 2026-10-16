@@ -7,6 +7,8 @@ import { ejsonStringifyReadable } from '../../../utils/ejson';
 import { HighlightedJson } from '../views/JsonView';
 import { docKey } from '../../../utils/displayValue';
 import { copyToClipboard } from '../../../utils/clipboard';
+import { formatShortcut } from '../../../commands/shortcutLabel';
+import { isMacRenderer } from '../../../utils/platform';
 import { useShellSyntaxField } from '../useShellSyntaxField';
 import {
   KNOWN_STAGE_OPS,
@@ -943,7 +945,7 @@ function StageRow({
                   Format
                 </button>
               </Tooltip>
-              <Tooltip label="Run up to this stage (⇧⌘↵)" withArrow>
+              <Tooltip label={`Run up to this stage (${formatShortcut('⇧⌘↵', isMacRenderer())})`} withArrow>
                 <button
                   onClick={onRunToStage}
                   disabled={previewLoading}
