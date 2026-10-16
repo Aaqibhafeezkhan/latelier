@@ -11,6 +11,7 @@ import { useHints } from '../hints/HintsContext';
 import { useFeatureHint } from '../hints/useFeatureHint';
 import { FeatureHint } from '../hints/FeatureHint';
 import { api } from '../api/atelier';
+import { notify } from '../theme/notifications';
 import { useRegistrySnapshot } from './useRegistrySnapshot';
 import { formatShortcut } from './shortcutLabel';
 import { isMacRenderer } from '../utils/platform';
@@ -317,20 +318,29 @@ export function CommandPalette({ registerApi }: PaletteShellProps) {
   }, [registerApi, openPalette, closePalette, togglePalette]);
 
   // History is a convenience: a failed read or write leaves the palette fully
-  // usable, so neither surfaces an error. Stale ids are dropped by rankCommands.
+  // usable. A failed read is logged, like the theme's; a failed write is a toast,
+  // like the layout's. Stale ids are dropped by rankCommands.
+  // Nothing is written until the stored history has been read and merged, so a
+  // command run early never overwrites it; after a failed read, never.
+  const [historyRead, setHistoryRead] = React.useState<'pending' | 'done' | 'failed'>('pending');
   React.useEffect(() => {
     let active = true;
     api.prefs
       .get<unknown>(MRU_PREF_KEY)
       .then((stored) => {
-        if (!active || !Array.isArray(stored)) return;
-        if (!stored.every((v): v is string => typeof v === 'string')) return;
-        // Merged behind anything performed while the read was in flight.
-        setRecentIds((prev) =>
-          [...prev, ...stored.filter((id) => !prev.includes(id))].slice(0, MRU_CAP),
-        );
+        if (!active) return;
+        if (Array.isArray(stored) && stored.every((v): v is string => typeof v === 'string')) {
+          // Merged behind anything performed while the read was in flight.
+          setRecentIds((prev) =>
+            [...prev, ...stored.filter((id) => !prev.includes(id))].slice(0, MRU_CAP),
+          );
+        }
+        setHistoryRead('done');
       })
-      .catch(() => { /* best-effort: start without history */ });
+      .catch((err: unknown) => {
+        console.warn('[palette] could not load the command history', err);
+        if (active) setHistoryRead('failed');
+      });
     return () => {
       active = false;
     };
@@ -340,10 +350,12 @@ export function CommandPalette({ registerApi }: PaletteShellProps) {
   // twice), and only after a perform — the seed is never written back.
   const recentDirtyRef = React.useRef(false);
   React.useEffect(() => {
-    if (!recentDirtyRef.current) return;
+    if (historyRead !== 'done' || !recentDirtyRef.current) return;
     recentDirtyRef.current = false;
-    void api.prefs.set(MRU_PREF_KEY, recentIds).catch(() => { /* best-effort */ });
-  }, [recentIds]);
+    void api.prefs.set(MRU_PREF_KEY, recentIds).catch(() => {
+      notify.error('Could not save the command history', { id: 'palette-history-save-failed' });
+    });
+  }, [recentIds, historyRead]);
 
   const recordRecent = React.useCallback((id: string) => {
     recentDirtyRef.current = true;
