@@ -12,6 +12,10 @@ describe('isShellMessage (child -> main)', () => {
     expect(isShellMessage({ type: 'shell-exit' })).toBe(true);
   });
 
+  it('accepts the notice that the REPL is waiting for input again', () => {
+    expect(isShellMessage({ type: 'shell-prompt' })).toBe(true);
+  });
+
   it('rejects output without text, other types, and non-objects', () => {
     expect(isShellMessage({ type: 'shell-out' })).toBe(false);
     expect(isShellMessage({ type: 'shell-out', data: 5 })).toBe(false);

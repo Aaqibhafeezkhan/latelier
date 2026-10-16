@@ -358,6 +358,29 @@ function svcRun(input: Parameters<ScriptService['run']>[0]): ReturnType<ScriptSe
   return svc!.run(input);
 }
 
+describe('ScriptService — runningCount', () => {
+  it('is 1 while a script runs and 0 once it is cancelled', async () => {
+    const s = setup();
+    expect(s.runningCount()).toBe(0);
+    const run = s.run({
+      connectionId: 'c1',
+      source: 'await new Promise(() => {})',
+      cancelToken: 'count-cancel',
+    });
+    const settled = run.catch((err: unknown) => err);
+    await until(async () => s.runningCount() === 1, 'the script to be counted');
+    s.cancel('count-cancel');
+    await settled;
+    expect(s.runningCount()).toBe(0);
+  });
+
+  it('is 0 after a script finishes', async () => {
+    const s = setup();
+    await s.run({ connectionId: 'c1', source: '1 + 1' });
+    expect(s.runningCount()).toBe(0);
+  });
+});
+
 describe('ScriptService — timeouts kill the runner', () => {
   it('enforces maxTimeMs on a CPU-bound runaway', async () => {
     const t0 = Date.now();

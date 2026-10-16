@@ -30,14 +30,23 @@ export interface ShellExited {
   type: 'shell-exit';
 }
 
-export type ShellMessage = ShellOutput | ShellExited;
+/**
+ * child -> main: the REPL is waiting for input again (it printed a prompt).
+ * Main counts one per line it wrote, so a line whose result is still pending
+ * is the difference between the two.
+ */
+export interface ShellPrompt {
+  type: 'shell-prompt';
+}
+
+export type ShellMessage = ShellOutput | ShellExited | ShellPrompt;
 
 /** Shape check for a message arriving from the child; a REPL user can post to the port too. */
 export function isShellMessage(value: unknown): value is ShellMessage {
   if (typeof value !== 'object' || value === null) return false;
   const m = value as Record<string, unknown>;
   if (m.type === 'shell-out') return typeof m.data === 'string';
-  return m.type === 'shell-exit';
+  return m.type === 'shell-exit' || m.type === 'shell-prompt';
 }
 
 /** Shape checks for what the child receives. The sender is main, so these guard the child's own state. */

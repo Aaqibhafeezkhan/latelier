@@ -43,6 +43,14 @@ export function startShellSession(channel: Channel, rpc: RpcClient, req: ShellSt
     writer: (value: unknown) =>
       rpc.isCursor(value) || rpc.isCollection(value) ? inspect(value) : shellWriter(value),
   });
+  // Tell main each time the REPL is ready for another line, so it can tell a
+  // line still waiting on its result from an idle shell. The prompt the REPL
+  // printed while starting (above) is not counted: main has written no line yet.
+  const baseDisplayPrompt = server.displayPrompt;
+  server.displayPrompt = (preserveCursor?: boolean) => {
+    baseDisplayPrompt.call(server, preserveCursor);
+    channel.post({ type: 'shell-prompt' });
+  };
   // Node's REPL prints a top-level Promise as it is and only awaits an
   // explicit `await`. A query call is always async here, so settle a thenable
   // result before it reaches the writer. Input is not paused meanwhile: a
