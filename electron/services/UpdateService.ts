@@ -34,19 +34,22 @@ export function shouldCheckForUpdates(env: {
 export class UpdateService {
   private state: UpdateState = { status: 'idle' };
   private updater: UpdaterLike | null = null;
+  // Set while an approved restart is installing; the updater's error event
+  // clears it when the install fails and the app does not quit.
+  private restartPending = false;
 
   private readonly loadUpdater: () => Promise<UpdaterLike>;
   private readonly log: Logger;
   private readonly emit: (state: UpdateState) => void;
   private readonly enabled: boolean;
-  private readonly quitGate: Pick<QuitGate, 'check' | 'ask'>;
+  private readonly quitGate: Pick<QuitGate, 'check' | 'ask' | 'reset'>;
 
   constructor(
     loadUpdater: () => Promise<UpdaterLike>,
     log: Logger,
     emit: (state: UpdateState) => void,
     enabled: boolean,
-    quitGate: Pick<QuitGate, 'check' | 'ask'>,
+    quitGate: Pick<QuitGate, 'check' | 'ask' | 'reset'>,
   ) {
     this.loadUpdater = loadUpdater;
     this.log = log;
@@ -69,6 +72,13 @@ export class UpdateService {
       });
       updater.on('error', (err) => {
         this.log.warn('updater', 'updater error', { err: String(err) });
+        // electron-updater reports every failed install here and then does not
+        // quit: take back the quit approval and offer Restart again.
+        if (this.restartPending) {
+          this.restartPending = false;
+          this.quitGate.reset();
+          this.emit(this.state);
+        }
       });
       await updater.checkForUpdates();
     } catch (err) {
@@ -85,7 +95,8 @@ export class UpdateService {
    * `quitAndInstall`, before the app's quit event, so asking at `before-quit`
    * would be too late to cancel. A yes lets the quit that follows through
    * without a second dialog. A no installs nothing and re-sends `ready`, so the
-   * renderer offers Restart again. Resolves whether the restart went ahead.
+   * renderer offers Restart again, as does an install that fails without
+   * quitting. Resolves whether the restart went ahead.
    */
   async restart(): Promise<boolean> {
     if (this.state.status !== 'ready') {
@@ -95,7 +106,9 @@ export class UpdateService {
       this.emit(this.state);
       return false;
     }
+    this.restartPending = true;
+    // A failed install emits `error` synchronously from inside this call.
     this.updater?.quitAndInstall(true, true);
-    return true;
+    return this.restartPending;
   }
 }

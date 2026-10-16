@@ -180,6 +180,32 @@ describe('UpdateService.restart over running work', () => {
     expect(confirm).toHaveBeenCalledTimes(1);
   });
 
+  it('an install that fails after Quit takes the approval back and offers Restart again', async () => {
+    const running = { ...idle, scripts: 1 };
+    const { svc, ee, updater, confirm, gate, emitted } = await ready({ running, confirm: async () => true });
+    // electron-updater reports every failed install through its error event,
+    // from inside quitAndInstall, and then does not quit.
+    updater.quitAndInstall.mockImplementation(() => {
+      ee.emit('error', new Error('No update filepath provided'));
+    });
+
+    await expect(svc.restart()).resolves.toBe(false);
+    expect(gate.check()).toBe('hold');
+    expect(svc.getState()).toEqual({ status: 'ready', version: '1.2.3' });
+    expect(emitted).toEqual([{ status: 'ready', version: '1.2.3' }]);
+
+    // The next attempt asks again rather than riding the old yes.
+    await svc.restart();
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it('an updater error with no restart under way leaves an earlier approval alone', async () => {
+    const { ee, gate } = await ready({ running: { ...idle, scripts: 1 }, confirm: async () => true });
+    await gate.ask();
+    ee.emit('error', new Error('bad feed'));
+    expect(gate.check()).toBe('allow');
+  });
+
   it('a second restart while the question is open asks nothing more and installs nothing', async () => {
     let answer: (yes: boolean) => void = () => {};
     const { svc, updater, confirm } = await ready({

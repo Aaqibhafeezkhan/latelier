@@ -131,6 +131,16 @@ describe('createQuitGate', () => {
     expect(confirm).toHaveBeenCalledTimes(2);
   });
 
+  it('reset takes back a yes, so the next quit over running work asks again', async () => {
+    const { gate: g, confirm } = gate(busy);
+    confirm.mockResolvedValue(true);
+    await g.ask();
+    expect(g.check()).toBe('allow');
+    g.reset();
+    expect(g.check()).toBe('hold');
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
   it('skips the question for a system shutdown', () => {
     const { gate: g, confirm } = gate(busy);
     g.markSystemShutdown();

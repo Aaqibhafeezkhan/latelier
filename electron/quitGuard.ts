@@ -48,6 +48,8 @@ export interface QuitGate {
   ask(): Promise<boolean>;
   /** The system is shutting down: the work goes either way, so nothing is asked. */
   markSystemShutdown(): void;
+  /** Takes back a yes whose quit never happened, so the next attempt asks again. */
+  reset(): void;
 }
 
 export function createQuitGate(deps: {
@@ -73,6 +75,9 @@ export function createQuitGate(deps: {
     },
     markSystemShutdown() {
       systemShutdown = true;
+    },
+    reset() {
+      confirmed = false;
     },
   };
 }
