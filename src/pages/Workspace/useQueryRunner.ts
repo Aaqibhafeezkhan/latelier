@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CollectionTabState, ValType } from '@shared/types';
+import type { CollectionTabState, LastRun, ValType } from '@shared/types';
 import { api, getErrorMessage } from '../../api/atelier';
 import { invalidateRecentValuesCache } from '../../features/fieldSuggestions/sources';
 import { toDisplayValue } from '../../utils/displayValue';
@@ -140,6 +140,10 @@ export function useQueryRunner({
   // The cancelToken currently owning `target.id`'s in-flight find, so
   // `cancel()` and a superseding `run()` know what to hand `query:cancel`.
   const cancelTokensRef = useRef<Map<string, string>>(new Map());
+  // The last `lastRun` the runner wrote per target. A late plan lands only on
+  // the run that wrote it: a newer run that wrote nothing (cancelled before
+  // its find settled) leaves the screen on this run, and its plan is still true.
+  const lastWrittenRef = useRef<Map<string, LastRun>>(new Map());
   const loadingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
@@ -203,7 +207,10 @@ export function useQueryRunner({
       runTokenRef.current.set(target.id, runToken);
       const cancelToken = crypto.randomUUID();
       cancelTokensRef.current.set(target.id, cancelToken);
-      const patchState = patchRef.current;
+      const patchState = (id: string, patch: Partial<CollectionTabState>) => {
+        if (patch.lastRun) lastWrittenRef.current.set(id, patch.lastRun);
+        patchRef.current(id, patch);
+      };
       const recordEvent = recordRef.current;
       const requested: CollectionTabState = override
         ? { ...target.state, ...override }
@@ -317,14 +324,29 @@ export function useQueryRunner({
         const effectiveHasMore =
           findResult.hasMore &&
           (userLimit === null || skip + limit < userLimit);
-        patchState(target.id, {
-          lastRun: {
-            documents: findResult.documents,
-            durationMs: findResult.durationMs,
-            ranAt: new Date().toISOString(),
-          },
-          lastRunHasMore: effectiveHasMore,
-        });
+        const lastRun: LastRun = {
+          documents: findResult.documents,
+          durationMs: findResult.durationMs,
+          ranAt: new Date().toISOString(),
+        };
+        patchState(target.id, { lastRun, lastRunHasMore: effectiveHasMore });
+        // Fire-and-forget, like the count below: the plan badge's data. The
+        // result never waits on it, and a failed explain only means no badge.
+        api.query
+          .explain({
+            connectionId: target.connectionId,
+            dbName: target.dbName,
+            collection: target.collection,
+            filter,
+            sort: compiled.sort,
+            projection: compiled.projection,
+            verbosity: 'queryPlanner',
+          })
+          .then((res) => {
+            if (lastWrittenRef.current.get(target.id) !== lastRun) return;
+            patchState(target.id, { lastRun: { ...lastRun, plan: res.plan } });
+          })
+          .catch((err: unknown) => console.warn('[query] plan explain failed', err));
         // Fire-and-forget: persists the values this run's conditions actually
         // carried for the value-suggestion popover. Never
         // blocks or fails the run itself — main re-filters by op and secret

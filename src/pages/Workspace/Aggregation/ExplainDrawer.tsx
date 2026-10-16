@@ -8,6 +8,7 @@ import { copyToClipboard } from '../../../utils/clipboard';
 import { useLatest } from '../../../commands/useLatest';
 import { summarizeExplain } from '../../../utils/explainSummary';
 import { JsonTree } from './JsonTree';
+import { PlanTree } from './PlanTree';
 import type { ExplainVerbosity } from '@shared/types';
 
 /** Keys visually emphasized in the plan tree — the fields the summary strip
@@ -68,6 +69,13 @@ interface Props {
    * drawer and hands control back.
    */
   onCreateIndex?: () => void;
+  /**
+   * A plan the caller already holds (the result bar's plan badge). Shown
+   * instead of fetching on open; changing the verbosity fetches as usual.
+   */
+  initialPlan?: unknown;
+  /** The plan describes an earlier run than the query now on screen; the title says so. */
+  stale?: boolean;
 }
 
 export function ExplainDrawer({
@@ -76,13 +84,18 @@ export function ExplainDrawer({
   runExplain,
   onCancelToken,
   onCreateIndex,
+  initialPlan,
+  stale,
 }: Props) {
   const T = themeVars;
   const [verbosity, setVerbosity] = React.useState<ExplainVerbosity>(
     initialVerbosity ?? 'queryPlanner',
   );
   const [loading, setLoading] = React.useState(false);
-  const [plan, setPlan] = React.useState<unknown | null>(null);
+  const [plan, setPlan] = React.useState<unknown | null>(initialPlan ?? null);
+  // State, not a ref flipped inside the effect: StrictMode double-invokes the
+  // effect on mount, and a ref set by the first run would let the second fetch.
+  const [verbosityTouched, setVerbosityTouched] = React.useState(false);
   const [writeOmitted, setWriteOmitted] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const [viewMode, setViewMode] = React.useState<'tree' | 'raw'>('tree');
@@ -107,7 +120,11 @@ export function ExplainDrawer({
   // The drawer has nothing to save, so every close is a dismiss.
   const close = useDialogFocusReturn(onClose);
 
+  // Fixed at mount: a re-run replacing the badge's plan (even with none, until
+  // its own explain lands) while the drawer is open must not start a fetch.
+  const [hasInitialPlan] = React.useState(initialPlan !== undefined);
   React.useEffect(() => {
+    if (hasInitialPlan && !verbosityTouched) return;
     const token = crypto.randomUUID();
     let cancelled = false;
     // Snapshot at effect-setup time (not read live inside cleanup) so
@@ -134,7 +151,7 @@ export function ExplainDrawer({
       cancelled = true;
       onCancelTokenSnapshot?.(token);
     };
-  }, [verbosity, runExplainRef, onCancelTokenRef]);
+  }, [verbosity, verbosityTouched, hasInitialPlan, runExplainRef, onCancelTokenRef]);
 
   const summary = React.useMemo(() => summarizeExplain(plan), [plan]);
 
@@ -181,7 +198,7 @@ export function ExplainDrawer({
       onClose={close}
       position="right"
       size={520}
-      title="Explain plan"
+      title={stale ? 'Explain plan (not current)' : 'Explain plan'}
       // Mantine's body is a plain padded block, so the `flex: 1` on the
       // scrolling plan output below has no flex context to resolve against: it
       // would collapse to its intrinsic height and the Copy/Download footer
@@ -209,7 +226,10 @@ export function ExplainDrawer({
         >
           <select
             value={verbosity}
-            onChange={(e) => setVerbosity(e.target.value as ExplainVerbosity)}
+            onChange={(e) => {
+              setVerbosity(e.target.value as ExplainVerbosity);
+              setVerbosityTouched(true);
+            }}
             aria-label="Verbosity"
             style={{
               fontSize: 11,
@@ -351,6 +371,7 @@ export function ExplainDrawer({
                   </div>
                 </div>
               )}
+              <PlanTree plan={plan} />
               {viewMode === 'raw' ? (
                 <pre
                   // Handle for the raw-vs-tree assertions. They used to reach
