@@ -108,6 +108,41 @@ describe('StructureView — indexes above schema, one pane', () => {
   });
 });
 
+describe('SchemaView — sample size is bounded by what meta:sampleSchema accepts', () => {
+  it('offers exactly 50, 100 and 200', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { sampleSchema: async () => ({ docs: [] }) },
+    });
+    renderStructure();
+
+    const select = (await screen.findByLabelText('Sample size')) as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['50', '100', '200']);
+  });
+
+  it('samples at the bound when a restored tab carries a size the channel would refuse', async () => {
+    const sampleSchema = vi.fn(async () => ({ docs: [{ sku: 'a' }] }));
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { sampleSchema },
+    });
+    const entries: SchemaSampleEntry[] = [{ path: 'sku', frequency: 1, types: { string: 3 } }];
+    renderStructure({
+      ...DEFAULT_SCHEMA_TAB_STATE,
+      sampleSize: 500,
+      entries,
+      sampledCount: 3,
+      ranAt: '2026-04-21T00:00:00.000Z',
+    });
+
+    const refreshButtons = await screen.findAllByRole('button', { name: 'Refresh' });
+    await userEvent.click(refreshButtons[refreshButtons.length - 1]!);
+
+    await waitFor(() => expect(sampleSchema).toHaveBeenCalledTimes(1));
+    expect(sampleSchema).toHaveBeenCalledWith(expect.objectContaining({ size: 200 }));
+  });
+});
+
 // ─── Header count on return to Documents (PanelBody's structural claim) ────
 
 const now = '2026-04-21T12:00:00.000Z';
