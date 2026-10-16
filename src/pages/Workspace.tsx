@@ -75,7 +75,16 @@ function WorkspaceInner() {
   // The navigator's tree, owned here: it outlives a collapsed sidebar and the
   // palette's namespace commands read the same cache.
   const navigatorData = useNavigatorData();
-  useNavigatorStatusSync(navigatorData);
+  // A Connection that came back after a disconnect: its cached databases and
+  // collections predate the gap, so the palette's next sweep of it re-lists
+  // them all.
+  const reconnectedRef = React.useRef(new Set<string>());
+  const [reconnects, setReconnects] = React.useState(0);
+  const onNavigatorReconnect = React.useCallback((id: string) => {
+    reconnectedRef.current.add(id);
+    setReconnects((n) => n + 1);
+  }, []);
+  useNavigatorStatusSync(navigatorData, onNavigatorReconnect);
   const {
     prefsReady,
     leftWidth,
@@ -747,6 +756,15 @@ function WorkspaceInner() {
   });
   React.useEffect(() => {
     if (!focusedConnectionId || !focusedIsConnected) return;
+    if (reconnectedRef.current.delete(focusedConnectionId)) {
+      // The expanded databases were already re-listed by the status sync.
+      const id = focusedConnectionId;
+      const expanded = ownGet(navigatorTree.expanded, id) ?? {};
+      void loadDbs(id, { force: true }).then((dbs) => {
+        for (const d of dbs ?? []) if (!ownGet(expanded, d.name)) void loadColls(id, d.name);
+      });
+      return;
+    }
     const c = focusedCache;
     if (!c?.dbs) {
       if (!c?.dbsLoading && !c?.err) void loadDbs(focusedConnectionId);
@@ -759,14 +777,23 @@ function WorkspaceInner() {
       done.add(d.name);
       void loadColls(focusedConnectionId, d.name);
     }
-  }, [focusedConnectionId, focusedIsConnected, focusedCache, loadDbs, loadColls]);
+  }, [
+    focusedConnectionId,
+    focusedIsConnected,
+    focusedCache,
+    loadDbs,
+    loadColls,
+    reconnects,
+    navigatorTree.expanded,
+  ]);
+  // A disconnected Connection's cache is a snapshot that can't be opened from.
   const paletteCollections = React.useMemo(() => {
     const c = focusedCache;
-    if (!c?.dbs) return [];
+    if (!focusedIsConnected || !c?.dbs) return [];
     return c.dbs.flatMap((d) =>
       (ownGet(c.colls, d.name) ?? []).map((x) => ({ db: d.name, coll: x.name })),
     );
-  }, [focusedCache]);
+  }, [focusedCache, focusedIsConnected]);
 
   const collectionCommands = React.useMemo(
     () =>

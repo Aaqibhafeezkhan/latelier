@@ -28,6 +28,7 @@ import {
   GENERIC_CONNECT_ERROR,
   useNavigatorData,
   useNavigatorStatusSync,
+  type LoadOptions,
   type NavigatorData,
 } from './useNavigatorData';
 import { emptyCache } from './navigatorTreeReducer';
@@ -401,33 +402,37 @@ export function DbCollectionNavigator({
   );
 
   const refreshDb = React.useCallback(
-    (id: string, dbName: string) => {
-      // Dedup a rapid double-click: loadColls's own gate doesn't prevent the
-      // listCollections call itself. `ownGet`, not `?.` — a hostile `id` can
-      // resolve to a truthy inherited Object.prototype member.
+    (id: string, dbName: string, opts: LoadOptions = {}) => {
+      // A refresh after a change (`force`) must see that change, so it never
+      // joins a listing already in flight. A manual one dedups a rapid
+      // double-click: loadColls's own gate doesn't prevent the listCollections
+      // call itself. `ownGet`, not `?.` — a hostile `id` can resolve to a
+      // truthy inherited Object.prototype member.
       const c = ownGet(caches, id);
-      if (c && ownGet(c.collsLoading, dbName)) return;
-      void loadColls(id, dbName);
+      if (!opts.force && c && ownGet(c.collsLoading, dbName)) return;
+      void loadColls(id, dbName, opts);
     },
     [caches, loadColls],
   );
 
   // Re-populates every previously-expanded DB (except the active one, already
-  // re-fetched elsewhere) after a whole-connection refresh. Keyed by
-  // connectionId so an in-flight refresh on one Connection can't block another.
+  // re-fetched elsewhere) after a whole-connection refresh. Its loads are
+  // forced: an emptied cache means the old in-flight answers are not wanted.
+  // A manual refresh is skipped while one runs (keyed by connectionId, so one
+  // Connection can't block another); a refresh after a change (`force`) never is.
   const refreshInFlightRef = React.useRef<Set<string>>(new Set());
   const refreshAll = React.useCallback(
-    async (id: string) => {
-      if (refreshInFlightRef.current.has(id)) return;
+    async (id: string, opts: LoadOptions = {}) => {
+      if (!opts.force && refreshInFlightRef.current.has(id)) return;
       refreshInFlightRef.current.add(id);
       try {
         const previouslyExpanded = ownGet(expandedRef.current, id) ?? {};
         dispatch({ type: 'cacheReset', id });
-        const dbs = await loadDbs(id);
+        const dbs = await loadDbs(id, { force: true });
         const pending: Promise<void>[] = [];
         for (const db of dbs ?? []) {
           if (ownGet(previouslyExpanded, db.name) && db.name !== activeDbNameRef.current) {
-            pending.push(loadColls(id, db.name));
+            pending.push(loadColls(id, db.name, { force: true }));
           }
         }
         await Promise.allSettled(pending);

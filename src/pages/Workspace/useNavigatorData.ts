@@ -12,6 +12,11 @@ const EMPTY_DB_RETRY_DELAY_MS = 300;
 
 export type NavigatorData = ReturnType<typeof useNavigatorData>;
 
+/** `force`: start a fresh load even when one is already in flight. */
+export interface LoadOptions {
+  force?: boolean;
+}
+
 /**
  * The navigator's tree state and its two loaders, owned above the navigator so
  * the cache outlives a collapsed sidebar and the command palette reads the same
@@ -26,19 +31,29 @@ export function useNavigatorData() {
   // Two callers asking in the same tick (the navigator's mount effect and the
   // palette's sweep both see an empty cache) share one IPC round trip. The
   // reducer's own loading flags can't stop the second call: both read the
-  // same render's snapshot.
-  const inFlight = React.useRef(new Map<string, Promise<unknown>>());
-  const once = React.useCallback(<T,>(key: string, run: () => Promise<T>): Promise<T> => {
-    const pending = inFlight.current.get(key);
-    if (pending) return pending as Promise<T>;
-    const p = run().finally(() => inFlight.current.delete(key));
-    inFlight.current.set(key, p);
-    return p;
-  }, []);
+  // same render's snapshot. A `force` load (a refresh after a change) never
+  // joins an older one: it starts its own, and the older one's late result is
+  // discarded (`isCurrent` turns false) so it cannot overwrite the newer one.
+  const inFlight = React.useRef(new Map<string, { p: Promise<unknown> }>());
+  const once = React.useCallback(
+    <T,>(key: string, force: boolean, run: (isCurrent: () => boolean) => Promise<T>): Promise<T> => {
+      const pending = inFlight.current.get(key);
+      if (pending && !force) return pending.p as Promise<T>;
+      const entry: { p: Promise<unknown> } = { p: Promise.resolve() };
+      const isCurrent = () => inFlight.current.get(key) === entry;
+      inFlight.current.set(key, entry);
+      const p = run(isCurrent).finally(() => {
+        if (isCurrent()) inFlight.current.delete(key);
+      });
+      entry.p = p;
+      return p;
+    },
+    [],
+  );
 
   const loadDbs = React.useCallback(
-    (id: string): Promise<DbInfo[] | null> =>
-      once(`dbs\u0000${id}`, async () => {
+    (id: string, opts: LoadOptions = {}): Promise<DbInfo[] | null> =>
+      once(`dbs\u0000${id}`, !!opts.force, async (isCurrent) => {
         dispatch({ type: 'dbsLoadStart', id });
         try {
           let rows = await api.meta.listDatabases({ connectionId: id });
@@ -51,9 +66,11 @@ export function useNavigatorData() {
             if (!isMounted()) return null;
             rows = await api.meta.listDatabases({ connectionId: id });
           }
+          if (!isCurrent()) return null;
           dispatch({ type: 'dbsLoadSuccess', id, dbs: rows });
           return rows;
         } catch (e) {
+          if (!isCurrent()) return null;
           const err: IpcError = isIpcError(e)
             ? e
             : { code: 'INTERNAL', message: String(e) };
@@ -65,8 +82,8 @@ export function useNavigatorData() {
   );
 
   const loadColls = React.useCallback(
-    (id: string, dbName: string): Promise<void> =>
-      once(`colls\u0000${id}\u0000${dbName}`, async () => {
+    (id: string, dbName: string, opts: LoadOptions = {}): Promise<void> =>
+      once(`colls\u0000${id}\u0000${dbName}`, !!opts.force, async (isCurrent) => {
         dispatch({ type: 'collsLoadStart', id, dbName });
         try {
           const rows = await api.meta.listCollections({ connectionId: id, dbName });
@@ -74,9 +91,9 @@ export function useNavigatorData() {
           const sorted = [...rows].sort((a, b) =>
             a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
           );
-          dispatch({ type: 'collsLoadSuccess', id, dbName, colls: sorted });
+          if (isCurrent()) dispatch({ type: 'collsLoadSuccess', id, dbName, colls: sorted });
         } catch {
-          dispatch({ type: 'collsLoadError', id, dbName });
+          if (isCurrent()) dispatch({ type: 'collsLoadError', id, dbName });
         }
       }),
     [once, dispatch],
@@ -88,18 +105,24 @@ export function useNavigatorData() {
 /**
  * Keeps a tree in step with the connection pool's status stream: connect
  * errors in and out, and a reconnect background-refreshes that Connection's
- * previously-expanded DBs. A Connection reconnecting into an empty tree opens
- * its root — only when nothing is already expanded. Called by whoever owns the
- * tree; `null` subscribes nothing, so a tree never has two writers.
+ * previously-expanded DBs, then calls `onReconnect` with its id. A Connection
+ * reconnecting into an empty tree opens its root — only when nothing is
+ * already expanded. Called by whoever owns the tree; `null` subscribes
+ * nothing, so a tree never has two writers.
  */
-export function useNavigatorStatusSync(nav: NavigatorData | null) {
+export function useNavigatorStatusSync(
+  nav: NavigatorData | null,
+  onReconnect?: (connectionId: string) => void,
+) {
   const dispatch = nav?.dispatch;
   const loadColls = nav?.loadColls;
   const expanded = nav?.tree.expanded;
   const expandedRef = React.useRef(expanded);
+  const onReconnectRef = React.useRef(onReconnect);
   React.useEffect(() => {
     expandedRef.current = expanded;
-  }, [expanded]);
+    onReconnectRef.current = onReconnect;
+  }, [expanded, onReconnect]);
   // Set on 'disconnected'/'error', consumed on 'connected'.
   const sawDisconnectRef = React.useRef<Set<string>>(new Set());
 
@@ -127,6 +150,7 @@ export function useNavigatorStatusSync(nav: NavigatorData | null) {
             void loadColls(runtime.id, db);
           }
           sawDisconnectRef.current.delete(runtime.id);
+          onReconnectRef.current?.(runtime.id);
         }
       }
     });

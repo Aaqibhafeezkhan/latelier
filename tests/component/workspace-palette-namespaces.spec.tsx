@@ -100,6 +100,12 @@ function mount(
     collection: {
       create: async (input) => ({ name: (input as { collection: string }).collection }),
     },
+    database: {
+      drop: async ({ connectionId, dbName }: { connectionId: string; dbName: string }) => {
+        delete server[connectionId]?.[dbName];
+        return { dropped: true as const };
+      },
+    },
   });
   render(
     <MemoryRouter initialEntries={['/workspace']}>
@@ -331,6 +337,112 @@ describe('the palette shares the navigator’s cache', () => {
     openPalette();
     search('invoices');
     await waitFor(() => expect(openRows()).toEqual(['Open: shop.invoices']));
+  });
+});
+
+describe('namespace rows follow the focused connection’s status', () => {
+  it('lists no namespace rows while the focused connection is disconnected', async () => {
+    const { listCollections } = mount();
+    await settled(listCollections);
+
+    emit({ id: 'c1', status: 'disconnected' });
+    openPalette();
+    search('Open:');
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(openRows()).toEqual([]);
+  });
+
+  it('re-lists every database of the connection after a reconnect', async () => {
+    const server = {
+      c1: { shop: ['orders'], crm: ['leads'] } as Record<string, string[]>,
+    };
+    const { listCollections } = mount(server);
+    await settled(listCollections);
+
+    emit({ id: 'c1', status: 'disconnected' });
+    server.c1.crm.push('contacts');
+    server.c1.billing = ['invoices'];
+    emit({ id: 'c1', status: 'connected' });
+
+    openPalette();
+    search('Open:');
+    await waitFor(() =>
+      expect(openRows().sort((a, b) => a.localeCompare(b))).toEqual([
+        'Open: billing.invoices',
+        'Open: crm.contacts',
+        'Open: crm.leads',
+        'Open: shop.orders',
+      ]),
+    );
+  });
+});
+
+describe('a refresh after a change never joins an older listing', () => {
+  it('lists the databases again after a drop, while an older listing is still in flight', async () => {
+    const server = {
+      c1: { shop: ['orders'], crm: ['leads'] } as Record<string, string[]>,
+    };
+    const { listCollections, listDatabases } = mount(server);
+    await settled(listCollections);
+
+    // The reconnect's database listing hangs, answering with the list as it
+    // was before the drop.
+    let releaseStale: () => void = () => {};
+    listDatabases.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseStale = () => resolve([db('shop'), db('crm')]);
+        }),
+    );
+    emit({ id: 'c1', status: 'disconnected' });
+    emit({ id: 'c1', status: 'connected' });
+    await waitFor(() => expect(listDatabases).toHaveBeenCalledTimes(2));
+
+    fireEvent.contextMenu(screen.getByTestId('nav-db-crm'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Drop database' }));
+    await userEvent.type(await screen.findByLabelText('Confirm database name'), 'crm');
+    await userEvent.click(screen.getByRole('button', { name: 'Drop database' }));
+
+    await waitFor(() => expect(listDatabases).toHaveBeenCalledTimes(3));
+    await screen.findByTestId('nav-db-shop');
+    await waitFor(() => expect(screen.queryByTestId('nav-db-crm')).toBeNull());
+    await act(async () => {
+      releaseStale();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.queryByTestId('nav-db-crm')).toBeNull();
+  });
+  it('lists the collections again after a create, while an older listing is still in flight', async () => {
+    const server = { c1: { shop: ['orders'], crm: ['leads'] } };
+    const { listCollections } = mount(server);
+    await settled(listCollections);
+
+    // Expanding crm revalidates it; that listing hangs on the old answer.
+    let releaseStale: () => void = () => {};
+    listCollections.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseStale = () => resolve([coll('leads')]);
+        }),
+    );
+    const calls = listCollections.mock.calls.length;
+    fireEvent.click(screen.getByTestId('nav-db-crm'));
+    await waitFor(() => expect(listCollections).toHaveBeenCalledTimes(calls + 1));
+
+    fireEvent.contextMenu(screen.getByTestId('nav-db-crm'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Create collection' }));
+    await userEvent.type(await screen.findByLabelText('Collection name'), 'contacts');
+    server.c1.crm.push('contacts');
+    await userEvent.click(screen.getByText('Create collection'));
+
+    await screen.findByTestId('nav-coll-crm-contacts');
+    await act(async () => {
+      releaseStale();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.getByTestId('nav-coll-crm-contacts')).toBeTruthy();
   });
 });
 
