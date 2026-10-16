@@ -15,7 +15,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['lcovonly'],
-      include: ['electron/**', 'src/**', 'shared/**'],
+      include: ['{electron,src,shared}/**/*.{ts,tsx}'],
     },
     projects: [
       {
