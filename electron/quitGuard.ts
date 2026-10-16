@@ -2,16 +2,22 @@
 export interface RunningWork {
   scripts: number;
   shellCommands: number;
+  imports: number;
+  aggregations: number;
 }
 
 const plural = (n: number, noun: string): string => `${n} running ${noun}${n === 1 ? '' : 's'}`;
 
 /** What quitting would stop, as a sentence, or null when nothing is running. */
-export function describeRunningWork({ scripts, shellCommands }: RunningWork): string | null {
+export function describeRunningWork({ scripts, shellCommands, imports, aggregations }: RunningWork): string | null {
   const parts: string[] = [];
   if (scripts > 0) parts.push(plural(scripts, 'script'));
   if (shellCommands > 0) parts.push(plural(shellCommands, 'shell command'));
-  return parts.length === 0 ? null : `This will stop ${parts.join(' and ')}.`;
+  if (imports > 0) parts.push(plural(imports, 'import'));
+  if (aggregations > 0) parts.push(plural(aggregations, 'aggregation'));
+  return parts.length === 0
+    ? null
+    : `This will stop ${new Intl.ListFormat('en').format(parts)}.`;
 }
 
 /**

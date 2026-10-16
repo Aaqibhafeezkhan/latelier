@@ -96,6 +96,8 @@ export class ImportService {
   // map) so `cancel()` can flip it after `importFile` has already captured
   // its reference, the same shape as QueryService's `active` map.
   private active = new Map<string, { cancelled: boolean }>();
+  // Imports in flight, token or not; `active` only holds tokened ones.
+  private running = 0;
 
   constructor(
     pool: MongoPool,
@@ -144,6 +146,7 @@ export class ImportService {
     const token = input.cancelToken;
     const state = token ? { cancelled: false } : undefined;
     if (token && state) this.active.set(token, state);
+    this.running++;
 
     // Registered before the file is read, so a cancel clicked while a large
     // array is still parsing is not lost; the outer finally unregisters it
@@ -233,8 +236,14 @@ export class ImportService {
       }
       return finish();
     } finally {
+      this.running--;
       if (token) this.active.delete(token);
     }
+  }
+
+  /** Imports in flight, for the quit confirmation. */
+  runningCount(): number {
+    return this.running;
   }
 
   /** JSON arrays and CSV are parsed whole, so their size is capped; JSONL streams. */

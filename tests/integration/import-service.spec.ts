@@ -231,6 +231,36 @@ describe('ImportService.importFile', () => {
     await expect(run(p)).rejects.toMatchObject({ code: 'NETWORK', message: expect.stringMatching(/connection reset/), details: { insertedCount: 2 } });
   });
 
+  describe('runningCount', () => {
+    const jsonl = (n: number) => Array.from({ length: n }, (_, i) => JSON.stringify({ _id: i })).join('\n');
+
+    it('counts an import in flight, tokened or not, and not after it ends', async () => {
+      const p = await file('rc.jsonl', jsonl(3));
+      const seen: number[] = [];
+      const spy = vi.spyOn(Collection.prototype, 'insertMany').mockImplementation(async () => {
+        seen.push(svc.runningCount());
+        return { insertedCount: 3, insertedIds: {}, acknowledged: true } as never;
+      });
+      expect(svc.runningCount()).toBe(0);
+      await run(p);
+      await svc.importFile({ connectionId: 'c1', dbName, collection: coll, path: p, cancelToken: 'rc-tok' });
+      spy.mockRestore();
+      expect(seen).toEqual([1, 1]);
+      expect(svc.runningCount()).toBe(0);
+    });
+
+    it('stops counting a cancelled import and one that fails to parse', async () => {
+      svc = new ImportService(pool, { batchSize: 1, emit: () => svc.cancel('rc-cancel') });
+      const p = await file('rc2.jsonl', jsonl(3));
+      const report = await svc.importFile({ connectionId: 'c1', dbName, collection: coll, path: p, cancelToken: 'rc-cancel' });
+      expect(report.cancelled).toBe(true);
+      expect(svc.runningCount()).toBe(0);
+      const bad = await file('rc3.json', '[{"_id":1},');
+      await expect(run(bad)).rejects.toMatchObject({ code: 'VALIDATION' });
+      expect(svc.runningCount()).toBe(0);
+    });
+  });
+
   describe('cancel', () => {
     it('cancels after the first batch of a 2500-doc file, keeping only what landed', async () => {
       const events: { processed: number; inserted: number; failed: number }[] = [];
