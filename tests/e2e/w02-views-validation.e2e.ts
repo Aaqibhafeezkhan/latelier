@@ -78,8 +78,9 @@ test('Save as view from the builder, then Modify view from the navigator', async
 
       await ws.collectionRow('shop', 'v1').click();
       await expect(win.getByText('banana-002').first()).toBeVisible({ timeout: 8000 });
-      await expect(win.getByText('apple-001')).toHaveCount(0);
-      await expect(win.getByText('cherry-003')).toHaveCount(0);
+      // Visible matches only: the orders tab opened earlier may keep its panel mounted.
+      await expect(win.getByText('apple-001').filter({ visible: true })).toHaveCount(0);
+      await expect(win.getByText('cherry-003').filter({ visible: true })).toHaveCount(0);
     });
   });
 });
