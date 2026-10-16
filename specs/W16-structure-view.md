@@ -198,16 +198,23 @@ So the badge names the plan; it does not count documents. Counts stay in
 signal that appears only sometimes is one users learn to ignore rather than
 read, which is why a duration-threshold variant is rejected too.
 
-### 3.2 No plan cache
+### 3.2 The plan is kept across a page change, and nowhere else
 
 `ExplainInput` is `Omit<FindInput, 'limit' | 'skip' | 'cancelToken'>` plus
 verbosity. Paging changes only `skip` and `limit` — neither reaches the
-explain — so the plan is page-independent *by construction*, and re-explaining
-on each page re-asks a question with the same answer at negligible cost.
+explain — so the plan is page-independent *by construction*, and a page change
+that left the connection, database, collection, filter, sort, projection and
+limit as the last explained run had them reuses that run's plan instead of
+asking the server the same question again. The new page's result carries the
+plan from the start, so the badge never blinks off between pages.
 
-Caching it would be worse than useless: the moment the cached answer is most
-wrong is immediately after the user creates the missing index, which is the
-exact moment §4 is designed to produce. No cache.
+That is the whole cache, one plan per tab, and it is deliberately narrow. An
+explicit Run always explains, as does any run that changes the query, the
+collection or the limit, and a page change while the previous plan has not
+arrived yet. Anything broader would be worse than useless: the moment a cached
+answer is most wrong is immediately after the user creates the missing index,
+which is the exact moment §4 is designed to produce, and §4's flow ends in an
+explicit Run.
 
 ### 3.3 Content and placement
 
@@ -541,8 +548,9 @@ it is the smallest, and it puts the idea in the running app soonest.
   find; rows render regardless.
 - The badge is a button; activating it opens `ExplainDrawer` on the
   already-fetched plan.
-- The badge updates on every run, including page changes, and reflects a
-  newly created index without an app restart.
+- The badge follows every run, and reflects a newly created index without an
+  app restart. A page change keeps the plan of the same query and sends no
+  second explain; an explicit Run, or any change to the query, does.
 - While the result count is marked not current (X14 §5), the badge is
   dimmed on the same condition, and its accessible name says so in words
   (§3.4).
@@ -565,12 +573,17 @@ it is the smallest, and it puts the idea in the running app soonest.
 - Tiers 1–4 add no IPC channel. Their only contract change is the `activeView`
   enum in `electron/ipc/handlers/tabs.ts` widening in step with `CollectionView`
   (§7.1) — no channel gains, loses, or retypes any other field. Tier 5 adds
-  `meta:collectionDetails` (§13.2) and nothing else.
+  `meta:collectionDetails` (§13.2) and Tier 7 adds `collection:modify` (§15.3).
+  The base these tiers ship in adds two more contract changes of its own:
+  `conn:getUri` (the navigator's "Copy connection string") and the `viewOn` and
+  `pipeline` options on `collection:create` (Save as view).
 - No renderer import of a forbidden module; the suggestion module is pure
   and imports nothing from `electron/`.
 - No behavior change to `IndexService` or `QueryService`. Tiers 1–4 leave
-  `MetaService` unchanged; Tier 5 adds `collectionDetails` to it and leaves its
-  other methods' results as they were.
+  `MetaService` unchanged; Tier 5 adds `collectionDetails` to it. Its other
+  methods' results stay as they were, though `listCollections` now takes its
+  figures from the same storage-stats read as `collectionDetails` (§13.2) and
+  skips a view, which has no storage and which `$collStats` refuses.
 
 ## 10. Test cases
 
@@ -653,7 +666,10 @@ than clicking the strip:
 - a `COLLSCAN` shows `no index` with its warning treatment;
 - a rejected explain leaves rows rendered and no badge;
 - activating the badge opens the drawer;
-- a page change re-runs the explain and updates the badge;
+- a page change, or a page-size change, sends no second explain and the new
+  page keeps the badge; an explicit Run of the same query, a changed filter,
+  sort, projection, limit or collection, and a page change before the first
+  plan arrived, each explain again;
 - editing the filter to something `findProblem` refuses dims the badge beside
   the already-stale count, and its accessible name carries the same fact —
   the assertion is on the name, not the colour (§3.4).
@@ -744,7 +760,8 @@ A read channel taking `{ connectionId, dbName, collection }` and returning
 `MetaService.listCollections` and `collectionDetails` share one storage-stats
 read, so the `$collStats` call and its fallback exist once. A collection whose
 read fails is still listed, without figures, so one bad collection does not
-blank the navigator.
+blank the navigator. A view is listed without figures and without a
+`$collStats` call, which a view refuses.
 
 ### 13.3 Acceptance criteria
 
@@ -761,6 +778,13 @@ blank the navigator.
   the Indexes or Schema sections rendering.
 - A reply for a collection the tab has since left never overwrites the one
   on screen.
+- Creating or dropping an index in Structure, and modifying the view from the
+  navigator, read the details again, so the figures and `View on <source>` are
+  never older than the change. A reload captured for a collection the tab has
+  since left does nothing.
+- The collection header's document and index counts come from the same
+  `meta:collectionDetails` read, one collection rather than the whole database;
+  a figure the server did not report is hidden, never `0`.
 - `meta:collectionDetails` has its schema, preload binding, handler registration
   and shared type, and no `SECRET_INPUT` tag (the payload carries no secret).
 
@@ -892,7 +916,8 @@ select (off, strict, moderate) and a `Validation action` select (error, warn,
 errorAndLog), with Save and Cancel. `errorAndLog` round-trips when the server
 reports it; MongoDB 8.0.5 refuses it in `collMod`, and that refusal shows
 inline like any other. Save requires the text to parse as
-a JSON document (not an array, not `null`) and says so inline otherwise, with
+a JSON document (not an array, not `null`, not a bare EJSON value such as
+`{"$date":…}`, the same rule main applies) and says so inline otherwise, with
 no call. An emptied textarea saves `{}`, which clears the rules. The region
 renders for a plain collection only: a view has no validation rules, and the
 server refuses `collMod` validation options on a time-series collection

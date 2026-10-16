@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { StructureView } from '../../src/pages/Workspace/StructureView';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
+import { notifyCollectionChanged } from '../../src/state/collectionChanges';
 import { DEFAULT_SCHEMA_TAB_STATE } from '@shared/defaults';
 import type { CollectionDetails } from '@shared/ipc';
 import { ejsonParse, ejsonStringify } from '../../src/utils/ejson';
@@ -565,6 +566,9 @@ describe('StructureView — validation rules', () => {
   it.each([
     ['invalid JSON', '{"$jsonSchema":'],
     ['an array', '[1]'],
+    // Parses as JSON, but revives to a Date: main refuses it, so the client must too.
+    ['a bare $date sentinel', '{"$date":"2020-01-01T00:00:00Z"}'],
+    ['a bare $oid sentinel', '{"$oid":"507f1f77bcf86cd799439011"}'],
   ])('refuses %s inline without a call', async (_label, text) => {
     const modify = vi.fn(async () => ({ ok: true as const }));
     installAtelierMock({
@@ -582,6 +586,40 @@ describe('StructureView — validation rules', () => {
 
     expect((await within(validation).findByRole('alert')).textContent).toMatch(/JSON document/);
     expect(modify).not.toHaveBeenCalled();
+  });
+
+  it('shows the next collection in read mode when the tab moves on mid-edit', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: {
+        collectionDetails: async ({ collection }: { collection: string }) => ({
+          ...DETAILS,
+          name: collection,
+          options: { validator: RULES },
+        }),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+    const view = (collection: string) => (
+      <StructureView
+        connectionId="c1"
+        dbName="shop"
+        collection={collection}
+        state={DEFAULT_SCHEMA_TAB_STATE}
+        onPatch={vi.fn()}
+      />
+    );
+
+    const { rerender } = render(view('orders'));
+    const validation = await screen.findByRole('region', { name: 'Validation' });
+    await userEvent.click(await within(validation).findByRole('button', { name: 'Edit rules' }));
+    expect(within(validation).getByLabelText('Validator')).toBeTruthy();
+
+    rerender(view('customers'));
+
+    const next = await screen.findByRole('region', { name: 'Validation' });
+    await within(next).findByRole('button', { name: 'Edit rules' });
+    expect(within(next).queryByLabelText('Validator')).toBeNull();
   });
 
   it('shows a refused save inline and stays in edit mode', async () => {
@@ -726,24 +764,18 @@ describe('Structure view — header count on return to Documents', () => {
   // PanelBody only mounts `CollectionHeader` inside `view === 'documents'`
   // (it dims-not-unmounts the builder pane for agg/structure, but the
   // header itself is conditional). Leaving Structure and coming back to
-  // Documents therefore remounts it, which re-fetches `meta.listCollections`
+  // Documents therefore remounts it, which re-fetches `meta.collectionDetails`
   // for free — no dedicated refresh signal needed. This proves that claim
   // rather than assuming it.
   it('re-fetches the header count after Structure → Documents, with no signal wired up', async () => {
-    let call = 0;
-    const listCollections = vi.fn(async () => {
-      call += 1;
-      return [
-        {
-          name: 'coll',
-          type: 'collection' as const,
-          documentCount: call === 1 ? 10 : 25,
-          sizeBytes: 0,
-          indexCount: 1,
-          capped: false,
-        },
-      ];
-    });
+    let docCount = 10;
+    const collectionDetails = vi.fn(async () => ({
+      name: 'coll',
+      type: 'collection' as const,
+      capped: false,
+      stats: { documentCount: docCount, indexCount: 1 },
+      options: {},
+    }));
     installAtelierMock({
       tabs: {
         list: async () => [collectionTab()],
@@ -763,7 +795,7 @@ describe('Structure view — header count on return to Documents', () => {
           },
         ],
       },
-      meta: { listCollections, sampleSchema: async () => ({ docs: [] }) },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
       index: { list: async () => [] },
     });
 
@@ -773,22 +805,123 @@ describe('Structure view — header count on return to Documents', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => expect(screen.getByText('10')).toBeTruthy());
+    // Matched by the header's own text: Structure's statistics also print the count.
+    const headerStats = (n: number) =>
+      screen.getByText((_, el) => el?.textContent?.startsWith(`${n} docs in collection`) ?? false);
+    await waitFor(() => expect(headerStats(10)).toBeTruthy());
 
     await userEvent.click(screen.getByRole('tab', { name: /Structure/i }));
-    await waitFor(() => expect(screen.queryByText('10')).toBeNull());
-
-    // The navigator (DbCollectionNavigator) also fetches listCollections once,
-    // independently, to auto-expand the focused tab's db — its timing floats
-    // relative to these clicks (a 300ms empty-db retry can land it anywhere
-    // in this test), so the total call count isn't deterministic. Snapshot
-    // here and assert only that the Documents click itself caused a further
-    // call — that's the behaviour this test is about.
-    const callsBeforeReturn = listCollections.mock.calls.length;
+    await screen.findByRole('region', { name: 'Statistics' });
+    docCount = 25;
+    const callsBeforeReturn = collectionDetails.mock.calls.length;
 
     await userEvent.click(screen.getByRole('tab', { name: /Documents/i }));
 
-    await waitFor(() => expect(screen.getByText('25')).toBeTruthy());
-    expect(listCollections.mock.calls.length).toBeGreaterThan(callsBeforeReturn);
+    await waitFor(() => expect(headerStats(25)).toBeTruthy());
+    expect(collectionDetails.mock.calls.length).toBeGreaterThan(callsBeforeReturn);
+  });
+});
+
+describe('StructureView — the statistics header follows writes', () => {
+  const NAMED_INDEX: IndexInfo = { ...ID_INDEX, name: 'email_1', isIdIndex: false, key: [{ field: 'email', direction: 1 }] };
+  const withIndexCount = (indexCount: number): CollectionDetails => ({
+    ...DETAILS,
+    stats: { ...DETAILS.stats!, indexCount, totalIndexSizeBytes: 4096 * indexCount },
+  });
+
+  it('shows the new index count and size after an index is created', async () => {
+    let created = false;
+    installAtelierMock({
+      index: {
+        list: async () => (created ? [ID_INDEX, NAMED_INDEX] : [ID_INDEX]),
+        create: async () => {
+          created = true;
+          return { name: 'email_1' };
+        },
+      },
+      meta: {
+        collectionDetails: async () => withIndexCount(created ? 3 : 2),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('2 · 8.0 KB')).toBeTruthy());
+
+    await userEvent.click(screen.getByText('+ New index'));
+    await userEvent.type(await screen.findByLabelText('Field 1'), 'email');
+    await userEvent.click(screen.getByText('Create index'));
+
+    await waitFor(() => expect(within(stats).getByText('3 · 12.0 KB')).toBeTruthy());
+  });
+
+  it('shows the new index count after an index is dropped', async () => {
+    let dropped = false;
+    installAtelierMock({
+      index: {
+        list: async () => (dropped ? [ID_INDEX] : [ID_INDEX, NAMED_INDEX]),
+        drop: async () => {
+          dropped = true;
+          return { dropped: true as const };
+        },
+      },
+      meta: {
+        collectionDetails: async () => withIndexCount(dropped ? 1 : 2),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('2 · 8.0 KB')).toBeTruthy());
+
+    await userEvent.click(await screen.findByLabelText('Drop index email_1'));
+    await userEvent.type(await screen.findByLabelText('Confirm index name'), 'email_1');
+    await userEvent.click(screen.getByText('Drop').closest('button')!);
+
+    await waitFor(() => expect(within(stats).getByText('1 · 4.0 KB')).toBeTruthy());
+  });
+
+  it('shows the new source when its view is modified from the navigator', async () => {
+    let viewOn = 'src';
+    const collectionDetails = vi.fn(async () => ({
+      name: 'orders',
+      type: 'view' as const,
+      capped: false,
+      options: { viewOn, pipeline: '[]' },
+    }));
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
+    });
+
+    renderStructure();
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('View on src')).toBeTruthy());
+
+    viewOn = 'dst';
+    act(() => notifyCollectionChanged({ connectionId: 'c1', dbName: 'shop', collection: 'orders' }));
+
+    await waitFor(() => expect(within(stats).getByText('View on dst')).toBeTruthy());
+  });
+
+  it('ignores a change to another collection', async () => {
+    const collectionDetails = vi.fn(async () => DETAILS);
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
+    });
+
+    renderStructure();
+    await waitFor(() => expect(collectionDetails).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      notifyCollectionChanged({ connectionId: 'c1', dbName: 'shop', collection: 'customers' });
+      notifyCollectionChanged({ connectionId: 'c2', dbName: 'shop', collection: 'orders' });
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(collectionDetails).toHaveBeenCalledTimes(1);
   });
 });

@@ -50,6 +50,7 @@ export function StructureView({
         collection={collection}
         initialCreate={initialCreate}
         onInitialCreateConsumed={onInitialCreateConsumed}
+        onChanged={() => void reload()}
       />
       {/* The server refuses collMod rules on a view and on a time-series collection. */}
       {details?.type === 'collection' && (

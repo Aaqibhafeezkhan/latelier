@@ -115,21 +115,18 @@ describe('workspace doc dialogs (T2)', () => {
     // refetch at all. Deriving the count from actual insert calls makes any
     // refetch before the insert honestly return 1.
     let docCount = 1;
-    const listCollections = vi.fn(async () => [
-      {
-        name: 'orders',
-        type: 'collection' as const,
-        documentCount: docCount,
-        sizeBytes: 0,
-        indexCount: 1,
-        capped: false,
-      },
-    ]);
+    const collectionDetails = vi.fn(async () => ({
+      name: 'orders',
+      type: 'collection' as const,
+      capped: false,
+      stats: { documentCount: docCount, indexCount: 1 },
+      options: {},
+    }));
     const insert = vi.fn(async () => {
       docCount += 1;
       return { insertedId: 'x' };
     });
-    mount({ meta: { listCollections }, doc: { insert } });
+    mount({ meta: { collectionDetails }, doc: { insert } });
 
     // Matched by its own textContent ("N docs · 1 indexes") rather than a
     // bare digit — a bare "1" also matches pagination/row-count text
@@ -150,7 +147,7 @@ describe('workspace doc dialogs (T2)', () => {
     // header included — exactly once, whenever its own async prefs fetch
     // resolves, independently of any insert. Under full-suite load that
     // remount can land at an indeterminate point relative to the insert,
-    // so asserting a `listCollections` call count (however it's counted)
+    // so asserting a `collectionDetails` call count (however it's counted)
     // is inherently racy. The header text is what a user actually sees,
     // and it can only read "2" once a refetch has landed a fresh count.
     await waitFor(() => expect(headerStats(2)).toBeTruthy());

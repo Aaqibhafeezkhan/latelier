@@ -12,6 +12,7 @@ import {
   uninstallAtelierMock,
 } from '../helpers/atelierMock';
 import type { CollectionInfo } from '../../shared/ipc';
+import { onCollectionChanged } from '../../src/state/collectionChanges';
 
 function mountNavigator(props: Partial<DbCollectionNavigatorProps> = {}) {
   const baseProps: DbCollectionNavigatorProps = {
@@ -555,6 +556,9 @@ describe('DbCollectionNavigator — views and the connection string', () => {
     mountNavigator();
     await screen.findByText('recent');
     const initialCalls = listCollections.mock.calls.length;
+    // What an open Structure tab on the view listens for.
+    const changes: unknown[] = [];
+    const off = onCollectionChanged((c) => changes.push(c));
 
     fireEvent.contextMenu(screen.getByTestId('nav-coll-shop-recent'));
     const item = screen.getByRole('menuitem', { name: 'Modify view' });
@@ -580,6 +584,8 @@ describe('DbCollectionNavigator — views and the connection string', () => {
     );
     await waitFor(() => expect(listCollections.mock.calls.length).toBeGreaterThan(initialCalls));
     await waitFor(() => expect(screen.queryByLabelText('Pipeline')).toBeNull());
+    expect(changes).toEqual([{ connectionId: 'c1', dbName: 'shop', collection: 'recent' }]);
+    off();
   });
 
   it('"Modify view" refuses a pipeline that is not a JSON array, inline and without a call', async () => {

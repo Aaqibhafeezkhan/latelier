@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ContextMenuState } from '../../components/ContextMenu';
+import { notifyCollectionChanged } from '../../state/collectionChanges';
 
 type MenuState = ContextMenuState;
 
@@ -95,10 +96,11 @@ export function useNavigatorDialogs(deps: {
   const cancelModifyView = React.useCallback(() => setModifyViewTarget(null), []);
   const handleViewModified = React.useCallback(() => {
     if (!modifyViewTarget) return;
-    const { connectionId: cid, dbName: db } = modifyViewTarget;
+    const { connectionId: cid, dbName: db, collection } = modifyViewTarget;
     setModifyViewTarget(null);
-    refreshDb(cid, db);
-  }, [modifyViewTarget, refreshDb]);
+    // The navigator listens for this and refreshes the DB; an open Structure tab on the view reloads too.
+    notifyCollectionChanged({ connectionId: cid, dbName: db, collection });
+  }, [modifyViewTarget]);
 
   const cancelDropColl = React.useCallback(() => setDropCollTarget(null), []);
   const handleCollectionDropped = React.useCallback(() => {

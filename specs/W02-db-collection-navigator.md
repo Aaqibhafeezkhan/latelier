@@ -233,9 +233,9 @@ Same as collection row minus Rename (views are immutable by name), plus:
 
 | Item            | Icon | Destructive | IPC requirement                                |
 |-----------------|------|-------------|------------------------------------------------|
-| Duplicate view  | Copy | no          | `mongo:createCollection` with `viewOn` + `pipeline` |
+| Duplicate view  | Copy | no          | 🚧 not built (an open navigator issue tracks it); would call `collection:create` with `viewOn` + `pipeline` |
 | Modify view     | Edit | no          | ✅ `meta:collectionDetails` to prefill, `collection:modify` (`collMod`) to save. A dialog with a "Source collection" input and a plain "Pipeline" textarea (resizable), prefilled as readable JSON (`0`, not `{"$numberInt":"0"}`); a pipeline that is not a JSON array is refused inline. Escape, the close button, the backdrop and Cancel ask "Discard changes?" once either field differs from what was loaded, and nothing closes the dialog while a save is in flight. Saving refreshes the database |
-| Drop view       | Trash| **yes**     | `mongo:dropCollection` (§12) → W02a            |
+| Drop view       | Trash| **yes**     | ✅ `collection:drop` (§12)                      |
 
 #### Timeseries row
 
@@ -428,12 +428,11 @@ While any mutation IPC is in flight (drop / rename / create): affected row shows
 - Connection status (`connected` / `connecting` / `disconnected` / `error`) is reflected live in the dot color.
 - Navigator switches to the new connection when arriving via `openForConnection`; old tabs close; no NewTabPicker modal (§1b).
 - The three-column layout renders even with zero tabs — navigator is always the discovery surface.
+- The tab strip follows the mutations: dropping a collection or view closes its open tabs, dropping a database closes every tab on it, and renaming a collection re-points an open tab at the new name.
 
 ### Deferred (blocked on IPC / sub-specs)
 
-- Destructive actions (drop collection / drop DB / rename / create / duplicate view / modify view) go through confirmation modals per W02a–d. Today every destructive menu item is `disabled` with a "Coming soon" tooltip.
-- Action definitions are authored once per row kind in a shared `actions.ts` module. Currently each menu is built inline in the navigator; refactor lands when the first live mutation (W02d likely) is implemented.
-- Tab strip updates (close tabs on dropped namespace, rename tabs on namespace rename) — not exercised until mutation IPC lands.
+- Duplicate view is the one menu action not built yet (the open "Navigator: Duplicate view" issue tracks it); it stays out of the view menu until it is. Drop collection, drop database, rename, create and modify view are live and go through the confirmation modals and dialogs of W02a–d.
 - Inline per-DB error cards for `listCollections` failures (§8).
 - Keyboard stretch (Home / End are live; `*` expand-siblings and letter type-ahead remain deferred).
 
@@ -512,7 +511,7 @@ The destructive and creation flows each need their own spec before shipping:
 | W02c   | Rename collection modal + tab-namespace migration | `mongo:renameCollection` |
 | W02d   | Create collection modal (name + capped/timeseries/view options) | `mongo:createCollection` |
 
-Each sub-spec must follow the destructive-action convention in §5c. They can be authored in parallel; none of them block W02's context-menu skeleton from shipping (the menu items render as disabled with a tooltip until their backing IPC + modal land).
+Each sub-spec must follow the destructive-action convention in §5c. They can be authored in parallel; none of them block W02's context-menu skeleton from shipping (an item whose backing IPC + modal had not landed rendered disabled with a tooltip; all four have landed).
 
 ---
 
