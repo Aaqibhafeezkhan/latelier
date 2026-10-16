@@ -295,9 +295,9 @@ When the owning component unmounts, the commands disappear from the palette auto
 The MRU lives in `app_state['ui.commandPalette.mru']`, a `string[]` of command ids, most recent first, through the existing `prefs:get` / `prefs:set` channels. Main validates it as at most 16 strings of at most 512 characters each; the renderer keeps 8.
 
 - **Load.** The palette reads the key once on mount. Anything other than an array of strings is ignored. The stored ids are merged behind any command performed while the read was in flight.
-- **Save.** Each perform writes the new list. The seed itself is never written back.
+- **Save.** Each perform writes the new list, but not before the stored history has been read and merged: a command performed while the read is in flight is written together with what was stored, never alone over it. After a failed read nothing is written, so an unreadable history is never replaced. The seed itself is never written back.
 - **Unknown ids** are dropped at rank time, not at load: a command registered later in the session (a collection that finishes loading) still finds its place.
-- **Failures** of the read or the write are silent. The history is a convenience, and the palette works the same without it.
+- **Failures.** The history is a convenience, and the palette works the same without it. A failed read is logged with `console.warn`, as the theme's is; a failed write shows one error toast, as a layout write does.
 
 ## 8. Error handling
 
@@ -329,13 +329,17 @@ The MRU lives in `app_state['ui.commandPalette.mru']`, a `string[]` of command i
 - `commands-registry.spec.ts` — `add` / `list` / `subscribe`; duplicate ids replace and warn once; multiple `add` calls compose; the unregister fn returned by `add` removes only what it added.
 - `commands-rank.spec.ts` — fixture catalog + queries → expected order. Covers MRU precedence, prefix > substring, keyword fallback, the fuzzy (subsequence) last bucket, and `hideWhenEmptyQuery`.
 - `commands-when.spec.ts` — `when` returning false hides the command; `when` throwing is treated as false and warns once.
+- `shortcut-label.spec.ts` — `formatShortcut` writes Mac glyphs as Windows/Linux combinations in the platform's modifier order, passes a label without glyphs through, writes a bare modifier without a dangling plus, and leaves a glyph in the middle of a label alone.
 
 ### Component
 
 - `command-palette-shell.spec.tsx` — `⌘K` opens, Esc closes, click-outside closes; focus restored.
 - `command-palette-keyboard.spec.tsx` — arrow keys move cursor, Enter performs and closes.
 - `command-palette-search.spec.tsx` — typing filters; group headers hide when empty; "no matches" copy.
-- `command-palette-mru.spec.tsx` — the stored history seeds RECENT; a perform writes it back, newest first; unknown ids and malformed values are ignored; a failed read leaves an empty RECENT.
+- `command-palette-mru.spec.tsx` — the stored history seeds RECENT; a perform writes it back, newest first; unknown ids and malformed values are ignored; a failed read leaves an empty RECENT, is logged and is never written over; a perform before the read lands is written merged with the stored list; a failed write toasts.
+- `shortcuts-modal.spec.tsx` — the cheat sheet opens from the palette, on `mod+/` and `⌘/`, lists commands with their platform shortcut and the shortcuts that are not commands, files workspace-only and connection-form shortcuts under their own headings, ignores the key inside a text field, an editor or another dialog, and Escape closes it and returns focus; tooltips name the platform shortcut.
+- `workspace-palette-namespaces.spec.tsx` — `Open: <db>.<coll>` rows for the focused connection only, found by subsequence and not by the letters of "Open", reusing a tab; Recent per connection on an empty query; the rows read the navigator's own cache (one listing per database, kept while collapsed); a reconnect re-lists every database; a refresh after a change never joins an older listing; the sweep keeps at most 4 collection listings in flight and still reaches every database.
+- `workspace-palette-views.spec.tsx` — "Open Shell" opens the shell pane and then offers to close it; "Go to Schema" and "Go to Indexes" switch to the Structure view; no structure entries without a collection tab, and no shell entry without a focused connection.
 - `register-commands.spec.tsx` — `useRegisterCommands` registers on mount, unregisters on unmount, replaces on `deps` change.
 - `palette-context.spec.tsx` — context exposes the right `pathname` / `connectionId` / `activeTab` for each route fixture.
 
