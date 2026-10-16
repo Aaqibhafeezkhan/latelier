@@ -122,7 +122,7 @@ describe('useTheme — a theme that could not be saved says so', () => {
 
   it('two toggles in one tick flip the theme twice, writing light then dark', async () => {
     let toggle!: () => void;
-    const setTheme = vi.fn(async (_mode: ThemeMode) => undefined);
+    const setTheme = vi.fn<(mode: ThemeMode) => Promise<void>>(async () => undefined);
     installAtelierMock({
       prefs: { getTheme: async () => 'light', setTheme, onThemeChanged: () => () => {} },
     });
