@@ -96,7 +96,7 @@ Structure is a single vertically scrolling pane holding sections in order:
 1. **Statistics** — one collection's counts and sizes (§13).
 2. **Indexes** — the list, with create and drop.
 3. **Validation** — the validation rules, level and action, editable (§15).
-   Absent for a view.
+   Plain collections only.
 4. **Schema** — today's `SchemaView`, demoted from a view to a section, with
    per-field depth (§14).
 
@@ -878,21 +878,31 @@ enforces next to the shape the sample observed.
 
 ### 15.2 What it shows and edits
 
-A `Validation` region. Read mode shows the validator pretty-printed, or
-`No validation rules` when there is none (an empty `{}` validator counts as
-none), then `Level: <level>` and `Action: <action>`. `listCollections` reports
+A `Validation` region. Read mode shows the validator pretty-printed as
+readable JSON (`"minimum": 0`, not `{"$numberInt":"0"}`; only wrappers that
+re-parse to the same BSON are dropped), or `No validation rules` when there is
+none (an empty `{}` validator counts as none), then `Level: <level>` and
+`Action: <action>`. `listCollections` reports
 the level and action only once they were set, so an absent one shows the
 server default, `strict` and `error`.
 
-`Edit rules` swaps in a `Validator` textarea prefilled with the rules, a
-`Validation level` select (off, strict, moderate) and a `Validation action`
-select (error, warn), with Save and Cancel. Save requires the text to parse as
+`Edit rules` swaps in a `Validator` textarea prefilled with the same readable
+rules, so saving them unchanged sends the same BSON, a `Validation level`
+select (off, strict, moderate) and a `Validation action` select (error, warn,
+errorAndLog), with Save and Cancel. `errorAndLog` round-trips when the server
+reports it; MongoDB 8.0.5 refuses it in `collMod`, and that refusal shows
+inline like any other. Save requires the text to parse as
 a JSON document (not an array, not `null`) and says so inline otherwise, with
-no call. An emptied textarea saves `{}`, which clears the rules. A view has no
-validation rules, so the region is not rendered for one.
+no call. An emptied textarea saves `{}`, which clears the rules. The region
+renders for a plain collection only: a view has no validation rules, and the
+server refuses `collMod` validation options on a time-series collection
+(MongoDB 8.0.5 answers `InvalidOptions`, code 72, for both `validator` and
+`validationLevel`).
 
 Save calls `collection:modify` with `{ validator, validationLevel,
-validationAction }` and then reads the details again. A refusal, a read-only
+validationAction }` and then reads the details again; the button stays in its
+submitting state and the editor stays open until that read is in, so the old
+rules never flash back. A refusal, a read-only
 connection's included, is a `role="alert"` in the section and the editor stays
 open; like the indexes section, nothing is greyed out up front, and main is the
 guard (ADR 0005).
@@ -924,11 +934,16 @@ the write grant. W02's Modify view is the channel's other caller.
   `meta:collectionDetails`; with none set it says `No validation rules`,
   `Level: strict`, `Action: error`.
 - Edit rules, a changed level, Save calls `collection:modify` with the
-  validator, level and action, then reads the details again.
+  validator, level and action, then reads the details again, and read mode
+  shows the new level only once that read is in.
+- Rules are shown and edited as readable JSON, and saving them unchanged
+  sends an equivalent validator.
+- The action select offers `errorAndLog`, and a reported `errorAndLog` shows.
 - An emptied validator saves `{}`; text that is not a JSON document is refused
   inline with no call.
 - A refused save shows inline and keeps the editor open.
-- A view renders no Validation region.
+- A view, a time-series collection and a failed details read render no
+  Validation region.
 - Entering Structure still reads `meta:collectionDetails` once.
 - `collection:modify` sets a validator the server then enforces, clears it with
   `{}`, updates level and action alone, and replaces a view's definition;

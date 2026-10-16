@@ -70,7 +70,7 @@ Saves the pipeline itself, not its output, as a read-only view on the open colle
 
 - **Trigger**: the output panel's "Save as view…" button, next to "Save as…". It is enabled whenever the pipeline is not running; it needs no output rows, because nothing is run.
 - **Modal**: one "View name" field. The view is created in the **same database** as the source collection, because MongoDB requires a view and its `viewOn` to share a database, so there is no target-database field.
-- **Pipeline**: the enabled stages, after the same Shell-Syntax repair a run applies, serialized as one canonical EJSON array. A stage whose body does not parse is named inline and nothing is sent.
+- **Pipeline**: the enabled stages, after the same Shell-Syntax repair a run applies, serialized as one canonical EJSON array. A stage whose body does not parse is named inline by its position in the builder and operator, with the parser's reason (`stage 2 ($group): invalid EJSON — …`), and nothing is sent.
 - **Write stages**: an enabled `$out` or `$merge` is refused inline before any call, since a view only reads. A disabled one is ignored. Main refuses them too, as VALIDATION on `pipeline`.
 - **Server action**: `collection:create` with `options: { viewOn: <source>, pipeline }`. A duplicate name comes back as CONFLICT and shows inline; the dialog stays open.
 - **Dismiss**: Escape with a typed name asks before discarding it; a click outside does nothing.
