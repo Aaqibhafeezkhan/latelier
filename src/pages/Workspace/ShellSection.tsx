@@ -16,6 +16,7 @@ import { usePaletteApi } from '../../commands/CommandPalette';
 import { useHints } from '../../hints/HintsContext';
 import { useWorkspacePanelPrefs } from './useWorkspacePanelPrefs';
 import { useConnectionDialogs } from './useConnectionDialogs';
+import type { NavigatorData } from './useNavigatorData';
 
 // Returns a fragment: AppShell places .Header/.Navbar/.Main by CSS grid on direct children, so a wrapper here would break layout.
 export interface ShellSectionProps {
@@ -37,6 +38,8 @@ export interface ShellSectionProps {
   setNewTabOpen: (open: boolean) => void;
   panelPrefs: ReturnType<typeof useWorkspacePanelPrefs>;
   connectionDialogs: ReturnType<typeof useConnectionDialogs>;
+  /** The navigator's tree, owned by Workspace so it survives the sidebar collapsing. */
+  navigatorData: NavigatorData;
   /** Opens the reference-rules drawer for the Focused Tab's collection. */
   onOpenReferences: () => void;
 }
@@ -60,6 +63,7 @@ export function ShellSection({
   setNewTabOpen,
   panelPrefs,
   connectionDialogs,
+  navigatorData,
   onOpenReferences,
 }: ShellSectionProps) {
   const T = themeVars;
@@ -169,6 +173,7 @@ export function ShellSection({
                   });
                 }}
                 onOpenReferences={onOpenReferences}
+                data={navigatorData}
               />
               <div
                 style={{

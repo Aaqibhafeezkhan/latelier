@@ -5,9 +5,9 @@ import {
   useListRef,
   type RowComponentProps,
 } from 'react-window';
-import type { CollectionInfo, DbInfo, IpcError } from '@shared/ipc';
+import type { CollectionInfo, DbInfo } from '@shared/ipc';
 import type { ConnectionSummary, ProbeErrorCode } from '@shared/types';
-import { api, isIpcError } from '../../api/atelier';
+import { api } from '../../api/atelier';
 import { copyToClipboard } from '../../utils/clipboard';
 import { disconnectConnection } from '../../features/connections/disconnectConnection';
 import { isKnownNotConnected } from '../../state/connections';
@@ -24,7 +24,7 @@ import { ImportDialog } from './ImportDialog';
 import { DropCollectionConfirm } from './DropCollectionConfirm';
 import { DropDatabaseConfirm } from './DropDatabaseConfirm';
 import { useNavigatorDialogs } from './useNavigatorDialogs';
-import { useNavigatorTree } from './useNavigatorTree';
+import { useNavigatorData, type NavigatorData } from './useNavigatorData';
 import { emptyCache } from './navigatorTreeReducer';
 import { ownGet } from '../../utils/ownProperty';
 import { isContextMenuKey, anchorForRow } from '../../utils/contextMenuKey';
@@ -76,6 +76,8 @@ export interface DbCollectionNavigatorProps {
    * "References…" item is disabled on any other row.
    */
   onOpenReferences?: () => void;
+  /** Tree state and loaders owned by the Workspace, so they outlive a collapsed sidebar. */
+  data?: NavigatorData;
 }
 
 type TreeRow =
@@ -183,9 +185,6 @@ const connExpandedKey = (id: string) => `ui.workspace.navigator.connExpanded:${i
 /** Connection-colour rail down the left edge; muted when no live client. */
 const SPINE_WIDTH = 3;
 
-/** Delay before the one bounded retry on an empty `listDatabases` result. */
-const EMPTY_DB_RETRY_DELAY_MS = 300;
-
 /** Fallback when a failed connect's status event and backfill both miss the message. */
 const GENERIC_CONNECT_ERROR = 'The connection attempt failed.';
 
@@ -204,9 +203,13 @@ export function DbCollectionNavigator({
   onDatabaseDropped,
   onCollectionRenamed,
   onOpenReferences,
+  data,
 }: DbCollectionNavigatorProps) {
   const T = themeVars;
-  const { state: tree, dispatch, isMounted } = useNavigatorTree();
+  // Shared with Workspace (and so the palette) when `data` is passed; the
+  // standalone copy is what a navigator mounted on its own reads.
+  const own = useNavigatorData();
+  const { tree, dispatch, loadDbs, loadColls } = data ?? own;
   const { caches, connectErrors, expandedConnId, expanded } = tree;
   const [filter, setFilter] = React.useState('');
   const [focusedId, setFocusedId] = React.useState<string | null>(null);
@@ -232,44 +235,6 @@ export function DbCollectionNavigator({
     () => (connectionId ? ownGet(expanded, connectionId) ?? {} : {}),
     [expanded, connectionId],
   );
-
-  const loadDbs = React.useCallback(async (id: string): Promise<DbInfo[] | null> => {
-    dispatch({ type: 'dbsLoadStart', id });
-    try {
-      let rows = await api.meta.listDatabases({ connectionId: id });
-      if (rows.length === 0) {
-        // A brand-new database can be briefly invisible to listDatabases right
-        // after connect (driver/server catalog-visibility race) — one bounded retry.
-        await new Promise((resolve) => setTimeout(resolve, EMPTY_DB_RETRY_DELAY_MS));
-        // The navigator can unmount during the delay; a gone view must not
-        // spend another main-process round trip on a result nobody will read.
-        if (!isMounted()) return null;
-        rows = await api.meta.listDatabases({ connectionId: id });
-      }
-      dispatch({ type: 'dbsLoadSuccess', id, dbs: rows });
-      return rows;
-    } catch (e) {
-      const err: IpcError = isIpcError(e)
-        ? e
-        : { code: 'INTERNAL', message: String(e) };
-      dispatch({ type: 'dbsLoadError', id, err });
-      return null;
-    }
-  }, [dispatch, isMounted]);
-
-  const loadColls = React.useCallback(async (id: string, dbName: string) => {
-    dispatch({ type: 'collsLoadStart', id, dbName });
-    try {
-      const rows = await api.meta.listCollections({ connectionId: id, dbName });
-      // Sort A→Z so large databases are scannable; server returns insertion order.
-      const sorted = [...rows].sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-      );
-      dispatch({ type: 'collsLoadSuccess', id, dbName, colls: sorted });
-    } catch {
-      dispatch({ type: 'collsLoadError', id, dbName });
-    }
-  }, [dispatch]);
 
   // The expanded root follows the Focused Tab's Connection on *change*, not
   // value — a root expanded by hand while on another tab stays expanded. Only

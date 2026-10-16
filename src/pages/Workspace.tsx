@@ -25,6 +25,9 @@ import {
 import { useQueryRunner } from './Workspace/useQueryRunner';
 import type { RunnerTarget } from './Workspace/useQueryRunner';
 import { useWorkspacePanelPrefs } from './Workspace/useWorkspacePanelPrefs';
+import { useNavigatorData } from './Workspace/useNavigatorData';
+import { ownGet } from '../utils/ownProperty';
+import type { DbInfo } from '@shared/ipc';
 import { useConnectionDialogs } from './Workspace/useConnectionDialogs';
 import { useDocumentDialogs } from './Workspace/useDocumentDialogs';
 import { offerUndo } from './Workspace/offerUndo';
@@ -66,6 +69,9 @@ function WorkspaceInner() {
   const [newTabOpen, setNewTabOpen] = React.useState(false);
 
   const panelPrefs = useWorkspacePanelPrefs();
+  // The navigator's tree, owned here: it outlives a collapsed sidebar and the
+  // palette's namespace commands read the same cache.
+  const navigatorData = useNavigatorData();
   const {
     prefsReady,
     leftWidth,
@@ -671,45 +677,42 @@ function WorkspaceInner() {
     [active?.pinned, builderCollapsed, toggleBuilderWithFocus],
   );
 
-  // Mirrors the navigator's data for `⌘K → orders`-style collection commands,
-  // via its own meta:list fetch rather than sharing the navigator's cache.
-  const [paletteCollections, setPaletteCollections] = React.useState<
-    Array<{ db: string; coll: string }>
-  >([]);
+  // `⌘K → orders`-style commands for every collection of the focused
+  // Connection. The sweep fills the navigator's own cache, so the navigator
+  // never fetches what the palette already has, and the reverse.
+  const { tree: navigatorTree, loadDbs, loadColls } = navigatorData;
+  const focusedCache = focusedConnectionId
+    ? ownGet(navigatorTree.caches, focusedConnectionId)
+    : undefined;
+  const focusedIsConnected = focusedConnection?.status === 'connected';
+  // One attempt per database per database list: a database whose listing
+  // failed is not retried on every render, and a refreshed list sweeps again.
+  const sweptRef = React.useRef<{ dbs: DbInfo[] | null; done: Set<string> }>({
+    dbs: null,
+    done: new Set(),
+  });
   React.useEffect(() => {
-    const cid = focusedConnectionId;
-    let cancelled = false;
-    void (async () => {
-      await Promise.resolve();
-      if (cancelled) return;
-      if (!cid) {
-        setPaletteCollections([]);
-        return;
-      }
-      try {
-        const dbs = await api.meta.listDatabases({ connectionId: cid });
-        const collsByDb = await Promise.all(
-          dbs.map(async (d) => {
-            try {
-              const colls = await api.meta.listCollections({
-                connectionId: cid,
-                dbName: d.name,
-              });
-              return colls.map((c) => ({ db: d.name, coll: c.name }));
-            } catch {
-              return [];
-            }
-          }),
-        );
-        if (!cancelled) setPaletteCollections(collsByDb.flat());
-      } catch {
-        if (!cancelled) setPaletteCollections([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [focusedConnectionId]);
+    if (!focusedConnectionId || !focusedIsConnected) return;
+    const c = focusedCache;
+    if (!c?.dbs) {
+      if (!c?.dbsLoading && !c?.err) void loadDbs(focusedConnectionId);
+      return;
+    }
+    if (sweptRef.current.dbs !== c.dbs) sweptRef.current = { dbs: c.dbs, done: new Set() };
+    const { done } = sweptRef.current;
+    for (const d of c.dbs) {
+      if (done.has(d.name) || ownGet(c.colls, d.name) || ownGet(c.collsLoading, d.name)) continue;
+      done.add(d.name);
+      void loadColls(focusedConnectionId, d.name);
+    }
+  }, [focusedConnectionId, focusedIsConnected, focusedCache, loadDbs, loadColls]);
+  const paletteCollections = React.useMemo(() => {
+    const c = focusedCache;
+    if (!c?.dbs) return [];
+    return c.dbs.flatMap((d) =>
+      (ownGet(c.colls, d.name) ?? []).map((x) => ({ db: d.name, coll: x.name })),
+    );
+  }, [focusedCache]);
 
   const collectionCommands = React.useMemo(
     () =>
@@ -718,6 +721,7 @@ function WorkspaceInner() {
         title: `Open: ${db}.${coll}`,
         group: 'workspace' as const,
         keywords: ['collection', 'tab', 'new', db, coll],
+        hideWhenEmptyQuery: true,
         perform: () => {
           if (focusedConnectionId) {
             void tabsRef.current.openCollection({
@@ -1007,6 +1011,7 @@ function WorkspaceInner() {
         setNewTabOpen={setNewTabOpen}
         panelPrefs={panelPrefs}
         connectionDialogs={connectionDialogs}
+        navigatorData={navigatorData}
         onOpenReferences={() => setRefEditorOpen(true)}
       />
 
