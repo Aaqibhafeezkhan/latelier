@@ -77,6 +77,8 @@ const READ_CHANNELS = new Set<string>([
 const NON_MONGO_CHANNELS = new Set<string>([
   IPC_CHANNELS.connList,
   IPC_CHANNELS.connGet,
+  // Builds a URI from the saved row; never reaches a MongoDB deployment.
+  IPC_CHANNELS.connGetUri,
   IPC_CHANNELS.connCreate,
   // Connection Export touches SQLite and files only, never a MongoDB deployment.
   IPC_CHANNELS.connExport,

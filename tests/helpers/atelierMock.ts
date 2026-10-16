@@ -27,6 +27,7 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
     conn: {
       list: async () => [],
       get: unused('conn.get') as IpcApi['conn']['get'],
+      getUri: unused('conn.getUri') as IpcApi['conn']['getUri'],
       create: unused('conn.create') as IpcApi['conn']['create'],
       update: unused('conn.update') as IpcApi['conn']['update'],
       delete: unused('conn.delete') as IpcApi['conn']['delete'],
@@ -350,6 +351,7 @@ function makePermissiveStub(): IpcApi {
     conn: {
       list: async () => [],
       get: noopAsync as IpcApi['conn']['get'],
+      getUri: noopAsync as IpcApi['conn']['getUri'],
       create: noopAsync as IpcApi['conn']['create'],
       update: noopAsync as IpcApi['conn']['update'],
       delete: async (id) => ({ id }),

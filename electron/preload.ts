@@ -42,6 +42,7 @@ const api: IpcApi = {
   conn: {
     list: () => call(IPC_CHANNELS.connList),
     get: (id) => call(IPC_CHANNELS.connGet, { id }),
+    getUri: (id) => call(IPC_CHANNELS.connGetUri, { id }),
     create: (input) => call(IPC_CHANNELS.connCreate, input),
     update: (id, patch) => call(IPC_CHANNELS.connUpdate, { id, patch }),
     delete: (id) => call(IPC_CHANNELS.connDelete, { id }),

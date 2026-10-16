@@ -7,7 +7,8 @@ import {
 } from 'react-window';
 import type { CollectionInfo, DbInfo, IpcError } from '@shared/ipc';
 import type { ConnectionSummary, ProbeErrorCode } from '@shared/types';
-import { api, isIpcError } from '../../api/atelier';
+import { api, getErrorMessage, isIpcError } from '../../api/atelier';
+import { notify } from '../../theme/notifications';
 import { copyToClipboard } from '../../utils/clipboard';
 import { disconnectConnection } from '../../features/connections/disconnectConnection';
 import { isKnownNotConnected } from '../../state/connections';
@@ -987,9 +988,12 @@ export function DbCollectionNavigator({
         kind: 'item',
         label: 'Copy connection string',
         icon: I.copy,
-        onClick: () => {},
-        disabled: true,
-        disabledTitle: 'Coming soon',
+        // Main builds the URI without the saved password, so none reaches the clipboard.
+        onClick: () =>
+          void api.conn
+            .getUri(id)
+            .then(({ uri }) => copyToClipboard(uri, 'Connection string copied — password not included.'))
+            .catch((e: unknown) => notify.error(getErrorMessage(e, 'Could not build the connection string'))),
       },
       { kind: 'sep' },
     ];

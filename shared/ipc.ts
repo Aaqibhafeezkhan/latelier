@@ -200,6 +200,8 @@ export interface IpcApi {
   conn: {
     list: () => Promise<ConnectionSummary[]>;
     get: (id: string) => Promise<Connection>;
+    /** The saved connection's URI, built in main without its password. */
+    getUri: (id: string) => Promise<{ uri: string }>;
     create: (input: ConnectionInput) => Promise<Connection>;
     update: (id: string, patch: ConnectionUpdate) => Promise<Connection>;
     delete: (id: string) => Promise<{ id: string }>;
@@ -487,6 +489,7 @@ export const IPC_CHANNELS = {
   // Connection CRUD -----------------------------------------
   connList:      'conn:list',
   connGet:       'conn:get',
+  connGetUri:    'conn:getUri',
   connCreate:    'conn:create',    // SECRET_INPUT
   connUpdate:    'conn:update',    // SECRET_INPUT
   connDelete:    'conn:delete',
