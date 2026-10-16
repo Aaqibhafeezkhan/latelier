@@ -703,7 +703,11 @@ export function AggregationTab({
           collection={collection}
           stages={stages}
           onClose={() => setSaveAsCollectionOpen(false)}
-          onWritten={(info) => notify.success(saveResultMessage(info))}
+          onWritten={(info) => {
+            // The target may be in another database than the source.
+            notifyCollectionChanged({ connectionId, dbName: info.dbName, collection: info.collection });
+            notify.success(saveResultMessage(info));
+          }}
         />
       )}
 

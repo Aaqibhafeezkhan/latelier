@@ -22,44 +22,54 @@ const row = (name: string, type: 'collection' | 'view'): CollectionInfo => ({
   capped: false,
 });
 
+function mountNavigatorAndTab(
+  rows: () => CollectionInfo[],
+  mocks: Parameters<typeof installAtelierMock>[0],
+) {
+  installAtelierMock({
+    meta: {
+      listDatabases: async () => [{ name: 'shop', sizeOnDisk: 1, empty: false }],
+      listCollections: async () => rows(),
+    },
+    ...mocks,
+  });
+  render(
+    <DarkCtx.Provider value={false}>
+      <DbCollectionNavigator
+        connectionsWithTabs={new Set()}
+        connections={[connectionFixture({ id: 'c1', name: 'Prod' })]}
+        focusedConnectionId="c1"
+        activeDbName="shop"
+        activeCollection="orders"
+        onOpenCollection={vi.fn()}
+        onOpenAggregation={vi.fn()}
+      />
+      <AggregationTab
+        connectionId="c1"
+        dbName="shop"
+        collection="orders"
+        state={DEFAULT_AGGREGATION_TAB_STATE}
+        darkMode={false}
+        sourceCount={null}
+        onPatch={vi.fn()}
+      />
+    </DarkCtx.Provider>,
+  );
+}
+
 describe('Save as view — navigator refresh', () => {
   it('lists the new view in the navigator without a manual refresh', async () => {
     let created = false;
-    installAtelierMock({
-      meta: {
-        listDatabases: async () => [{ name: 'shop', sizeOnDisk: 1, empty: false }],
-        listCollections: async () =>
-          created ? [row('orders', 'collection'), row('open_orders', 'view')] : [row('orders', 'collection')],
-      },
-      collection: {
-        create: async (input) => {
-          created = true;
-          return { name: (input as { collection: string }).collection };
+    mountNavigatorAndTab(
+      () => (created ? [row('orders', 'collection'), row('open_orders', 'view')] : [row('orders', 'collection')]),
+      {
+        collection: {
+          create: async (input) => {
+            created = true;
+            return { name: (input as { collection: string }).collection };
+          },
         },
       },
-    });
-
-    render(
-      <DarkCtx.Provider value={false}>
-        <DbCollectionNavigator
-          connectionsWithTabs={new Set()}
-          connections={[connectionFixture({ id: 'c1', name: 'Prod' })]}
-          focusedConnectionId="c1"
-          activeDbName="shop"
-          activeCollection="orders"
-          onOpenCollection={vi.fn()}
-          onOpenAggregation={vi.fn()}
-        />
-        <AggregationTab
-          connectionId="c1"
-          dbName="shop"
-          collection="orders"
-          state={DEFAULT_AGGREGATION_TAB_STATE}
-          darkMode={false}
-          sourceCount={null}
-          onPatch={vi.fn()}
-        />
-      </DarkCtx.Provider>,
     );
     await screen.findByTestId('nav-coll-shop-orders');
     expect(screen.queryByTestId('nav-coll-shop-open_orders')).toBeNull();
@@ -69,5 +79,31 @@ describe('Save as view — navigator refresh', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create view' }));
 
     await waitFor(() => expect(screen.getByTestId('nav-coll-shop-open_orders')).toBeTruthy());
+  });
+});
+
+describe('Save as collection — navigator refresh', () => {
+  it('lists the collection a $out created without a manual refresh', async () => {
+    let written = false;
+    mountNavigatorAndTab(
+      () => (written ? [row('orders', 'collection'), row('monthly', 'collection')] : [row('orders', 'collection')]),
+      {
+        agg: {
+          runAndSave: (async () => {
+            written = true;
+            return { writtenCount: 3 };
+          }) as never,
+        },
+      },
+    );
+    await screen.findByTestId('nav-coll-shop-orders');
+    expect(screen.queryByTestId('nav-coll-shop-monthly')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save to collection' }));
+    fireEvent.change(await screen.findByLabelText(/Target collection/), { target: { value: 'monthly' } });
+    fireEvent.change(screen.getByLabelText(/to confirm/i), { target: { value: 'monthly' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm $out' }));
+
+    await waitFor(() => expect(screen.getByTestId('nav-coll-shop-monthly')).toBeTruthy());
   });
 });
