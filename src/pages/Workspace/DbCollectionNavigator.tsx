@@ -84,12 +84,15 @@ export interface DbCollectionNavigatorProps {
   /** Tree state and loaders owned by the Workspace, so they outlive a collapsed sidebar. */
   data?: NavigatorData;
   /**
-   * "Reveal in sidebar": move the tree's focus to this row (`coll:<conn>:<db>:<coll>`)
-   * as soon as it is rendered. A new object per request, so revealing the same
-   * row twice still fires.
+   * "Reveal in sidebar": move the tree's focus to this collection's row as soon
+   * as it is rendered. A new object per request, so revealing the same row
+   * twice still fires.
    */
-  revealRequest?: { rowId: string } | null;
-  /** Called once the reveal has landed, so a later remount does not replay it. */
+  revealRequest?: NavigatorOpenInput | null;
+  /**
+   * Called once the reveal has landed, or been dropped because its database
+   * settled without the collection, so it never fires later.
+   */
   onRevealHandled?: () => void;
 }
 
@@ -627,19 +630,41 @@ export function DbCollectionNavigator({
   // The requested row may not exist yet (its database still loading, or the
   // navigator only just mounted), so the request waits for the rows that hold
   // it. Focusing it lets the focusedId effect below scroll it into view.
-  const pendingRevealRef = React.useRef<string | null>(null);
+  // A name filter that hides the row would hold it back forever, so a reveal
+  // clears it. It also re-lists the database's collections (sharing a load
+  // already in flight): once that settles without the collection — dropped, or
+  // the listing failed — the request is spent, so it never fires later.
+  const pendingRevealRef = React.useRef<{ req: NavigatorOpenInput; listed: boolean } | null>(null);
+  const [revealListed, setRevealListed] = React.useState(0);
   React.useEffect(() => {
-    if (revealRequest) pendingRevealRef.current = revealRequest.rowId;
-  }, [revealRequest]);
-  React.useEffect(() => {
-    const id = pendingRevealRef.current;
-    if (!id || !rows.some((r) => r.id === id)) return;
-    pendingRevealRef.current = null;
-    queueMicrotask(() => {
-      setFocusedId(id);
-      onRevealHandled?.();
+    if (!revealRequest) return;
+    const pending = { req: revealRequest, listed: false };
+    pendingRevealRef.current = pending;
+    queueMicrotask(() => setFilter(''));
+    void loadColls(revealRequest.connectionId, revealRequest.dbName).then(() => {
+      pending.listed = true;
+      setRevealListed((n) => n + 1);
     });
-  }, [rows, revealRequest, onRevealHandled]);
+  }, [revealRequest, loadColls]);
+  React.useEffect(() => {
+    const pending = pendingRevealRef.current;
+    if (!pending) return;
+    const { req } = pending;
+    const id = `coll:${req.connectionId}:${req.dbName}:${req.collection}`;
+    if (rows.some((r) => r.id === id)) {
+      pendingRevealRef.current = null;
+      queueMicrotask(() => {
+        setFocusedId(id);
+        onRevealHandled?.();
+      });
+      return;
+    }
+    const c = ownGet(caches, req.connectionId);
+    if (!pending.listed || ownGet(c?.collsLoading ?? {}, req.dbName)) return;
+    if (ownGet(c?.colls ?? {}, req.dbName)?.some((x) => x.name === req.collection)) return;
+    pendingRevealRef.current = null;
+    queueMicrotask(() => onRevealHandled?.());
+  }, [rows, revealListed, onRevealHandled, caches]);
   const rowHeight = useDynamicRowHeight({ defaultRowHeight: 26 });
 
   React.useEffect(() => {

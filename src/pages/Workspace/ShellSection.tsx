@@ -69,7 +69,7 @@ export function ShellSection({
   const T = themeVars;
   const { sidebarCollapsed, toggleSidebar, leftWidth, setLeftWidth, commitLeftWidth } = panelPrefs;
   const { openEditConnectionModal, requestDisconnect } = connectionDialogs;
-  const [revealRequest, setRevealRequest] = React.useState<{ rowId: string } | null>(null);
+  const [revealRequest, setRevealRequest] = React.useState<NavigatorOpenInput | null>(null);
 
   const activate = (id: string) => {
     if (id !== tabs.activeId) hints.recordSessionEvent('tabSwitch', '*');
@@ -120,7 +120,7 @@ export function ShellSection({
       dbName: t.dbName,
       value: true,
     });
-    setRevealRequest({ rowId: `coll:${t.connectionId}:${t.dbName}:${t.collection}` });
+    setRevealRequest({ connectionId: t.connectionId, dbName: t.dbName, collection: t.collection });
   };
 
   return (

@@ -155,8 +155,9 @@ Reveal in sidebar:
 
 1. Activates the tab, waking a dormant connection the same way a click does.
 2. Opens the sidebar if it is collapsed.
-3. Expands the tab's connection root and its database.
+3. Expands the tab's connection root and its database, clears the navigator's name filter so it cannot hide the row, and re-lists the database's collections (sharing a load already in flight).
 4. Moves the navigator's focus (its `aria-activedescendant`) to the collection row once that row is rendered, which scrolls it into view. The request is then spent: reopening the sidebar later focuses the active tab's row, not this one.
+5. If that listing settles without the collection (it was dropped, or the listing failed), the request is dropped instead. It never fires later, when the collection reappears and the user has moved on.
 
 Real DOM focus stays where the menu returns it.
 

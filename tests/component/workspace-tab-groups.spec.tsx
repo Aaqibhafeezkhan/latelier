@@ -916,7 +916,20 @@ describe('only a genuinely Dormant Connection gets the muted treatment', () => {
 describe('the tab context menu closes in bulk and reveals a tab in the sidebar', () => {
   type TabSpec = Parameters<typeof multiConnectionMock>[0]['tabs'];
 
-  function mountTabs(tabs: TabSpec) {
+  const collInfo = (name: string) => ({
+    name,
+    type: 'collection' as const,
+    documentCount: 0,
+    sizeBytes: 0,
+    indexCount: 0,
+    capped: false,
+  });
+  type Lister = (a: { connectionId: string; dbName: string }) => Promise<ReturnType<typeof collInfo>[]>;
+
+  function mountTabs(
+    tabs: TabSpec,
+    opts: { dbs?: string[]; listCollections?: Lister } = {},
+  ) {
     const mock = multiConnectionMock({
       connections: [
         { id: 'c1', name: 'Prod' },
@@ -929,16 +942,10 @@ describe('the tab context menu closes in bulk and reveals a tab in the sidebar',
       ...mock,
       tabs: { ...mock.tabs, close, reorder: async () => ({ ok: true as const }) },
       meta: {
-        listDatabases: async () => [{ name: 'db', sizeOnDisk: 1, empty: false }],
-        listCollections: async () =>
-          ['alpha', 'bravo', 'charlie'].map((name) => ({
-            name,
-            type: 'collection' as const,
-            documentCount: 0,
-            sizeBytes: 0,
-            indexCount: 0,
-            capped: false,
-          })),
+        listDatabases: async () =>
+          (opts.dbs ?? ['db']).map((name) => ({ name, sizeOnDisk: 1, empty: false })),
+        listCollections: (opts.listCollections ??
+          (async () => ['alpha', 'bravo', 'charlie'].map(collInfo))) as never,
       },
     });
     render(
@@ -1210,6 +1217,146 @@ describe('the tab context menu closes in bulk and reveals a tab in the sidebar',
       await new Promise((r) => setTimeout(r, 20));
     });
     expect(tree().getAttribute('aria-activedescendant')).toBe(alphaRow.id);
+  });
+
+  const activeDescendant = () => screen.getByRole('tree').getAttribute('aria-activedescendant');
+
+  it('Reveal in sidebar clears the navigator’s filter so the row can show', async () => {
+    mountTabs([
+      { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+      { id: 'b', connectionId: 'c1', collection: 'bravo' },
+    ]);
+    await screen.findByTestId('nav-coll-db-alpha');
+    fireEvent.change(screen.getByLabelText('Filter collections'), { target: { value: 'alp' } });
+    await waitFor(() => expect(screen.queryByTestId('nav-coll-db-bravo')).toBeNull());
+
+    fireEvent.contextMenu(tab('bravo'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in sidebar' }));
+
+    const bravo = await screen.findByTestId('nav-coll-db-bravo');
+    expect((screen.getByLabelText('Filter collections') as HTMLInputElement).value).toBe('');
+    await waitFor(() => expect(activeDescendant()).toBe(bravo.id));
+  });
+
+  it('Reveal in sidebar waits for a database whose collections are still loading', async () => {
+    let release: (names: string[]) => void = () => {};
+    const slow = new Promise<string[]>((r) => {
+      release = r;
+    });
+    mountTabs(
+      [
+        { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+        { id: 'b', connectionId: 'c1', dbName: 'other', collection: 'zulu' },
+      ],
+      {
+        dbs: ['db', 'other'],
+        listCollections: async ({ dbName }) =>
+          (dbName === 'other' ? await slow : ['alpha']).map(collInfo),
+      },
+    );
+    await screen.findByTestId('nav-coll-db-alpha');
+
+    fireEvent.contextMenu(tab('zulu'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in sidebar' }));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    release(['zulu']);
+
+    const zulu = await screen.findByTestId('nav-coll-other-zulu');
+    await waitFor(() => expect(activeDescendant()).toBe(zulu.id));
+  });
+
+  it('Reveal in sidebar re-lists a stale database and lands on a collection created since', async () => {
+    let names = ['alpha'];
+    mountTabs(
+      [
+        { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+        { id: 'f', connectionId: 'c1', collection: 'fresh' },
+      ],
+      { listCollections: async () => names.map(collInfo) },
+    );
+    await screen.findByTestId('nav-coll-db-alpha');
+    names = ['alpha', 'fresh'];
+
+    fireEvent.contextMenu(tab('fresh'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in sidebar' }));
+
+    const fresh = await screen.findByTestId('nav-coll-db-fresh');
+    await waitFor(() => expect(activeDescendant()).toBe(fresh.id));
+  });
+
+  it('drops a reveal whose database failed to list its collections', async () => {
+    let fail = true;
+    mountTabs(
+      [
+        { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+        { id: 'b', connectionId: 'c1', dbName: 'other', collection: 'zulu' },
+      ],
+      {
+        dbs: ['db', 'other'],
+        listCollections: async ({ dbName }) => {
+          if (dbName !== 'other') return ['alpha'].map(collInfo);
+          if (fail) throw new Error('listCollections failed');
+          return ['zulu'].map(collInfo);
+        },
+      },
+    );
+    await screen.findByTestId('nav-coll-db-alpha');
+
+    fireEvent.contextMenu(tab('zulu'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in sidebar' }));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    // Collapse and re-expand the database once it lists again.
+    fail = false;
+    fireEvent.click(screen.getByTestId('nav-db-other'));
+    fireEvent.click(screen.getByTestId('nav-db-other'));
+    const zulu = await screen.findByTestId('nav-coll-other-zulu');
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    expect(activeDescendant()).toBe(screen.getByTestId('nav-db-other').id);
+    expect(activeDescendant()).not.toBe(zulu.id);
+  });
+
+  it('drops a reveal whose collection is gone, so it never fires later', async () => {
+    let names = ['alpha', 'bravo'];
+    mountTabs(
+      [
+        { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+        { id: 'g', connectionId: 'c1', collection: 'ghost' },
+      ],
+      { listCollections: async () => names.map(collInfo) },
+    );
+    await screen.findByTestId('nav-coll-db-alpha');
+
+    fireEvent.contextMenu(tab('ghost'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in sidebar' }));
+    await waitFor(() => expect(tab('ghost').getAttribute('aria-selected')).toBe('true'));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    // The user moves on; later the collection appears after all.
+    fireEvent.click(tab('alpha'));
+    const alpha = screen.getByTestId('nav-coll-db-alpha');
+    await waitFor(() => expect(activeDescendant()).toBe(alpha.id));
+    names = ['alpha', 'bravo', 'ghost'];
+    fireEvent.contextMenu(screen.getByTestId('nav-db-db'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh collections' }));
+    const ghost = await screen.findByTestId('nav-coll-db-ghost');
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    // Right-clicking the database row focuses it; the stale reveal must not
+    // pull the focus onto the collection that has just appeared.
+    expect(activeDescendant()).toBe(screen.getByTestId('nav-db-db').id);
+    expect(activeDescendant()).not.toBe(ghost.id);
   });
 
   it('Reveal in sidebar moves the navigator’s focus to the row with the sidebar already open', async () => {
