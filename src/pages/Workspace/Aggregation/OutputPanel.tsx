@@ -19,6 +19,8 @@ interface OutputPanelProps {
   onHeightCommit: () => void;
   onViewChange: (v: ResultViewMode) => void;
   onSaveAsCollection: () => void;
+  /** Saves the pipeline itself, so it needs no output rows. */
+  onSaveAsView: () => void;
 }
 
 const DEFAULT_HEIGHT = 260;
@@ -56,6 +58,7 @@ export function OutputPanel({
   onHeightCommit,
   onViewChange,
   onSaveAsCollection,
+  onSaveAsView,
 }: OutputPanelProps) {
   const T = themeVars;
   const [errDetails, setErrDetails] = React.useState(false);
@@ -196,6 +199,9 @@ export function OutputPanel({
         </Button>
         <Button size="compact-xs" variant="default" leftSection={I.save} onClick={onSaveAsCollection} disabled={running || rows.length === 0}>
           Save as…
+        </Button>
+        <Button size="compact-xs" variant="default" onClick={onSaveAsView} disabled={running}>
+          Save as view…
         </Button>
         <Button
           size="compact-xs"
