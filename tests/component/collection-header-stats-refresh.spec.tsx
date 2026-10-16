@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '../helpers/render';
+import { render, screen, waitFor, fireEvent } from '../helpers/render';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { CollectionHeader } from '../../src/pages/Workspace/CollectionHeader';
 
@@ -14,6 +14,8 @@ function renderHeader(refreshSignal: number | undefined) {
       connectionId="c1"
       dbName="shop"
       collection="orders"
+      onOpenReferences={() => {}}
+      referenceRuleCount={0}
       refreshSignal={refreshSignal}
     />,
   );
@@ -47,6 +49,8 @@ describe('CollectionHeader — stats refresh', () => {
         connectionId="c1"
         dbName="shop"
         collection="orders"
+        onOpenReferences={() => {}}
+        referenceRuleCount={0}
         refreshSignal={1}
       />,
     );
@@ -76,6 +80,8 @@ describe('CollectionHeader — stats refresh', () => {
         connectionId="c1"
         dbName="shop"
         collection="orders"
+        onOpenReferences={() => {}}
+        referenceRuleCount={0}
         refreshSignal={1}
       />,
     );
@@ -84,12 +90,21 @@ describe('CollectionHeader — stats refresh', () => {
     expect(screen.queryByText(/docs/)).toBeNull();
   });
 
-  // Insert and References moved out to ResultBar and the navigator's
-  // collection context menu (six-chrome-strips cleanup) — the header is
-  // breadcrumb + stats only now.
-  it('renders neither an Insert nor a References control', () => {
-    renderHeader(0);
+  // Insert lives in ResultBar; the header keeps the References button and
+  // reports its rule count.
+  it('renders no Insert control and a References button that opens the editor', () => {
+    const onOpenReferences = vi.fn();
+    render(
+      <CollectionHeader
+        connectionId="c1"
+        dbName="shop"
+        collection="orders"
+        onOpenReferences={onOpenReferences}
+        referenceRuleCount={3}
+      />,
+    );
     expect(screen.queryByRole('button', { name: 'Insert document' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /References/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'References (3)' }));
+    expect(onOpenReferences).toHaveBeenCalledTimes(1);
   });
 });
