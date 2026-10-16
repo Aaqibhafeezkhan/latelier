@@ -67,7 +67,7 @@ import { IndexService } from './mongo/IndexService.ts';
 import { CollectionAdminService } from './mongo/CollectionAdminService.ts';
 import { UserService } from './mongo/UserService.ts';
 import { WorkspaceTabRepo } from './db/repositories/WorkspaceTabRepo.ts';
-import { WorkspaceStateService } from './services/WorkspaceStateService.ts';
+import { WorkspaceStateService, applyRestoreTabsPref } from './services/WorkspaceStateService.ts';
 import { SavedQueryRepo } from './db/repositories/SavedQueryRepo.ts';
 import { SavedQueryService } from './services/SavedQueryService.ts';
 import { RecentQueryRepo } from './db/repositories/RecentQueryRepo.ts';
@@ -717,6 +717,7 @@ app.whenReady().then(() => {
   // Workspace tabs; opening a saved pipeline reads its stored stages.
   const tabsRepo = new WorkspaceTabRepo(db);
   const tabsSvc = new WorkspaceStateService(tabsRepo, savedSvc);
+  applyRestoreTabsPref(appState, tabsSvc);
 
   const recentRepo = new RecentQueryRepo(db);
   const recentSvc = new RecentQueryService(recentRepo, log);

@@ -1,5 +1,6 @@
 import React from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { createHashRouter, Navigate, RouterProvider } from 'react-router-dom';
+import { RootLayout } from './RootLayout';
 import { MantineProvider } from '@mantine/core';
 import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
@@ -7,17 +8,7 @@ import ConnectionManager from './pages/ConnectionManager';
 import NewConnection from './pages/NewConnection';
 import Workspace from './pages/Workspace';
 import { HintsProvider } from './hints/HintsProvider';
-import { SettingsProvider } from './pages/SettingsContext';
-import { ConnectionTransferProvider } from './features/connections/ConnectionTransferProvider';
-import { CommandPaletteRoot } from './commands/CommandPalette';
-import { PaletteContextProvider } from './commands/PaletteContext';
-import { GlobalCommands } from './commands/GlobalCommands';
-import { ConnectionPaletteCommands } from './commands/ConnectionPaletteCommands';
-import { TroubleshootingProvider } from './troubleshooting/TroubleshootingProvider';
-import { TroubleshootingPaletteCommand } from './troubleshooting/TroubleshootingPaletteCommand';
-import { UpdateReadyPrompt } from './features/updates/UpdateReadyPrompt';
 import { Splash } from './components/Splash';
-import { ErrorBoundary } from './components/ErrorBoundary';
 import { useTheme } from './ThemeContext';
 import { mantineTheme } from './theme/mantineTheme';
 
@@ -29,6 +20,32 @@ const SPLASH_DURATION_MS = 800;
 const isTestEnv =
   typeof window !== 'undefined' &&
   (window as unknown as { __atelierEnv__?: { isTest?: boolean } }).__atelierEnv__?.isTest === true;
+
+// A data router, not <HashRouter>: NewConnection's unsaved-changes guard uses
+// `useBlocker`, which only works under one. The provider stack lives in the
+// root layout route (RootLayout) so every screen still sits inside it.
+const router = createHashRouter([
+  {
+    element: <RootLayout />,
+    children: [
+      { path: '/', element: <Navigate to="/workspace" replace /> },
+      // Retired list-sidebar screen — the Switcher is how users reach
+      // Connections now; send any old bookmark home.
+      { path: '/connections', element: <Navigate to="/workspace" replace /> },
+      { path: '/connections/:id', element: <ConnectionManager /> },
+      { path: '/connections/new', element: <NewConnection /> },
+      { path: '/connections/:id/edit', element: <NewConnection /> },
+      // Legacy route, redirect for any bookmarks
+      { path: '/new-connection', element: <Navigate to="/connections/new" replace /> },
+      { path: '/workspace', element: <Workspace /> },
+      // Aggregation lives inside /workspace as a tab kind (A01).
+      { path: '/aggregation', element: <Navigate to="/workspace" replace /> },
+    ],
+  },
+]);
+
+// Vite re-evaluates this module on a hot update; drop the old router's listeners.
+if (import.meta.hot) import.meta.hot.dispose(() => router.dispose());
 
 export default function App() {
   const [splashVisible, setSplashVisible] = React.useState(!isTestEnv);
@@ -47,38 +64,7 @@ export default function App() {
         <Notifications position="bottom-right" />
         <HintsProvider>
           {splashVisible && <Splash />}
-          <HashRouter>
-            <PaletteContextProvider>
-              <SettingsProvider>
-                <ConnectionTransferProvider>
-                <CommandPaletteRoot>
-                  <TroubleshootingProvider>
-                    <GlobalCommands />
-                    <UpdateReadyPrompt />
-                    <ConnectionPaletteCommands />
-                    <TroubleshootingPaletteCommand />
-                    <ErrorBoundary>
-                      <Routes>
-                      <Route path="/" element={<Navigate to="/workspace" replace />} />
-                      {/* Retired list-sidebar screen — the Switcher is how users
-                          reach Connections now; send any old bookmark home. */}
-                      <Route path="/connections" element={<Navigate to="/workspace" replace />} />
-                      <Route path="/connections/:id" element={<ConnectionManager />} />
-                      <Route path="/connections/new" element={<NewConnection />} />
-                      <Route path="/connections/:id/edit" element={<NewConnection />} />
-                      {/* Legacy route, redirect for any bookmarks */}
-                      <Route path="/new-connection" element={<Navigate to="/connections/new" replace />} />
-                      <Route path="/workspace" element={<Workspace />} />
-                      {/* Aggregation lives inside /workspace as a tab kind (A01). */}
-                      <Route path="/aggregation" element={<Navigate to="/workspace" replace />} />
-                    </Routes>
-                    </ErrorBoundary>
-                  </TroubleshootingProvider>
-                </CommandPaletteRoot>
-                </ConnectionTransferProvider>
-              </SettingsProvider>
-            </PaletteContextProvider>
-          </HashRouter>
+          <RouterProvider router={router} />
         </HintsProvider>
       </ModalsProvider>
     </MantineProvider>

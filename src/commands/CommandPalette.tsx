@@ -11,7 +11,9 @@ import { useHints } from '../hints/HintsContext';
 import { useFeatureHint } from '../hints/useFeatureHint';
 import { FeatureHint } from '../hints/FeatureHint';
 import { api } from '../api/atelier';
-import { commandRegistry } from './registry';
+import { useRegistrySnapshot } from './useRegistrySnapshot';
+import { formatShortcut } from './shortcutLabel';
+import { isMacRenderer } from '../utils/platform';
 import { usePaletteContext } from './PaletteContext';
 import { groupRows, rankCommands } from './rank';
 import { GROUP_LABEL } from './types';
@@ -81,17 +83,6 @@ export function usePaletteApi(): PaletteApi {
   );
 }
 
-// ── Registry snapshot ─────────────────────────────────────────────────────────
-
-function useRegistrySnapshot(): Command[] {
-  const subscribe = React.useCallback(
-    (cb: () => void) => commandRegistry.subscribe(cb),
-    [],
-  );
-  const getSnapshot = React.useCallback(() => commandRegistry.list(), []);
-  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-}
-
 // ── Action item renderer ──────────────────────────────────────────────────────
 
 interface ActionItemProps {
@@ -154,7 +145,7 @@ function ActionItem({ cmd, isCursor, onActivate, onHover, index }: ActionItemPro
             color: 'var(--atelier-text-ghost)',
           }}
         >
-          {cmd.shortcut}
+          {formatShortcut(cmd.shortcut, isMacRenderer())}
         </span>
       )}
     </button>
