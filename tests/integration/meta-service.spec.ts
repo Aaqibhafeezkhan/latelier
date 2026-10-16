@@ -271,6 +271,28 @@ describe('MetaService', () => {
       expect(JSON.parse(d.options.pipeline!)).toEqual([{ $match: { a: { $numberInt: '1' } } }]);
     });
 
+    it('lists a view without reading its storage stats or logging a warning for it', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('v').catch(() => undefined);
+        await db.dropCollection('src').catch(() => undefined);
+        await db.createCollection('src');
+        await db.createCollection('v', { viewOn: 'src', pipeline: [] });
+      });
+      const warn = vi.fn();
+      const logged = new MetaService(pool, { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() });
+      const aggregate = vi.spyOn(Collection.prototype, 'aggregate');
+
+      const rows = await logged.listCollections({ connectionId: connId, dbName: DETAILS_DB });
+
+      const view = rows.find((r) => r.name === 'v');
+      expect(view).toMatchObject({ name: 'v', type: 'view' });
+      expect(view?.documentCount).toBeUndefined();
+      expect(rows.find((r) => r.name === 'src')?.type).toBe('collection');
+      expect(aggregate.mock.contexts.map((c) => (c as Collection).collectionName)).not.toContain('v');
+      expect(warn).not.toHaveBeenCalled();
+    });
+
     it('throws NotFoundError for a collection that does not exist', async () => {
       await setup();
       await expect(

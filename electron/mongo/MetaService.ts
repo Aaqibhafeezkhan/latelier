@@ -131,6 +131,8 @@ export class MetaService {
         type: collectionType(s.type),
         capped: Boolean((s.options as { capped?: boolean } | undefined)?.capped),
       };
+      // A view has no storage of its own, and `$collStats` fails on one.
+      if (info.type === 'view') return info;
       try {
         const stats = await readStorageStats(db, s.name, this.log);
         if (stats.documentCount !== undefined) info.documentCount = stats.documentCount;
