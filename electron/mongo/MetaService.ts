@@ -171,7 +171,8 @@ export class MetaService {
     };
     // A view has no storage of its own to measure.
     if (type !== 'view') {
-      const { lastModified: _unused, ...stats } = await readStorageStats(db, spec.name);
+      const stats = await readStorageStats(db, spec.name);
+      delete stats.lastModified;
       details.stats = stats;
     }
     return details;

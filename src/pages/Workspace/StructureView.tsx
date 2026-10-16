@@ -1,5 +1,6 @@
 import type { SchemaTabState } from '@shared/types';
 import { IndexesTab, type IndexCreateRequest } from '../IndexesTab';
+import { CollectionStatsSection } from './CollectionStatsSection';
 import { SchemaView } from './SchemaView';
 
 interface Props {
@@ -15,7 +16,8 @@ interface Props {
 
 /**
  * The collection tab's Structure sub-view (W16 Tier 2, ADR 0003): the
- * namespace-scoped indexes stacked above the sampled schema, in one
+ * statistics header and the namespace-scoped indexes stacked above the
+ * sampled schema, in one
  * scrolling pane rather than a fourth tab. `IndexesTab` and `SchemaView`
  * each used to own their own `flex:1; overflow:auto` scroller, sized by a
  * flex parent with a definite height (the collection tab's result panel).
@@ -37,6 +39,7 @@ export function StructureView({
 }: Props) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+      <CollectionStatsSection connectionId={connectionId} dbName={dbName} collection={collection} />
       <IndexesTab
         connectionId={connectionId}
         dbName={dbName}
