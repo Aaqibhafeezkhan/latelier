@@ -378,11 +378,9 @@ describe('buildPlanTree', () => {
     const ix = root!.children[0].children[0];
     expect(ix).toMatchObject({ stage: 'IXSCAN', indexName: 'a_1', keyPattern: { a: 1 } });
     for (const n of [root!, root!.children[0], ix]) {
-      expect(n.nReturned).toBeUndefined();
-      expect(n.docsExamined).toBeUndefined();
-      expect(n.keysExamined).toBeUndefined();
-      expect(n.timeMs).toBeUndefined();
+      expect(Object.keys(n).filter((k) => ['nReturned', 'docsExamined', 'keysExamined', 'timeMs'].includes(k))).toEqual([]);
     }
+    expect('keyPattern' in root!).toBe(false);
   });
 
   it('(5) an aggregation puts the $cursor subtree first under a synthetic pipeline root', () => {
@@ -397,7 +395,7 @@ describe('buildPlanTree', () => {
     expect(root?.collscan).toBe(false);
     expect(root?.children.map((c) => c.stage)).toEqual(['SORT', '$group', '$sort']);
     expect(root!.children[0].children[0].stage).toBe('FETCH');
-    expect(root!.children[1]).toMatchObject({ nReturned: 4, timeMs: 3, children: [] });
+    expect(root!.children[1]).toMatchObject({ nReturned: 4, timeMs: 3, collscan: false, children: [] });
     expect(root!.children[2]).toMatchObject({ nReturned: 4, timeMs: 1 });
   });
 
@@ -467,7 +465,7 @@ describe('buildPlanTree', () => {
         },
       },
     });
-    expect(root).toEqual({ stage: 'IXSCAN', collscan: false, children: [] });
+    expect(root).toStrictEqual({ stage: 'IXSCAN', collscan: false, children: [] });
   });
 
   it('(9) null, {}, and unknown shapes give null', () => {
@@ -495,6 +493,22 @@ describe('buildPlanTree', () => {
       },
     });
     expect(root?.children.map((c) => c.stage)).toEqual(['IXSCAN']);
+  });
+
+  it('(9d) stays total on malformed shards, winning plans and aggregation entries', () => {
+    expect(buildPlanTree({ queryPlanner: { winningPlan: null } })).toBeNull();
+    expect(
+      buildPlanTree({ queryPlanner: { winningPlan: { stage: 'SHARD_MERGE', shards: [null, 'x'] } } })?.children,
+    ).toEqual([]);
+    expect(buildPlanTree({ stages: [{ $cursor: { weird: 1 } }, { $group: {} }] })).toBeNull();
+  });
+
+  it('(9e) an aggregation lists the entries after the $cursor that name a $-operator', () => {
+    const cursor = { $cursor: { queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } } };
+    const root = buildPlanTree({
+      stages: [{ $limit: 1 }, cursor, null, 'x', { nReturned: 3 }, { $sort: {}, nReturned: 1 }],
+    });
+    expect(root?.children.map((c) => c.stage)).toEqual(['COLLSCAN', '$sort']);
   });
 
   it('(10) the badge summary names the index for IXSCAN and none for COLLSCAN', () => {

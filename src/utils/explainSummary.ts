@@ -158,8 +158,9 @@ function applyMetrics(node: PlanNode, from: Record<string, unknown>): void {
 /** Child stages of one classic stage: `inputStage`, then every `inputStages`
  * element, then each shard's own plan. */
 function childStages(stage: Record<string, unknown>): unknown[] {
-  const out: unknown[] = [];
-  if (isRecord(stage.inputStage)) out.push(stage.inputStage);
+  // `stageToNode` drops anything that is not a stage record, so the entries
+  // are not pre-filtered here.
+  const out: unknown[] = [stage.inputStage];
   if (Array.isArray(stage.inputStages)) out.push(...(stage.inputStages as unknown[]));
   if (Array.isArray(stage.shards)) {
     for (const shard of stage.shards as unknown[]) {
