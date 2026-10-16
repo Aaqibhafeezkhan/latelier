@@ -6,6 +6,7 @@ import {
   ipcMain,
   Menu,
   nativeTheme,
+  powerMonitor,
   safeStorage,
   screen,
   session,
@@ -83,6 +84,7 @@ import { ImportService } from './mongo/ImportService.ts';
 import { DEFAULT_EXPORT_CAP, QueryService } from './mongo/QueryService.ts';
 import { DocumentService } from './mongo/DocumentService.ts';
 import { createLogger, type Logger } from './log.ts';
+import { confirmQuit, describeRunningWork, type RunningWork } from './quitGuard.ts';
 import { PrivateModeError } from './utils/privateFs.ts';
 import { createRouter } from './ipc/router.ts';
 import { senderCheck } from './ipc/senderGuard.ts';
@@ -383,6 +385,10 @@ function createWindow(): void {
     importWizardSvc?.clearPending();
   });
 
+  // Windows: the session is ending and cannot be held back, so asking is moot.
+  win.on('session-end', () => {
+    systemShutdown = true;
+  });
   win.on('resize', scheduleBoundsWrite);
   win.on('move', scheduleBoundsWrite);
   win.on('maximize', persistBoundsNow);
@@ -432,8 +438,52 @@ app.on('activate', () => {
 // Graceful shutdown ----------------------------------------------------------
 
 let shuttingDown = false;
+// Set once the user has said yes to quitting over running work, so the
+// `app.quit()` that follows goes straight through.
+let quitConfirmed = false;
+let confirmingQuit = false;
+// The system is shutting down or logging out (see `powerMonitor` and the
+// window's `session-end`): the prompt is skipped, the work is going anyway.
+let systemShutdown = false;
+
+function runningWork(): RunningWork {
+  return { scripts: scriptSvc?.runningCount() ?? 0, shellCommands: mshellSvc?.busyCount() ?? 0 };
+}
+
+async function askToQuit(message: string): Promise<boolean> {
+  const options = {
+    type: 'warning' as const,
+    buttons: ['Cancel', 'Quit'],
+    defaultId: 0,
+    cancelId: 0,
+    title: "Quit L'Atelier?",
+    message,
+    detail: 'Work in progress is cancelled and its results are lost.',
+  };
+  const result = await (win && !win.isDestroyed()
+    ? dialog.showMessageBox(win, options)
+    : dialog.showMessageBox(options));
+  return result.response === 1;
+}
+
 app.on('before-quit', async (e) => {
   if (shuttingDown) return;
+  const running = runningWork();
+  if (!quitConfirmed && !systemShutdown && describeRunningWork(running) !== null) {
+    e.preventDefault();
+    // A second quit request while the question is open is the same question.
+    if (confirmingQuit) return;
+    confirmingQuit = true;
+    try {
+      if (await confirmQuit({ counts: () => running, confirm: askToQuit })) {
+        quitConfirmed = true;
+        app.quit();
+      }
+    } finally {
+      confirmingQuit = false;
+    }
+    return;
+  }
   shuttingDown = true;
   e.preventDefault();
   log?.info('shutdown', 'begin');
@@ -526,6 +576,11 @@ app.whenReady().then(() => {
   // as "development" in every shipped build. `isPackaged` cannot be omitted.
   log = createLogger(userDataDir, { level: app.isPackaged ? 'info' : 'debug' });
   log.info('boot', 'starting', { userDataDir, platform: process.platform });
+  // macOS and Linux: the system is shutting down or restarting. Asking would
+  // only hold it up (or be answered by nobody), so quit without the prompt.
+  powerMonitor.on('shutdown', () => {
+    systemShutdown = true;
+  });
 
   // Security posture first: nothing may create a webContents before these are
   // in place. The listener also fires for the main window.
