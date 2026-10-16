@@ -32,6 +32,8 @@ interface Session {
   exited: Promise<void>;
   isExited: boolean;
   post: (message: ShellInput) => void;
+  /** Lines written whose prompt has not come back yet: more than one when a late result is pending behind newer lines. */
+  pending: number;
 }
 
 /**
@@ -129,6 +131,7 @@ export class ShellService {
     const session: Session = {
       info,
       isExited: false,
+      pending: 0,
       exited,
       post: (message) => handle.postMessage(message),
       end: (reason) => {
@@ -154,7 +157,10 @@ export class ShellService {
       if (session.isExited) return;
       if (isShellMessage(message)) {
         if (message.type === 'shell-out') this.emit({ sessionId, kind: 'stdout', data: message.data });
-        else session.end();
+        else if (message.type === 'shell-prompt') {
+          session.pending = Math.max(0, session.pending - 1);
+          this.emit({ sessionId, kind: 'prompt' });
+        } else session.end();
       } else if (isRunnerMessage(message) && message.type === 'rpc') {
         void host
           .handle(message)
@@ -205,6 +211,14 @@ export class ShellService {
     // its writes, since the REPL can't reliably tell reads from writes.
     this.pool.assertWritable(s.info.connectionId);
     s.post({ type: 'shell-in', data: rewriteShellSugar(data) });
+    s.pending += 1;
+  }
+
+  /** Sessions with a line still running. An idle shell is not counted. */
+  busyCount(): number {
+    let n = 0;
+    for (const s of this.sessions.values()) if (s.pending > 0) n += 1;
+    return n;
   }
 
   async stop(sessionId: string): Promise<void> {

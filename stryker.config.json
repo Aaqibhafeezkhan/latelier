@@ -89,6 +89,7 @@
     "electron/ipc/prefKeys.ts",
     "electron/script-runner/protocol.ts",
     "electron/script-runner/shellProtocol.ts",
+    "electron/quitGuard.ts",
     "electron/script-runner/encodeResult.ts",
     "electron/script-runner/scriptSource.ts",
     "electron/script-runner/rpcSurface.ts",
