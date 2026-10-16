@@ -43,5 +43,7 @@ export interface Command {
   keywords?: string[];
   shortcut?: string;
   when?: (ctx: PaletteContext) => boolean;
+  /** Listed only once the user types: one row per collection would flood the empty palette. */
+  hideWhenEmptyQuery?: boolean;
   perform: (ctx: PaletteContext) => void | Promise<void>;
 }

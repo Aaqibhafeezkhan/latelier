@@ -10,6 +10,7 @@ import { useRovingHighlight } from '../hooks/useRovingHighlight';
 import { useHints } from '../hints/HintsContext';
 import { useFeatureHint } from '../hints/useFeatureHint';
 import { FeatureHint } from '../hints/FeatureHint';
+import { api } from '../api/atelier';
 import { commandRegistry } from './registry';
 import { usePaletteContext } from './PaletteContext';
 import { groupRows, rankCommands } from './rank';
@@ -17,6 +18,7 @@ import { GROUP_LABEL } from './types';
 import type { Command } from './types';
 
 const MRU_CAP = 8;
+const MRU_PREF_KEY = 'ui.commandPalette.mru';
 
 // ── Dedicated Spotlight store ────────────────────────────────────────────────
 // Use a private store instead of the package's default. The public CJS bundle
@@ -323,7 +325,37 @@ export function CommandPalette({ registerApi }: PaletteShellProps) {
     });
   }, [registerApi, openPalette, closePalette, togglePalette]);
 
+  // History is a convenience: a failed read or write leaves the palette fully
+  // usable, so neither surfaces an error. Stale ids are dropped by rankCommands.
+  React.useEffect(() => {
+    let active = true;
+    api.prefs
+      .get<unknown>(MRU_PREF_KEY)
+      .then((stored) => {
+        if (!active || !Array.isArray(stored)) return;
+        if (!stored.every((v): v is string => typeof v === 'string')) return;
+        // Merged behind anything performed while the read was in flight.
+        setRecentIds((prev) =>
+          [...prev, ...stored.filter((id) => !prev.includes(id))].slice(0, MRU_CAP),
+        );
+      })
+      .catch(() => { /* best-effort: start without history */ });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Written from an effect, not the state updater (StrictMode runs updaters
+  // twice), and only after a perform — the seed is never written back.
+  const recentDirtyRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!recentDirtyRef.current) return;
+    recentDirtyRef.current = false;
+    void api.prefs.set(MRU_PREF_KEY, recentIds).catch(() => { /* best-effort */ });
+  }, [recentIds]);
+
   const recordRecent = React.useCallback((id: string) => {
+    recentDirtyRef.current = true;
     setRecentIds((prev) => {
       const next = [id, ...prev.filter((p) => p !== id)];
       return next.slice(0, MRU_CAP);

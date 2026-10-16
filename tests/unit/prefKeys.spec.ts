@@ -16,6 +16,7 @@ const VALID: Record<string, unknown> = {
   'ui.workspace.sidebarCollapsed': false,
   'ui.workspace.builderCollapsed': true,
   'ui.workspace.documentEditorSize': { width: 600, height: 400 },
+  'ui.commandPalette.mru': ['tab.new', 'query.run'],
   [CONN_KEY]: true,
 };
 
@@ -69,6 +70,10 @@ describe('prefKeys', () => {
     ['ui.hints.dismissed', { dismissedIds: ['x'.repeat(65)] }],
     ['ui.hints.dismissed', { dismissedIds: [], resetAt: 'x'.repeat(65) }],
     [CONN_KEY, 'true'],
+    ['ui.commandPalette.mru', 'tab.new'],
+    ['ui.commandPalette.mru', [1]],
+    ['ui.commandPalette.mru', Array.from({ length: 17 }, () => 'a')],
+    ['ui.commandPalette.mru', ['x'.repeat(513)]],
   ])('%s rejects %j', (key, value) => {
     expect(prefSetSchema(key)?.safeParse(value).success).toBe(false);
   });
@@ -85,6 +90,11 @@ describe('prefKeys', () => {
     ).toBe(true);
     expect(
       prefSetSchema('ui.workspace.documentEditorSize')?.safeParse({ width: 1 }).success,
+    ).toBe(true);
+    expect(
+      prefSetSchema('ui.commandPalette.mru')?.safeParse(
+        Array.from({ length: 16 }, () => 'x'.repeat(512)),
+      ).success,
     ).toBe(true);
   });
 });
