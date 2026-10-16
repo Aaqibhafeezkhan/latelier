@@ -203,6 +203,18 @@ describe('lineToInput', () => {
     expect(lineInputProblem(c)).toBeNull();
   });
 
+  it.each([
+    ['left blank', { index: 0, username: '', password: '' }],
+    ['not sent', undefined],
+  ])('a password from the file with the username %s saves without authentication', (_, creds) => {
+    const fromFile = { input: { ...ok('mongodb://h').input, password: 'pw' } };
+    const c = lineToInput(fromFile, 'h', DEFAULTS, creds);
+    expect(c.authMech).toBe('none');
+    expect(c).not.toHaveProperty('authUsername');
+    expect(c).not.toHaveProperty('password');
+    expect(lineInputProblem(c)).toBeNull();
+  });
+
   it('a cleared username leaves a mechanism that needs none, such as AWS, alone', () => {
     const c = lineToInput(ok('mongodb://h/?authMechanism=MONGODB-AWS'), 'h', DEFAULTS, { index: 0, username: '' });
     expect(c.authMech).toBe('awsiam');

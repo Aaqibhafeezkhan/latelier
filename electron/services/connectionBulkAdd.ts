@@ -90,9 +90,12 @@ export function lineToInput(
   const parsed = line.input;
   const cleared = creds?.username === '' && PASSWORD_MECHS.has(parsed.authMech!);
   const username = cleared ? undefined : creds?.username || parsed.authUsername;
-  const password = cleared ? undefined : creds?.password || parsed.password;
   const srv = parsed.connectionType === 'srv';
   const authMech = cleared ? 'none' : parsed.authMech === 'none' && username ? 'default' : parsed.authMech!;
+  // A row left without a username saves without authentication, so a password
+  // that came with it from the file has nothing to sign in with and is dropped.
+  // A typed one is kept, so the import rules still refuse it in words.
+  const password = cleared ? undefined : creds?.password || (authMech === 'none' ? undefined : parsed.password);
   return {
     name,
     color: parsed.color ?? DEFAULT_COLOR,

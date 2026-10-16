@@ -505,6 +505,20 @@ describe('ImportWizardService', () => {
       const mapped = a.wizard.importMap({ token: opened.token, at: '', mapping: { host: 'host', name: 'a.b' } });
       expect(okRow(mapped.review, 0).savedAs).toBe('h.example');
     });
+
+    it('saves a row whose password came without a username, left untouched, without authentication', async () => {
+      const a = install();
+      const opened = await open(a.wizard, writeFile('p.json', '[{"uri":"mongodb://h.example","pass":"from-file"}]'));
+      if (opened.source !== 'unknown') throw new Error('expected unknown');
+      const mapped = a.wizard.importMap({ token: opened.token, at: '', mapping: { connectionString: 'uri', password: 'pass' } });
+      expect(okRow(mapped.review, 0)).toMatchObject({ hasPassword: true, needsCredentials: true });
+      // The review sends no credentials for a row the user never touched.
+      const result = await a.wizard.importCommit({ token: opened.token, indices: [0], readOnly: false, credentials: [], directConnection: [] });
+      expect(result.skipped).toEqual([]);
+      const saved = a.conns.get(result.created[0]!.id);
+      expect(saved).toMatchObject({ authMech: 'none', hasPasswordStored: false });
+      expect(saved.authUsername ?? '').toBe('');
+    });
   });
 
   describe('Pasted URIs', () => {
