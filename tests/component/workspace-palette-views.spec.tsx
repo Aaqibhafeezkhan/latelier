@@ -119,6 +119,33 @@ describe('palette: shell and structure entries', () => {
     expect(await screen.findByLabelText('Sample size')).toBeTruthy();
   });
 
+  // The schema sits below the whole index list in one scroller, so selecting
+  // Structure alone can leave it below the fold; the command must scroll to
+  // it, and again when Structure is already the active view.
+  it('"Go to Schema" brings the schema section into view, also when Structure is already active', async () => {
+    const scrolled: Element[] = [];
+    const proto = HTMLElement.prototype as { scrollIntoView?: (arg?: unknown) => void };
+    const original = proto.scrollIntoView;
+    proto.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      mount([collectionTab()]);
+      await screen.findByLabelText('Close orders');
+
+      await run('schema', 'Go to Schema');
+      const region = await screen.findByRole('region', { name: 'Schema' });
+      await waitFor(() => expect(scrolled).toContain(region));
+
+      scrolled.length = 0;
+      await run('schema', 'Go to Schema');
+      await waitFor(() => expect(scrolled).toContain(region));
+      expect(scrolled.some((el) => el.getAttribute('aria-label') === 'Indexes')).toBe(false);
+    } finally {
+      proto.scrollIntoView = original;
+    }
+  });
+
   it('"Go to Indexes" switches to the Structure view and brings the indexes into view', async () => {
     const scrolled: Element[] = [];
     const proto = HTMLElement.prototype as { scrollIntoView?: (arg?: unknown) => void };

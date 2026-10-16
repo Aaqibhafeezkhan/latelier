@@ -82,7 +82,11 @@ export function SchemaView({
   // 0003) rather than filling a flex parent with its own internal scroll.
   // See the matching note in IndexesTab.tsx.
   return (
-    <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', overflow: 'visible' }}>
+    <div
+      role="region"
+      aria-label="Schema"
+      style={{ flex: 'none', display: 'flex', flexDirection: 'column', overflow: 'visible' }}
+    >
       {/* Header */}
       <div
         style={{

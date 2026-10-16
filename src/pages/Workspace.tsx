@@ -336,18 +336,22 @@ function WorkspaceInner() {
   const tabsRef = useLatest(tabs);
   const focusedConnectionRef = useLatest(focusedConnection);
 
-  // "Go to Indexes" from the palette: the Structure view may not be mounted
-  // yet when the command runs, so the scroll waits for the render that shows it.
-  const scrollToIndexesRef = React.useRef(false);
-  const [indexesScrollNonce, setIndexesScrollNonce] = React.useState(0);
+  // "Go to Indexes" / "Go to Schema" from the palette: the Structure view may
+  // not be mounted yet when the command runs, so the scroll waits for the
+  // render that shows it. The nonce re-runs it when Structure is already
+  // active. Both sections share one scroller, so selecting the view alone can
+  // leave the schema below a long index list.
+  const structureScrollRef = React.useRef<'Indexes' | 'Schema' | null>(null);
+  const [structureScrollNonce, setStructureScrollNonce] = React.useState(0);
   React.useEffect(() => {
-    if (!scrollToIndexesRef.current || activeView !== 'structure') return;
-    scrollToIndexesRef.current = false;
+    const target = structureScrollRef.current;
+    if (!target || activeView !== 'structure') return;
+    structureScrollRef.current = null;
     document
-      .querySelector<HTMLElement>('[role="region"][aria-label="Indexes"]')
+      .querySelector<HTMLElement>(`[role="region"][aria-label="${target}"]`)
       // jsdom has no scrollIntoView.
       ?.scrollIntoView?.({ block: 'start' });
-  }, [indexesScrollNonce, activeView]);
+  }, [structureScrollNonce, activeView]);
 
   // Stable callbacks for the major panels, reading state via the `*Ref` bag
   // so an unrelated re-render doesn't cascade through every child.
@@ -645,7 +649,10 @@ function WorkspaceInner() {
         when: () => activeCollectionRef.current !== null,
         perform: () => {
           const a = activeCollectionRef.current;
-          if (a) tabsRef.current.setActiveView(a.id, 'structure');
+          if (!a) return;
+          structureScrollRef.current = 'Schema';
+          setStructureScrollNonce((n) => n + 1);
+          tabsRef.current.setActiveView(a.id, 'structure');
         },
       },
       {
@@ -657,8 +664,8 @@ function WorkspaceInner() {
         perform: () => {
           const a = activeCollectionRef.current;
           if (!a) return;
-          scrollToIndexesRef.current = true;
-          setIndexesScrollNonce((n) => n + 1);
+          structureScrollRef.current = 'Indexes';
+          setStructureScrollNonce((n) => n + 1);
           tabsRef.current.setActiveView(a.id, 'structure');
         },
       },
