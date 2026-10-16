@@ -22,7 +22,7 @@ Snapshot of what's currently shipped in `src/pages/Workspace/DbCollectionNavigat
 | Tree rendering (connection / db / coll / view / ts) | ✅ live         | §1, §7                             |
 | Filter (with force-load of unexpanded DBs)          | ✅ live         | §4                                 |
 | Click modifiers (plain / Cmd / Alt / right-click)   | ✅ live         | §5.1                               |
-| Context menu — connection row                       | ✅ live (some disabled) | §5.2; Disconnect/Reconnect/Refresh/Edit live; "Copy connection string" disabled pending URI IPC |
+| Context menu — connection row                       | ✅ live         | §5.2; Disconnect/Reconnect/Refresh/Edit live; "Copy connection string" live through `conn:getUri`, without the password |
 | Context menu — DB row                               | ✅ live (some disabled) | §5.2; Refresh/Copy-name live; Create-collection/Drop-database disabled pending IPC + W02b, W02d |
 | Context menu — collection/view/ts row               | ✅ live (some disabled) | §5.2; Open/Copy live; Rename/Drop disabled pending IPC + W02a, W02c |
 | Hover action bar on DB rows                         | ✅ live (partial) | §5b; Refresh-collections live; Create-collection disabled pending IPC |
@@ -234,7 +234,7 @@ Same as collection row minus Rename (views are immutable by name), plus:
 | Item            | Icon | Destructive | IPC requirement                                |
 |-----------------|------|-------------|------------------------------------------------|
 | Duplicate view  | Copy | no          | `mongo:createCollection` with `viewOn` + `pipeline` |
-| Modify view     | Edit | no          | `mongo:collMod` or equivalent — **very likely punt to a follow-up**; mark disabled with "Not yet implemented" tooltip until its own spec lands |
+| Modify view     | Edit | no          | ✅ `meta:collectionDetails` to prefill, `collection:modify` (`collMod`) to save. A dialog with a "Source collection" input and a plain "Pipeline" textarea (resizable; Escape closes it); a pipeline that is not a JSON array is refused inline. Saving refreshes the database |
 | Drop view       | Trash| **yes**     | `mongo:dropCollection` (§12) → W02a            |
 
 #### Timeseries row
@@ -256,7 +256,7 @@ Limited variant (MongoDB doesn't support rename on TS collections):
 |-----------------------|------------|-------------|--------|---------------------------|
 | Refresh databases     | Sync       | no          | ✅     | existing `meta:listDatabases` |
 | Edit connection       | Edit       | no          | ✅     | existing — route to `/connections/:id` via `onEditConnection` prop |
-| Copy connection string| Copy       | no          | 🚧     | needs a `conn:getUri` IPC that assembles the URI in main (password handling TBD) |
+| Copy connection string| Copy       | no          | ✅     | `conn:getUri` builds the URI in main from the saved connection **without its password**: the username, host, options and TLS flags are kept, the stored secret never crosses IPC or reaches the clipboard. The toast says the password is not included |
 | ───                   |            |             |        |                           |
 | Disconnect            | Disconnect | **yes**     | ✅     | existing `mongo:disconnect`. Tabs are **not** auto-closed on disconnect — see §14 deliberate choice |
 | Reconnect             | Sync       | no          | ✅     | existing `mongo:connect`. Shown in place of Disconnect when current status is not `connected` |
@@ -434,7 +434,6 @@ While any mutation IPC is in flight (drop / rename / create): affected row shows
 - Destructive actions (drop collection / drop DB / rename / create / duplicate view / modify view) go through confirmation modals per W02a–d. Today every destructive menu item is `disabled` with a "Coming soon" tooltip.
 - Action definitions are authored once per row kind in a shared `actions.ts` module. Currently each menu is built inline in the navigator; refactor lands when the first live mutation (W02d likely) is implemented.
 - Tab strip updates (close tabs on dropped namespace, rename tabs on namespace rename) — not exercised until mutation IPC lands.
-- Copy connection string (needs `conn:getUri`-equivalent IPC).
 - Inline per-DB error cards for `listCollections` failures (§8).
 - Keyboard stretch (Home / End are live; `*` expand-siblings and letter type-ahead remain deferred).
 
@@ -492,6 +491,8 @@ The following channels are **prerequisites** for the matching §5 actions. Each 
 | `mongo:dropDatabase`      | `{ connectionId; dbName }`                                          | `{ dropped: boolean }`  | no            | W02b           |
 | `mongo:renameCollection`  | `{ connectionId; dbName; collection; newName; dropTarget?: boolean }` | `{ newNamespace: string }` | no         | W02c           |
 | `mongo:createCollection`  | `{ connectionId; dbName; name; options? }` (options covers capped, timeseries, viewOn+pipeline) | `{ namespace: string }` | no | W02d, hover bar |
+| `collection:modify`       | `{ connectionId; dbName; collection; options }`: either `validator`/`validationLevel`/`validationAction`, or `viewOn` + `pipeline` together | `{ ok: true }` | no | Modify view, W16 §15 |
+| `conn:getUri`             | `{ id }`                                                            | `{ uri: string }`, never with the password | no | Copy connection string |
 
 Non-functional requirements for the new handlers:
 - Errors must surface as `AppError` subclasses: `NotFoundError` (db/coll missing), `ConflictError` (rename target exists), `MongoOpError` (wrapping the driver error). `electron/errors.ts` already covers these.
@@ -525,7 +526,7 @@ Documented so reviewers don't reopen these:
 - **Virtualized list.** Defer indefinitely; pure-flex layout (§1a of the redesign analysis) is simpler and sufficient.
 - **Multi-connection drawer.** Unchanged from v1 — stays deferred *as originally scoped here*. Shipped instead as one navigator root per Connection; see [X16](./X16-multi-connection.md).
 - **MongoDB shell, performance metrics, query insights, cluster overview.** Compass-only; do not port.
-- **Modify view.** Requires its own A-series pipeline editor spec. Context-menu entry stays disabled with a tooltip until then.
+- **Modify view in an aggregation tab.** Modify view edits the pipeline as JSON in a textarea dialog; editing it stage by stage in the aggregation builder is a later enhancement, not planned here.
 
 ---
 
