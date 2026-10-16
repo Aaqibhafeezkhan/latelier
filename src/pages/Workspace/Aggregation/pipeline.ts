@@ -1,6 +1,6 @@
 import type { PipelineState, Stage, StageOp } from '@shared/types';
 import { prettyPrintJsonKeepingBigInts } from '../../../utils/bigIntJson';
-import { isValidEjson } from '../../../utils/ejson';
+import { ejsonParse, ejsonStringify, isValidEjson } from '../../../utils/ejson';
 import { refusalMessage, repairToCanonicalEjson } from '../../../utils/shellSyntax';
 import { stageOperatorSummary } from '../../../features/fieldSuggestions/operators';
 
@@ -354,4 +354,21 @@ export function formatBody(body: string): string {
   } catch {
     return body;
   }
+}
+
+/**
+ * The enabled stages as one canonical EJSON array, the `pipeline` a view is
+ * created with. Throws naming the first enabled stage whose body does not parse.
+ */
+export function stagesToPipelineJson(stages: Stage[]): string {
+  const pipeline = stages
+    .filter((s) => s.enabled)
+    .map((s) => {
+      try {
+        return { [s.op]: ejsonParse(s.body) };
+      } catch {
+        throw new Error(`stage ${s.id} (${s.op}): invalid EJSON`);
+      }
+    });
+  return ejsonStringify(pipeline);
 }
