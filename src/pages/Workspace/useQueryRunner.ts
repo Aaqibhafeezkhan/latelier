@@ -140,10 +140,14 @@ export function useQueryRunner({
   // The cancelToken currently owning `target.id`'s in-flight find, so
   // `cancel()` and a superseding `run()` know what to hand `query:cancel`.
   const cancelTokensRef = useRef<Map<string, string>>(new Map());
-  // The last `lastRun` the runner wrote per target. A late plan lands only on
-  // the run that wrote it: a newer run that wrote nothing (cancelled before
-  // its find settled) leaves the screen on this run, and its plan is still true.
-  const lastWrittenRef = useRef<Map<string, LastRun>>(new Map());
+  // Which write of a `lastRun` is the latest per target, as a number rather
+  // than the `lastRun` itself: the runner outlives closed tabs, and holding
+  // their documents would keep every closed tab's page alive. A late plan lands
+  // only on the run that wrote it: a newer run that wrote nothing (cancelled
+  // before its find settled) leaves the screen on this run, and its plan is
+  // still true.
+  const lastWrittenRef = useRef<Map<string, number>>(new Map());
+  const writeSeqRef = useRef(0);
   // The plan last received per target, with the query it explained. A page
   // change runs the same query, so it keeps this plan instead of asking the
   // server to explain it again.
@@ -211,9 +215,12 @@ export function useQueryRunner({
       runTokenRef.current.set(target.id, runToken);
       const cancelToken = crypto.randomUUID();
       cancelTokensRef.current.set(target.id, cancelToken);
-      const patchState = (id: string, patch: Partial<CollectionTabState>) => {
-        if (patch.lastRun) lastWrittenRef.current.set(id, patch.lastRun);
+      /** Returns the write's number when it writes a `lastRun`. */
+      const patchState = (id: string, patch: Partial<CollectionTabState>): number | undefined => {
+        let seq: number | undefined;
+        if (patch.lastRun) lastWrittenRef.current.set(id, (seq = ++writeSeqRef.current));
         patchRef.current(id, patch);
+        return seq;
       };
       const recordEvent = recordRef.current;
       const requested: CollectionTabState = override
@@ -353,7 +360,7 @@ export function useQueryRunner({
           ranAt: new Date().toISOString(),
           ...(keepPlan ? { plan: known.plan } : {}),
         };
-        patchState(target.id, { lastRun, lastRunHasMore: effectiveHasMore });
+        const written = patchState(target.id, { lastRun, lastRunHasMore: effectiveHasMore });
         // Fire-and-forget, like the count below: the plan badge's data. The
         // result never waits on it, and a failed explain only means no badge.
         if (!keepPlan) {
@@ -369,7 +376,7 @@ export function useQueryRunner({
             })
             .then((res) => {
               explainedRef.current.set(target.id, { key: explainKey, plan: res.plan });
-              if (lastWrittenRef.current.get(target.id) !== lastRun) return;
+              if (lastWrittenRef.current.get(target.id) !== written) return;
               patchState(target.id, { lastRun: { ...lastRun, plan: res.plan } });
             })
             .catch((err: unknown) => console.warn('[query] plan explain failed', err));

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { queryObjects } from 'node:v8';
 import type { IpcApi } from '@shared/ipc';
 import { act, renderHook, waitFor } from '../helpers/render';
 import { useQueryRunner } from '../../src/pages/Workspace/useQueryRunner';
@@ -1192,5 +1193,38 @@ describe('useQueryRunner', () => {
 
       expect(recordFieldValues).not.toHaveBeenCalled();
     });
+  });
+
+  // Workspace keeps one runner mounted for every tab, so whatever it keeps
+  // per tab outlives the tab. Its record of the last result written must not
+  // hold that result's documents, or each closed tab leaves a page behind.
+  it('keeps no result documents alive once the run has been written', async () => {
+    class ResultRow {}
+    installAtelierMock({
+      query: {
+        find: async () => ({ documents: [new ResultRow(), new ResultRow()], durationMs: 1, hasMore: false }),
+        count: async () => ({ count: 2 }),
+        explain: async () => ({ plan: {}, verbosity: 'queryPlanner' }),
+      },
+    });
+    let written = 0;
+    const { result } = renderHook(() =>
+      useQueryRunner({
+        active: makeTarget(),
+        // Counts the writes without keeping them, so only the runner can hold a row.
+        patchCollectionState: (_id, p) => {
+          if (p.lastRun) written++;
+        },
+        loadingDelayMs: 0,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.run();
+    });
+    // The result, then the same result with its plan.
+    await waitFor(() => expect(written).toBe(2));
+
+    expect(queryObjects(ResultRow, { format: 'count' })).toBe(0);
   });
 });
