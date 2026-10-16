@@ -114,10 +114,10 @@ app.on('before-quit', async (e) => {
 
 Before the sequence above starts, `before-quit` checks for work that quitting would kill:
 
-- **Counted:** script runs in flight (`ScriptService.runningCount()`) and shell sessions with a command still running (`ShellService.busyCount()`, W11 section 3). An idle shell is not counted.
-- **Not counted:** imports, aggregations and plain finds. They run in main with no handle the check can read, so quitting still cuts them off without asking.
+- **Counted:** script runs in flight (`ScriptService.runningCount()`), shell sessions with a command still running (`ShellService.busyCount()`, W11 section 3), imports in flight (`ImportService.runningCount()`) and aggregation runs in flight (`AggregationService.runningCount()`). An idle shell is not counted.
+- **Not counted:** plain finds. They run in main with no handle the check can read, so quitting still cuts them off without asking.
 - **Where it is asked:** off macOS, closing the last window quits the app, so the window's `close` event is held and the question is asked there, before the window goes; a Cancel then leaves the window as it was. On macOS closing the window stops nothing, so it is not asked. Any other quit (`Cmd/Ctrl+Q`, `app.quit()`) is held in `before-quit` the same way. A Quit answer lets the close and the app quit that follows it through without a second question, and a quit or close requested while the question is open is not asked again. The decisions live in `createQuitGate` (`electron/quitGuard.ts`).
-- **Prompt:** when something is counted, the quit is held and a native warning dialog names what stops, for example `This will stop 1 running script and 2 running shell commands.`, with `Cancel` (default) and `Quit`. Cancel leaves the app running. Quit quits again, past the check, into the sequence above. A second quit request while the dialog is open is the same question.
+- **Prompt:** when something is counted, the quit is held and a native warning dialog names what stops, for example `This will stop 1 running script and 2 running shell commands.` (three or more kinds read as a comma list), with `Cancel` (default) and `Quit`. Cancel leaves the app running. Quit quits again, past the check, into the sequence above. A second quit request while the dialog is open is the same question.
 - **Bypass:** a system shutdown, restart or log-off is not asked about, since the work goes with it either way: Electron's `powerMonitor` `shutdown` event (macOS and Linux) and the window's `session-end` event (Windows) set a flag that skips the check.
 
 ## 5. Restore on activate

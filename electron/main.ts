@@ -174,6 +174,8 @@ let pool: MongoPool | null = null;
 let docSvc: DocumentService | null = null;
 let mshellSvc: ShellService | null = null;
 let scriptSvc: ScriptService | null = null;
+let aggSvc: AggregationService | null = null;
+let importSvc: ImportService | null = null;
 let log: Logger | null = null;
 let connExportSvc: ConnectionExportService | null = null;
 let importWizardSvc: ImportWizardService | null = null;
@@ -454,7 +456,12 @@ app.on('activate', () => {
 
 let shuttingDown = false;
 function runningWork(): RunningWork {
-  return { scripts: scriptSvc?.runningCount() ?? 0, shellCommands: mshellSvc?.busyCount() ?? 0 };
+  return {
+    scripts: scriptSvc?.runningCount() ?? 0,
+    shellCommands: mshellSvc?.busyCount() ?? 0,
+    imports: importSvc?.runningCount() ?? 0,
+    aggregations: aggSvc?.runningCount() ?? 0,
+  };
 }
 
 async function askToQuit(message: string): Promise<boolean> {
@@ -717,7 +724,7 @@ app.whenReady().then(() => {
   const recentFieldValueSvc = new RecentFieldValueService(recentFieldValueRepo);
   const querySvc = new QueryService(pool, recentSvc, DEFAULT_EXPORT_CAP, log);
   docSvc = new DocumentService(pool, { log });
-  const aggSvc = new AggregationService(pool, recentSvc, log);
+  aggSvc = new AggregationService(pool, recentSvc, log);
   const metaSvc = new MetaService(pool);
   const indexSvc = new IndexService(pool);
   const collectionAdminSvc = new CollectionAdminService(pool);
@@ -789,9 +796,10 @@ app.whenReady().then(() => {
   registerSavedChannels(router, savedSvc);
   registerRecentChannels(router, recentSvc, recentFieldValueSvc);
   registerAuditChannels(router, auditSvc);
+  importSvc = new ImportService(pool, { emit: makeDataEmitter(() => win?.webContents ?? null) });
   registerDataChannels(
     router,
-    new ImportService(pool, { emit: makeDataEmitter(() => win?.webContents ?? null) }),
+    importSvc,
     pickedImports,
   );
   registerAggChannels(router, aggSvc);

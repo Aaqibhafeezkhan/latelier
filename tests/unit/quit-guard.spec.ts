@@ -3,25 +3,45 @@ import { confirmQuit, createQuitGate, describeRunningWork, type RunningWork } fr
 
 describe('describeRunningWork', () => {
   it('is null when nothing is running', () => {
-    expect(describeRunningWork({ scripts: 0, shellCommands: 0 })).toBeNull();
+    expect(describeRunningWork({ scripts: 0, shellCommands: 0, imports: 0, aggregations: 0 })).toBeNull();
   });
 
   it('names one running script', () => {
-    expect(describeRunningWork({ scripts: 1, shellCommands: 0 })).toBe('This will stop 1 running script.');
+    expect(describeRunningWork({ scripts: 1, shellCommands: 0, imports: 0, aggregations: 0 })).toBe('This will stop 1 running script.');
   });
 
   it('pluralises scripts', () => {
-    expect(describeRunningWork({ scripts: 3, shellCommands: 0 })).toBe('This will stop 3 running scripts.');
+    expect(describeRunningWork({ scripts: 3, shellCommands: 0, imports: 0, aggregations: 0 })).toBe('This will stop 3 running scripts.');
   });
 
   it('names one shell command and pluralises several', () => {
-    expect(describeRunningWork({ scripts: 0, shellCommands: 1 })).toBe('This will stop 1 running shell command.');
-    expect(describeRunningWork({ scripts: 0, shellCommands: 2 })).toBe('This will stop 2 running shell commands.');
+    expect(describeRunningWork({ scripts: 0, shellCommands: 1, imports: 0, aggregations: 0 })).toBe('This will stop 1 running shell command.');
+    expect(describeRunningWork({ scripts: 0, shellCommands: 2, imports: 0, aggregations: 0 })).toBe('This will stop 2 running shell commands.');
   });
 
   it('lists both kinds when both are running', () => {
-    expect(describeRunningWork({ scripts: 1, shellCommands: 2 })).toBe(
+    expect(describeRunningWork({ scripts: 1, shellCommands: 2, imports: 0, aggregations: 0 })).toBe(
       'This will stop 1 running script and 2 running shell commands.',
+    );
+  });
+});
+
+describe('describeRunningWork imports and aggregations', () => {
+  const none: RunningWork = { scripts: 0, shellCommands: 0, imports: 0, aggregations: 0 };
+
+  it('names a running import and an aggregation, singular and plural', () => {
+    expect(describeRunningWork({ ...none, imports: 1 })).toBe('This will stop 1 running import.');
+    expect(describeRunningWork({ ...none, imports: 2 })).toBe('This will stop 2 running imports.');
+    expect(describeRunningWork({ ...none, aggregations: 1 })).toBe('This will stop 1 running aggregation.');
+    expect(describeRunningWork({ ...none, aggregations: 3 })).toBe('This will stop 3 running aggregations.');
+  });
+
+  it('lists every kind that is running, in a readable list', () => {
+    expect(describeRunningWork({ ...none, imports: 1, aggregations: 2 })).toBe(
+      'This will stop 1 running import and 2 running aggregations.',
+    );
+    expect(describeRunningWork({ scripts: 1, shellCommands: 2, imports: 1, aggregations: 2 })).toBe(
+      'This will stop 1 running script, 2 running shell commands, 1 running import, and 2 running aggregations.',
     );
   });
 });
@@ -29,26 +49,26 @@ describe('describeRunningWork', () => {
 describe('confirmQuit', () => {
   it('quits without asking when nothing is running', async () => {
     const confirm = vi.fn(async () => false);
-    await expect(confirmQuit({ counts: () => ({ scripts: 0, shellCommands: 0 }), confirm })).resolves.toBe(true);
+    await expect(confirmQuit({ counts: () => ({ scripts: 0, shellCommands: 0, imports: 0, aggregations: 0 }), confirm })).resolves.toBe(true);
     expect(confirm).not.toHaveBeenCalled();
   });
 
   it('asks with the description of what stops, and quits on a yes', async () => {
     const confirm = vi.fn(async () => true);
-    await expect(confirmQuit({ counts: () => ({ scripts: 1, shellCommands: 2 }), confirm })).resolves.toBe(true);
+    await expect(confirmQuit({ counts: () => ({ scripts: 1, shellCommands: 2, imports: 0, aggregations: 0 }), confirm })).resolves.toBe(true);
     expect(confirm).toHaveBeenCalledExactlyOnceWith('This will stop 1 running script and 2 running shell commands.');
   });
 
   it('stays open on a no', async () => {
     const confirm = vi.fn(async () => false);
-    await expect(confirmQuit({ counts: () => ({ scripts: 2, shellCommands: 0 }), confirm })).resolves.toBe(false);
+    await expect(confirmQuit({ counts: () => ({ scripts: 2, shellCommands: 0, imports: 0, aggregations: 0 }), confirm })).resolves.toBe(false);
     expect(confirm).toHaveBeenCalledOnce();
   });
 });
 
 describe('createQuitGate', () => {
-  const idle: RunningWork = { scripts: 0, shellCommands: 0 };
-  const busy: RunningWork = { scripts: 1, shellCommands: 0 };
+  const idle: RunningWork = { scripts: 0, shellCommands: 0, imports: 0, aggregations: 0 };
+  const busy: RunningWork = { scripts: 1, shellCommands: 0, imports: 0, aggregations: 0 };
 
   function gate(initial: RunningWork, answer: () => Promise<boolean> = async () => true) {
     const state = { work: initial };
@@ -63,7 +83,7 @@ describe('createQuitGate', () => {
   });
 
   it('holds a quit while work runs, and says what would stop when asked', async () => {
-    const { gate: g, confirm } = gate({ scripts: 2, shellCommands: 1 });
+    const { gate: g, confirm } = gate({ scripts: 2, shellCommands: 1, imports: 0, aggregations: 0 });
     expect(g.check()).toBe('hold');
     await g.ask();
     expect(confirm).toHaveBeenCalledExactlyOnceWith('This will stop 2 running scripts and 1 running shell command.');
