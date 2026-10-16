@@ -44,14 +44,18 @@ export function StructureView({
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
       <CollectionStatsSection details={details} error={error} loading={loading} onRefresh={() => void reload()} />
-      <IndexesTab
-        connectionId={connectionId}
-        dbName={dbName}
-        collection={collection}
-        initialCreate={initialCreate}
-        onInitialCreateConsumed={onInitialCreateConsumed}
-        onChanged={() => void reload()}
-      />
+      {/* Held until the details settle: a view must never be asked for its indexes. */}
+      {(details || error) && (
+        <IndexesTab
+          connectionId={connectionId}
+          dbName={dbName}
+          collection={collection}
+          viewOn={details?.type === 'view' ? details.options.viewOn : undefined}
+          initialCreate={initialCreate}
+          onInitialCreateConsumed={onInitialCreateConsumed}
+          onChanged={() => void reload()}
+        />
+      )}
       {/* The server refuses collMod rules on a view and on a time-series collection. */}
       {details?.type === 'collection' && (
         <ValidationSection
