@@ -564,7 +564,7 @@ describe('DbCollectionNavigator — views and the connection string', () => {
     const source = (await screen.findByLabelText('Source collection')) as HTMLInputElement;
     await waitFor(() => expect(source.value).toBe('orders'));
     const pipeline = screen.getByLabelText('Pipeline') as HTMLTextAreaElement;
-    expect(JSON.parse(pipeline.value)).toEqual([{ $match: { a: { $numberInt: '1' } } }]);
+    expect(JSON.parse(pipeline.value)).toEqual([{ $match: { a: 1 } }]);
     expect(collectionDetails).toHaveBeenCalledWith({ connectionId: 'c1', dbName: 'shop', collection: 'recent' });
 
     fireEvent.change(pipeline, { target: { value: '[{"$match":{"a":2}}]' } });

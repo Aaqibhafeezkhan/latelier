@@ -2,6 +2,8 @@ import React from 'react';
 import { Alert, Button, Group, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import { api, getErrorMessage } from '../../api/atelier';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
+import { confirmDestructive } from '../../utils/confirm';
+import { ejsonParse, ejsonStringifyReadable } from '../../utils/ejson';
 import { SubmitButton } from '../../components/SubmitButton';
 
 interface Props {
@@ -18,12 +20,15 @@ interface Props {
 /**
  * Edits a view's source collection and pipeline in place (`collMod`). A plain
  * textarea rather than the script editor, so it keeps its resize handle and
- * Escape closes the dialog.
+ * Escape reaches the dialog's close path instead of a completion popup. Every
+ * close path asks before discarding an edit, and none closes mid-save.
  */
 export function ModifyViewModal({ connectionId, dbName, collection, onClose, onSaved, returnFocusTo }: Props) {
   const [viewOn, setViewOn] = React.useState('');
   const [pipeline, setPipeline] = React.useState('');
-  const [loaded, setLoaded] = React.useState(false);
+  // What was loaded, so an edit is told apart from the prefill.
+  const [initial, setInitial] = React.useState<{ viewOn: string; pipeline: string } | null>(null);
+  const loaded = initial !== null;
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const close = useDialogFocusReturn(onClose, returnFocusTo);
@@ -35,9 +40,13 @@ export function ModifyViewModal({ connectionId, dbName, collection, onClose, onS
       .collectionDetails({ connectionId, dbName, collection })
       .then((d) => {
         if (!live) return;
-        setViewOn(d.options.viewOn ?? '');
-        setPipeline(JSON.stringify(JSON.parse(d.options.pipeline ?? '[]'), null, 2));
-        setLoaded(true);
+        const next = {
+          viewOn: d.options.viewOn ?? '',
+          pipeline: ejsonStringifyReadable(ejsonParse(d.options.pipeline ?? '[]'), 2),
+        };
+        setViewOn(next.viewOn);
+        setPipeline(next.pipeline);
+        setInitial(next);
       })
       .catch((e: unknown) => {
         if (live) setError(getErrorMessage(e, 'Could not read the view'));
@@ -46,6 +55,19 @@ export function ModifyViewModal({ connectionId, dbName, collection, onClose, onS
       live = false;
     };
   }, [connectionId, dbName, collection]);
+
+  const requestClose = async () => {
+    // A close mid-save would drop the refresh the save's completion triggers.
+    if (submitting) return;
+    const dirty = initial !== null && (viewOn !== initial.viewOn || pipeline !== initial.pipeline);
+    if (!dirty) return close();
+    const discard = await confirmDestructive({
+      title: 'Discard changes?',
+      body: 'This closes the dialog and loses what you typed.',
+      confirmLabel: 'Discard',
+    });
+    if (discard) close();
+  };
 
   const submit = async () => {
     if (!loaded || submitting) return;
@@ -68,7 +90,13 @@ export function ModifyViewModal({ connectionId, dbName, collection, onClose, onS
   const mono = { input: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' } };
 
   return (
-    <Modal opened onClose={close} title={`Modify view "${collection}"`} centered size="lg">
+    <Modal
+      opened
+      onClose={() => void requestClose()}
+      title={`Modify view "${collection}"`}
+      centered
+      size="lg"
+    >
       <Stack gap="sm">
         <Text size="xs" c="dimmed">
           {dbName}.{collection}
@@ -97,7 +125,7 @@ export function ModifyViewModal({ connectionId, dbName, collection, onClose, onS
           </Alert>
         )}
         <Group justify="flex-end" gap="xs">
-          <Button variant="subtle" size="compact-xs" onClick={close} disabled={submitting}>
+          <Button variant="subtle" size="compact-xs" onClick={() => void requestClose()}>
             Cancel
           </Button>
           <SubmitButton
