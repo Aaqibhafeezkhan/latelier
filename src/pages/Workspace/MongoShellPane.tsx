@@ -213,7 +213,12 @@ export function MongoShellPane({ connectionId, connectionName, dbName, height, o
     // they see their own command in the transcript.
     append(`> ${line}\n`);
     setPending((n) => n + 1);
-    void api.mshell.write({ sessionId: state.sessionId, data: line + '\n' }).catch(() => {});
+    // A refused write (read-only switch, session gone) never gets a prompt back,
+    // so it is taken off the busy count here and its reason printed.
+    void api.mshell.write({ sessionId: state.sessionId, data: line + '\n' }).catch((err: unknown) => {
+      setPending((n) => Math.max(0, n - 1));
+      append(`[could not send the command: ${getErrorMessage(err, 'write failed')}]\n`);
+    });
   };
 
   const navigateHistory = (direction: 'up' | 'down') => {
