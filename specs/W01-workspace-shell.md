@@ -161,6 +161,14 @@ Reveal in sidebar:
 
 Real DOM focus stays where the menu returns it.
 
+### Collection view strip
+
+Above a collection tab, a strip switches between Documents, Aggregation and Structure. It is a tablist (`aria-label="Collection view"`) built on Mantine `Tabs`, in the same root as the three view panels, so each tab's `aria-controls` points at a real `tabpanel` that names the tab back with `aria-labelledby`.
+
+- One tab stop: only the selected tab is reachable with Tab.
+- Left and Right move focus and select that view; Home and End move focus to the first and last tab, and Enter or Space selects it.
+- Only the selected view's panel is mounted, so an unselected view does no work.
+
 ## 8. New-collection-tab modal
 
 - Small centered modal:
