@@ -507,6 +507,13 @@ export interface LastRun {
   durationMs: number;
   ranAt: string;
   error?: LastRunError;
+  /**
+   * The `queryPlanner` explain of the query that produced `documents`, for the
+   * result bar's plan badge. Renderer-memory only: `lastRun` is stripped from
+   * every persisted tab write. Absent until the side-fired explain resolves,
+   * and when it fails.
+   */
+  plan?: unknown;
 }
 
 // ─── Saved queries (W09) ─────────────────────────────────────────────────────
