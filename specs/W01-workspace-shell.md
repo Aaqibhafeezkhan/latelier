@@ -186,7 +186,7 @@ On mount of `/workspace`:
 3. Else if there's at least one saved connection → render empty state with an "Open a collection…" button that opens the new-tab modal.
 4. Else redirect to `/connections`.
 
-Settings carries a "Reopen tabs on launch" switch, stored under `ui.workspace.restoreTabs`. An unset value means on, so the behaviour above is the default. When the value is `false`, the main process closes every tab (pinned ones included) once at boot, right after the tab service is built, so the workspace opens empty. The check lives in main rather than in the `/workspace` mount because that page remounts on route changes and would wipe tabs mid-session.
+Settings carries a "Reopen tabs on launch" switch, stored under `ui.workspace.restoreTabs`. An unset value means on, so the behaviour above is the default. When the value is `false`, the main process closes every tab (pinned ones included) once at boot, right after the tab service is built, so the workspace opens empty. The check lives in main rather than in the `/workspace` mount because that page remounts on route changes and would wipe tabs mid-session. Nothing asks at quit with the setting off, so a tab holding unsaved pipeline changes is lost at the next launch along with the rest; the switch's description in Settings says so.
 
 Every renderer state change in a tab triggers `api.tabs.update(id, patchOfState)` with a **debounced** (250ms) writer. This keeps session restoration on par with the last typed-but-unsaved state without thrashing SQLite.
 
