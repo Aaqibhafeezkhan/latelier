@@ -338,7 +338,7 @@ export class WorkspaceStateService {
 
   /** Closes every tab, pinned and active ones included. */
   closeAll(): void {
-    for (const row of this.repo.list()) this.repo.deleteById(row.id);
+    this.repo.deleteAll();
   }
 
   setPinned(id: string, pinned: boolean): WorkspaceTab {

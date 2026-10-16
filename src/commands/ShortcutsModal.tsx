@@ -25,10 +25,12 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
       .map((c) => ({ id: c.id, title: c.title, keys: c.shortcut! }))
       .sort((a, b) => a.title.localeCompare(b.title)),
   }));
-  sections.push({
-    label: 'Anywhere',
-    rows: STATIC_SHORTCUTS.map((s) => ({ id: s.keys, title: s.title, keys: s.keys })),
-  });
+  for (const s of STATIC_SHORTCUTS) {
+    sections.push({
+      label: s.section,
+      rows: s.items.map((i) => ({ id: `${s.section}:${i.keys}`, title: i.title, keys: i.keys })),
+    });
+  }
 
   return (
     <Modal opened onClose={close} title="Keyboard shortcuts" centered size="md">

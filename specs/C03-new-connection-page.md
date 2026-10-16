@@ -171,7 +171,7 @@ Recap (from §4 Auth):
 - Removing a stored password via the explicit button clears it server-side.
 - Validation errors highlight offending fields and jump to the right tab.
 - `⌘S` saves; `⌘↵` tests; `Esc` asks to discard changes if dirty.
-- Leaving the full-page form with unsaved changes shows a "Discard changes?" confirmation, whichever way the user leaves: the back link, Cancel, the command palette or a shortcut. The app runs on a data router (`createHashRouter` + `RouterProvider`) so `useBlocker` can intercept every router navigation; the blocker lets a navigation through when the form is clean, when only the search or state changes, and right after a successful save. Keep editing stays on the form with what was typed; Discard continues the navigation.
+- Leaving the full-page form with unsaved changes through an in-app navigation shows a "Discard changes?" confirmation: the back link, Cancel, the command palette or a shortcut. The app runs on a data router (`createHashRouter` + `RouterProvider`) so `useBlocker` can intercept every router navigation; the blocker lets a navigation through when the form is clean, when only the search or state changes, and right after a successful save. Keep editing stays on the form with what was typed; Discard continues the navigation. Closing the window, quitting and reloading are not router navigations and are not covered.
 
 ## 12. Test cases
 

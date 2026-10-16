@@ -589,6 +589,33 @@ describe('NewConnection (unsaved-changes guard)', () => {
     expect(discardPrompt()).toBeNull();
   });
 
+  it('leaving after the plaintext-fallback retry save shows no prompt', async () => {
+    let calls = 0;
+    const createSpy = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw { code: 'SECRETS_UNAVAILABLE', message: 'OS keychain not accessible' };
+      return { id: 'c1' } as never;
+    });
+    installAtelierMock({
+      conn: { create: createSpy as never },
+      secrets: { setPlaintextFallback: async (enabled: boolean) => ({ enabled }) },
+    });
+    const { router } = renderNew();
+    await userEvent.type(await screen.findByPlaceholderText(/My MongoDB Server/i), 'X');
+    await userEvent.type(screen.getByPlaceholderText(/cluster\.mongodb\.net/i), 'localhost');
+    await userEvent.click(screen.getByText('Auth'));
+    await userEvent.selectOptions(screen.getAllByRole('combobox')[0]!, 'scram256');
+    await userEvent.type(screen.getAllByPlaceholderText('admin')[0]!, 'alice');
+    await userEvent.type(await screen.findByPlaceholderText(/^••••••••$/), 'pw');
+    fireEvent.click(screen.getByText(/^Save$/));
+
+    fireEvent.click(await screen.findByText(/Store as plaintext/i));
+
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/workspace'));
+    expect(discardPrompt()).toBeNull();
+  });
+
   it('a navigation from elsewhere (the palette) is blocked while dirty', async () => {
     const { router } = await dirtyForm();
     act(() => {

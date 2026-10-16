@@ -28,6 +28,8 @@ export function GlobalCommands() {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== '/' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
       const origin = e.target instanceof HTMLElement ? e.target : null;
+      // Like ⌘B and ⌘E: a dialog that is already open keeps the keyboard.
+      if (origin?.closest('[role="dialog"], [role="alertdialog"]')) return;
       if (origin?.closest('input, textarea, select, [contenteditable]')) return;
       e.preventDefault();
       setShortcutsOpen(true);

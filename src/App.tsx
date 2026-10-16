@@ -1,5 +1,6 @@
 import React from 'react';
-import { createHashRouter, Navigate, Outlet, RouterProvider } from 'react-router-dom';
+import { createHashRouter, Navigate, RouterProvider } from 'react-router-dom';
+import { RootLayout } from './RootLayout';
 import { MantineProvider } from '@mantine/core';
 import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
@@ -7,17 +8,7 @@ import ConnectionManager from './pages/ConnectionManager';
 import NewConnection from './pages/NewConnection';
 import Workspace from './pages/Workspace';
 import { HintsProvider } from './hints/HintsProvider';
-import { SettingsProvider } from './pages/SettingsContext';
-import { ConnectionTransferProvider } from './features/connections/ConnectionTransferProvider';
-import { CommandPaletteRoot } from './commands/CommandPalette';
-import { PaletteContextProvider } from './commands/PaletteContext';
-import { GlobalCommands } from './commands/GlobalCommands';
-import { ConnectionPaletteCommands } from './commands/ConnectionPaletteCommands';
-import { TroubleshootingProvider } from './troubleshooting/TroubleshootingProvider';
-import { TroubleshootingPaletteCommand } from './troubleshooting/TroubleshootingPaletteCommand';
-import { UpdateReadyPrompt } from './features/updates/UpdateReadyPrompt';
 import { Splash } from './components/Splash';
-import { ErrorBoundary } from './components/ErrorBoundary';
 import { useTheme } from './ThemeContext';
 import { mantineTheme } from './theme/mantineTheme';
 
@@ -31,31 +22,8 @@ const isTestEnv =
   (window as unknown as { __atelierEnv__?: { isTest?: boolean } }).__atelierEnv__?.isTest === true;
 
 // A data router, not <HashRouter>: NewConnection's unsaved-changes guard uses
-// `useBlocker`, which only works under one. The provider stack lives in the root
-// layout route so every screen still sits inside the palette, settings and
-// troubleshooting contexts.
-function RootLayout() {
-  return (
-    <PaletteContextProvider>
-      <SettingsProvider>
-        <ConnectionTransferProvider>
-          <CommandPaletteRoot>
-            <TroubleshootingProvider>
-              <GlobalCommands />
-              <UpdateReadyPrompt />
-              <ConnectionPaletteCommands />
-              <TroubleshootingPaletteCommand />
-              <ErrorBoundary>
-                <Outlet />
-              </ErrorBoundary>
-            </TroubleshootingProvider>
-          </CommandPaletteRoot>
-        </ConnectionTransferProvider>
-      </SettingsProvider>
-    </PaletteContextProvider>
-  );
-}
-
+// `useBlocker`, which only works under one. The provider stack lives in the
+// root layout route (RootLayout) so every screen still sits inside it.
 const router = createHashRouter([
   {
     element: <RootLayout />,
@@ -75,6 +43,9 @@ const router = createHashRouter([
     ],
   },
 ]);
+
+// Vite re-evaluates this module on a hot update; drop the old router's listeners.
+if (import.meta.hot) import.meta.hot.dispose(() => router.dispose());
 
 export default function App() {
   const [splashVisible, setSplashVisible] = React.useState(!isTestEnv);

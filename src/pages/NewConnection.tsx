@@ -17,9 +17,11 @@ export default function NewConnection() {
   const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
   const backTarget = isEdit ? returnTo ?? `/connections/${params.id}` : '/workspace';
   const backLabel = isEdit ? (returnTo === '/workspace' ? 'Data View' : 'Connection') : 'Data View';
-  // Every way off this page (back link, Cancel, the palette, a shortcut) is a
-  // router navigation, so one blocker covers them all. Refs, not state: the
-  // blocker predicate must see the latest value without re-subscribing.
+  // Every in-app way off this page (back link, Cancel, the palette, a shortcut)
+  // is a router navigation, so one blocker covers them. It does not cover
+  // closing the window, quitting or reloading (#531); `beforeunload` is no fix,
+  // since Electron cancels it silently. Refs, not state: the blocker predicate
+  // must see the latest value without re-subscribing.
   const dirtyRef = React.useRef(false);
   const bypassRef = React.useRef(false);
   const promptingRef = React.useRef(false);

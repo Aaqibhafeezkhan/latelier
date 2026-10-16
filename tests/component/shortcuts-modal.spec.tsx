@@ -71,7 +71,7 @@ describe('keyboard shortcuts cheat sheet', () => {
     const dlg = await openFromPalette();
     const row = within(dlg).getByText('New tab…').closest('li')!;
     expect(within(row).getByText('Ctrl+T')).toBeTruthy();
-    expect(within(dlg).getByText('Ctrl+Enter')).toBeTruthy();
+    expect(within(within(dlg).getByText('Run query').closest('li')!).getByText('Ctrl+Enter')).toBeTruthy();
     expect(dlg.textContent).not.toContain('⌘');
 
     // Close it, then check the palette's own rows.
@@ -121,6 +121,43 @@ describe('keyboard shortcuts cheat sheet', () => {
     mount();
     fireEvent.keyDown(screen.getByText('toggle'), { key: '/', metaKey: true });
     expect(await dialog()).toBeTruthy();
+  });
+
+  it('does nothing while focus is inside another dialog', async () => {
+    mount();
+    const other = document.createElement('div');
+    other.setAttribute('role', 'dialog');
+    const inside = document.createElement('button');
+    other.appendChild(inside);
+    document.body.appendChild(other);
+    inside.focus();
+    fireEvent.keyDown(inside, { key: '/', ctrlKey: true });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).toBeNull();
+    other.remove();
+  });
+
+  it('files the workspace-only and connection-form shortcuts under their own headings', async () => {
+    setPlatform('win32');
+    mount();
+    const dlg = await openFromPalette();
+    const section = (name: string) => within(dlg).getByRole('region', { name });
+
+    expect(within(section('Anywhere')).getByText('Ctrl+K')).toBeTruthy();
+    expect(within(section('Anywhere')).queryByText('Ctrl+E')).toBeNull();
+
+    const workspace = section('In the workspace');
+    for (const keys of ['Ctrl+1–9', 'Ctrl+Alt+←', 'Ctrl+Alt+→', 'Ctrl+E']) {
+      expect(within(workspace).getByText(keys)).toBeTruthy();
+    }
+
+    const form = section('In the connection form');
+    expect(within(form).getByText('Save connection')).toBeTruthy();
+    expect(within(form).getByText('Ctrl+S')).toBeTruthy();
+    expect(within(form).getByText('Test connection')).toBeTruthy();
+    expect(within(form).getByText('Ctrl+Enter')).toBeTruthy();
   });
 
   it('does nothing while a text field has focus', async () => {
