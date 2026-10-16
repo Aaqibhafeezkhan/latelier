@@ -585,6 +585,36 @@ describe('useQueryRunner', () => {
       expect(planPatches[0][1].lastRun.plan).not.toBe(plan);
     });
 
+    it('re-explains on a page change, with the same filter, so the badge follows every run', async () => {
+      const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents: [], durationMs: 1, hasMore: false }),
+          count: async () => ({ count: 0 }),
+          explain: explainSpy,
+        },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({
+          active: makeTarget({ queryRaw: '{"a":1}' }),
+          patchCollectionState: patch,
+          loadingDelayMs: 0,
+        }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+      await act(async () => {
+        await result.current.run({ page: 2 });
+      });
+
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+      expect(explainSpy.mock.calls[1][0].filter).toBe('{"a":1}');
+      expect(explainSpy.mock.calls[1][0]).not.toHaveProperty('skip');
+    });
+
     it('does not explain on the past-cap short-circuit', async () => {
       const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
       installAtelierMock({
