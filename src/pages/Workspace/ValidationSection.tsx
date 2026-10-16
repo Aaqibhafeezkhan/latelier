@@ -4,7 +4,7 @@ import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
 import { api, getErrorMessage } from '../../api/atelier';
 import { SubmitButton } from '../../components/SubmitButton';
-import { ejsonParse, ejsonStringifyReadable } from '../../utils/ejson';
+import { ejsonParse, ejsonStringifyReadable, isEjsonDocument } from '../../utils/ejson';
 import type { CollectionDetails } from '@shared/ipc';
 import type { ValidationAction, ValidationLevel } from '@shared/types';
 
@@ -55,7 +55,7 @@ export function ValidationSection({ connectionId, dbName, collection, details, o
   const save = async () => {
     if (saving) return;
     const nextRules = text.trim() === '' ? '{}' : text;
-    if (!isJsonDocument(nextRules)) {
+    if (!isEjsonDocument(nextRules)) {
       setError('The rules must be a JSON document, like { "$jsonSchema": { … } }.');
       return;
     }
@@ -193,13 +193,4 @@ export function ValidationSection({ connectionId, dbName, collection, details, o
       </div>
     </section>
   );
-}
-
-function isJsonDocument(text: string): boolean {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
-  } catch {
-    return false;
-  }
 }

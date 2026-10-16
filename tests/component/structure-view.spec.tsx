@@ -566,6 +566,9 @@ describe('StructureView — validation rules', () => {
   it.each([
     ['invalid JSON', '{"$jsonSchema":'],
     ['an array', '[1]'],
+    // Parses as JSON, but revives to a Date: main refuses it, so the client must too.
+    ['a bare $date sentinel', '{"$date":"2020-01-01T00:00:00Z"}'],
+    ['a bare $oid sentinel', '{"$oid":"507f1f77bcf86cd799439011"}'],
   ])('refuses %s inline without a call', async (_label, text) => {
     const modify = vi.fn(async () => ({ ok: true as const }));
     installAtelierMock({
