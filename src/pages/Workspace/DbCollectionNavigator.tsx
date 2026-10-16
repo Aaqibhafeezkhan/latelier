@@ -24,7 +24,12 @@ import { ImportDialog } from './ImportDialog';
 import { DropCollectionConfirm } from './DropCollectionConfirm';
 import { DropDatabaseConfirm } from './DropDatabaseConfirm';
 import { useNavigatorDialogs } from './useNavigatorDialogs';
-import { useNavigatorData, type NavigatorData } from './useNavigatorData';
+import {
+  GENERIC_CONNECT_ERROR,
+  useNavigatorData,
+  useNavigatorStatusSync,
+  type NavigatorData,
+} from './useNavigatorData';
 import { emptyCache } from './navigatorTreeReducer';
 import { ownGet } from '../../utils/ownProperty';
 import { isContextMenuKey, anchorForRow } from '../../utils/contextMenuKey';
@@ -84,6 +89,8 @@ export interface DbCollectionNavigatorProps {
    * row twice still fires.
    */
   revealRequest?: { rowId: string } | null;
+  /** Called once the reveal has landed, so a later remount does not replay it. */
+  onRevealHandled?: () => void;
 }
 
 type TreeRow =
@@ -191,8 +198,6 @@ const connExpandedKey = (id: string) => `ui.workspace.navigator.connExpanded:${i
 /** Connection-colour rail down the left edge; muted when no live client. */
 const SPINE_WIDTH = 3;
 
-/** Fallback when a failed connect's status event and backfill both miss the message. */
-const GENERIC_CONNECT_ERROR = 'The connection attempt failed.';
 
 export function DbCollectionNavigator({
   connections,
@@ -211,6 +216,7 @@ export function DbCollectionNavigator({
   onOpenReferences,
   data,
   revealRequest,
+  onRevealHandled,
 }: DbCollectionNavigatorProps) {
   const T = themeVars;
   // Shared with Workspace (and so the palette) when `data` is passed; the
@@ -222,8 +228,6 @@ export function DbCollectionNavigator({
   const [focusedId, setFocusedId] = React.useState<string | null>(null);
   // Sticky-header trick: overflow:hidden on the container, overflow:auto only on the tree region.
   const treeRef = React.useRef<HTMLDivElement | null>(null);
-  // Set on 'disconnected'/'error', consumed on 'connected' to background-refresh expanded DBs.
-  const sawDisconnectRef = React.useRef<Set<string>>(new Set());
   const expandedRef = React.useRef(expanded);
   const activeDbNameRef = React.useRef(activeDbName);
 
@@ -285,38 +289,10 @@ export function DbCollectionNavigator({
     activeDbNameRef.current = activeDbName;
   }, [activeDbName]);
 
-  // One subscription for every Connection id (not per root): reconnect
-  // background-refreshes a Connection's previously-expanded DBs, and a
-  // Connection reconnecting into an empty navigator opens its root — only
-  // when nothing is already expanded.
-  React.useEffect(() => {
-    const off = api.mongo.onStatus((runtime) => {
-      // A transition away from 'error' retires the message on that root.
-      if (runtime.status === 'error') {
-        dispatch({
-          type: 'connectErrorSet',
-          id: runtime.id,
-          message: runtime.errorMessage ?? GENERIC_CONNECT_ERROR,
-          code: runtime.errorCode,
-        });
-      } else {
-        dispatch({ type: 'connectErrorClear', id: runtime.id });
-      }
-      if (runtime.status === 'disconnected' || runtime.status === 'error') {
-        sawDisconnectRef.current.add(runtime.id);
-      } else if (runtime.status === 'connected') {
-        dispatch({ type: 'expandedConnSetIfNull', id: runtime.id });
-        if (sawDisconnectRef.current.has(runtime.id)) {
-          const snapshot = ownGet(expandedRef.current, runtime.id) ?? {};
-          for (const db of Object.keys(snapshot).filter((d) => snapshot[d])) {
-            void loadColls(runtime.id, db);
-          }
-          sawDisconnectRef.current.delete(runtime.id);
-        }
-      }
-    });
-    return off;
-  }, [loadColls, dispatch]);
+  // The status subscription goes with whoever owns the tree: the Workspace
+  // when `data` is passed (so a reconnect while collapsed still lands), this
+  // navigator when it runs standalone.
+  useNavigatorStatusSync(data ? null : own);
 
   // Backfills the error message for a Connection already 'error' at mount,
   // whose failure predates this component's status subscription.
@@ -659,8 +635,11 @@ export function DbCollectionNavigator({
     const id = pendingRevealRef.current;
     if (!id || !rows.some((r) => r.id === id)) return;
     pendingRevealRef.current = null;
-    queueMicrotask(() => setFocusedId(id));
-  }, [rows, revealRequest]);
+    queueMicrotask(() => {
+      setFocusedId(id);
+      onRevealHandled?.();
+    });
+  }, [rows, revealRequest, onRevealHandled]);
   const rowHeight = useDynamicRowHeight({ defaultRowHeight: 26 });
 
   React.useEffect(() => {

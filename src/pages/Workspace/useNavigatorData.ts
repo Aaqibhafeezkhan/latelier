@@ -2,6 +2,10 @@ import React from 'react';
 import type { DbInfo, IpcError } from '@shared/ipc';
 import { api, isIpcError } from '../../api/atelier';
 import { useNavigatorTree } from './useNavigatorTree';
+import { ownGet } from '../../utils/ownProperty';
+
+/** Fallback when a failed connect's status event and backfill both miss the message. */
+export const GENERIC_CONNECT_ERROR = 'The connection attempt failed.';
 
 /** Delay before the one bounded retry on an empty `listDatabases` result. */
 const EMPTY_DB_RETRY_DELAY_MS = 300;
@@ -13,7 +17,8 @@ export type NavigatorData = ReturnType<typeof useNavigatorData>;
  * the cache outlives a collapsed sidebar and the command palette reads the same
  * databases and collections instead of fetching its own. No effects here: the
  * navigator mounts its own copy when it is rendered standalone, and that copy
- * must stay inert when a shared one is passed in.
+ * must stay inert when a shared one is passed in. The owner subscribes it to
+ * connection status with `useNavigatorStatusSync`.
  */
 export function useNavigatorData() {
   const { state: tree, dispatch, isMounted } = useNavigatorTree();
@@ -78,4 +83,53 @@ export function useNavigatorData() {
   );
 
   return { tree, dispatch, isMounted, loadDbs, loadColls };
+}
+
+/**
+ * Keeps a tree in step with the connection pool's status stream: connect
+ * errors in and out, and a reconnect background-refreshes that Connection's
+ * previously-expanded DBs. A Connection reconnecting into an empty tree opens
+ * its root — only when nothing is already expanded. Called by whoever owns the
+ * tree; `null` subscribes nothing, so a tree never has two writers.
+ */
+export function useNavigatorStatusSync(nav: NavigatorData | null) {
+  const dispatch = nav?.dispatch;
+  const loadColls = nav?.loadColls;
+  const expanded = nav?.tree.expanded;
+  const expandedRef = React.useRef(expanded);
+  React.useEffect(() => {
+    expandedRef.current = expanded;
+  }, [expanded]);
+  // Set on 'disconnected'/'error', consumed on 'connected'.
+  const sawDisconnectRef = React.useRef<Set<string>>(new Set());
+
+  React.useEffect(() => {
+    if (!dispatch || !loadColls) return;
+    const off = api.mongo.onStatus((runtime) => {
+      // A transition away from 'error' retires the message on that root.
+      if (runtime.status === 'error') {
+        dispatch({
+          type: 'connectErrorSet',
+          id: runtime.id,
+          message: runtime.errorMessage ?? GENERIC_CONNECT_ERROR,
+          code: runtime.errorCode,
+        });
+      } else {
+        dispatch({ type: 'connectErrorClear', id: runtime.id });
+      }
+      if (runtime.status === 'disconnected' || runtime.status === 'error') {
+        sawDisconnectRef.current.add(runtime.id);
+      } else if (runtime.status === 'connected') {
+        dispatch({ type: 'expandedConnSetIfNull', id: runtime.id });
+        if (sawDisconnectRef.current.has(runtime.id)) {
+          const snapshot = ownGet(expandedRef.current ?? {}, runtime.id) ?? {};
+          for (const db of Object.keys(snapshot).filter((d) => snapshot[d])) {
+            void loadColls(runtime.id, db);
+          }
+          sawDisconnectRef.current.delete(runtime.id);
+        }
+      }
+    });
+    return off;
+  }, [loadColls, dispatch]);
 }

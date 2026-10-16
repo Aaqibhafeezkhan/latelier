@@ -25,7 +25,7 @@ import {
 import { useQueryRunner } from './Workspace/useQueryRunner';
 import type { RunnerTarget } from './Workspace/useQueryRunner';
 import { useWorkspacePanelPrefs } from './Workspace/useWorkspacePanelPrefs';
-import { useNavigatorData } from './Workspace/useNavigatorData';
+import { useNavigatorData, useNavigatorStatusSync } from './Workspace/useNavigatorData';
 import { ownGet } from '../utils/ownProperty';
 import type { DbInfo } from '@shared/ipc';
 import { useConnectionDialogs } from './Workspace/useConnectionDialogs';
@@ -72,6 +72,7 @@ function WorkspaceInner() {
   // The navigator's tree, owned here: it outlives a collapsed sidebar and the
   // palette's namespace commands read the same cache.
   const navigatorData = useNavigatorData();
+  useNavigatorStatusSync(navigatorData);
   const {
     prefsReady,
     leftWidth,

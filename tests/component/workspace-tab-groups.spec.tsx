@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, within, fireEvent } from '../helpers/render';
+import { render, screen, waitFor, within, fireEvent, act } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
@@ -1134,6 +1134,37 @@ describe('the tab context menu closes in bulk and reveals a tab in the sidebar',
     await waitFor(() =>
       expect(screen.getByRole('tree').getAttribute('aria-activedescendant')).toBe(row.id),
     );
+  });
+
+  it('does not replay an old reveal when the navigator is reopened later', async () => {
+    mountTabs([
+      { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+      { id: 'b', connectionId: 'c1', collection: 'bravo' },
+    ]);
+    // Generous waits: this walk mounts the navigator twice, slow under a loaded run.
+    await screen.findByTestId('nav-coll-db-alpha', {}, { timeout: 4000 });
+    fireEvent.contextMenu(tab('bravo'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in sidebar' }));
+    const tree = () => screen.getByRole('tree');
+    await waitFor(() =>
+      expect(tree().getAttribute('aria-activedescendant')).toBe(
+        screen.getByTestId('nav-coll-db-bravo').id,
+      ),
+    );
+
+    fireEvent.click(tab('alpha'));
+    await waitFor(() => expect(tab('alpha').getAttribute('aria-selected')).toBe('true'));
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse navigator' }));
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigator' }));
+
+    const alphaRow = await screen.findByTestId('nav-coll-db-alpha', {}, { timeout: 4000 });
+    await waitFor(() => expect(tree().getAttribute('aria-activedescendant')).toBe(alphaRow.id));
+    // And it stays there once every queued focus move has run.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(tree().getAttribute('aria-activedescendant')).toBe(alphaRow.id);
   });
 
   it('Reveal in sidebar moves the navigator’s focus to the row with the sidebar already open', async () => {

@@ -219,6 +219,7 @@ export function ShellSection({
                 onOpenReferences={onOpenReferences}
                 data={navigatorData}
                 revealRequest={revealRequest}
+                onRevealHandled={() => setRevealRequest(null)}
               />
               <div
                 style={{

@@ -155,7 +155,7 @@ Reveal in sidebar:
 1. Activates the tab, waking a dormant connection the same way a click does.
 2. Opens the sidebar if it is collapsed.
 3. Expands the tab's connection root and its database.
-4. Moves the navigator's focus (its `aria-activedescendant`) to the collection row once that row is rendered, which scrolls it into view.
+4. Moves the navigator's focus (its `aria-activedescendant`) to the collection row once that row is rendered, which scrolls it into view. The request is then spent: reopening the sidebar later focuses the active tab's row, not this one.
 
 Real DOM focus stays where the menu returns it.
 

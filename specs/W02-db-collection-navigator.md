@@ -145,6 +145,8 @@ interface ConnectionCache {
 
 **Where the state lives.** The tree (caches, expanded root and databases, connect errors) and its two loaders, `loadDbs` and `loadColls`, are owned by the Workspace (`useNavigatorData`) and passed to the navigator as a prop, not held inside it. Two reasons: the navigator unmounts when the sidebar collapses, and the cache must outlive that; and the command palette's `Open: <db>.<coll>` commands (X07 §5) read the same cache instead of fetching their own copy. A navigator rendered without the prop owns a private copy, which is what its standalone tests mount. `filter`, `focusedId` and `menu` stay local to the navigator.
 
+The `mongo.onStatus` subscription that keeps the tree current (connect errors in and out, and the reconnect refresh of previously-expanded databases) moves with the state: the owner of the tree subscribes, so a disconnect and reconnect while the sidebar is collapsed still refreshes what the reopened navigator shows.
+
 The loaders share in-flight requests: a second `loadDbs` for a connection, or `loadColls` for the same database, while one is pending returns the pending one rather than issuing a second IPC call. The navigator's mount effect and the palette's sweep both see an empty cache in the same commit, and the reducer's loading flags cannot stop that.
 
 Key points:

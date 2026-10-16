@@ -20,6 +20,7 @@ import {
   collectionTabFixture,
 } from '../helpers/atelierMock';
 import type { CollectionInfo, DbInfo } from '@shared/ipc';
+import type { ConnectionRuntime } from '@shared/types';
 
 const coll = (name: string): CollectionInfo => ({
   name,
@@ -42,7 +43,16 @@ function ToggleButton() {
   return <button onClick={palette.toggle}>toggle</button>;
 }
 
+/** The `mongo.onStatus` listeners the mounted tree subscribed; `emit` drives them. */
+let statusListeners: Array<(r: ConnectionRuntime) => void> = [];
+function emit(runtime: ConnectionRuntime) {
+  act(() => {
+    for (const l of [...statusListeners]) l(runtime);
+  });
+}
+
 function mount(server: Record<string, Record<string, string[]>> = SERVER) {
+  statusListeners = [];
   const listDatabases = vi.fn(async ({ connectionId }: { connectionId: string }) =>
     Object.keys(server[connectionId] ?? {}).map(db),
   );
@@ -74,6 +84,14 @@ function mount(server: Record<string, Record<string, string[]>> = SERVER) {
       update: async (id: string) => collectionTabFixture({ id }),
     },
     meta: { listDatabases: listDatabases as never, listCollections: listCollections as never },
+    mongo: {
+      onStatus: (cb: (r: ConnectionRuntime) => void) => {
+        statusListeners.push(cb);
+        return () => {
+          statusListeners = statusListeners.filter((l) => l !== cb);
+        };
+      },
+    },
     collection: {
       create: async (input) => ({ name: (input as { collection: string }).collection }),
     },
@@ -256,5 +274,44 @@ describe('the palette shares the navigator’s cache', () => {
     openPalette();
     search('invoices');
     await waitFor(() => expect(openRows()).toEqual(['Open: shop.invoices']));
+  });
+});
+
+describe('the shared cache follows connection status while the navigator is collapsed', () => {
+  const crmCalls = (lc: ReturnType<typeof mount>['listCollections']) =>
+    lc.mock.calls.filter(([a]) => a.dbName === 'crm').length;
+
+  it('re-lists an expanded database after a reconnect that happened while collapsed', async () => {
+    const { listCollections } = mount();
+    await settled(listCollections);
+    // crm, not the open tab's shop: the tab header re-reads shop's counts on
+    // its own, which would mask a missing re-list.
+    fireEvent.click(screen.getByTestId('nav-db-crm'));
+    await screen.findByTestId('nav-coll-crm-leads');
+    await waitFor(() => expect(crmCalls(listCollections)).toBe(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse navigator' }));
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull());
+
+    emit({ id: 'c1', status: 'disconnected' });
+    emit({ id: 'c1', status: 'connected' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigator' }));
+    await screen.findByTestId('nav-coll-crm-leads');
+
+    await waitFor(() => expect(crmCalls(listCollections)).toBe(3));
+  });
+
+  it('drops a connect error that cleared while collapsed', async () => {
+    const { listCollections } = mount();
+    await settled(listCollections);
+    emit({ id: 'c1', status: 'error', errorMessage: 'connection refused' });
+    expect(await screen.findByText('connection refused')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse navigator' }));
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull());
+    emit({ id: 'c1', status: 'connected' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigator' }));
+
+    await screen.findByRole('tree');
+    expect(screen.queryByText('connection refused')).toBeNull();
   });
 });
