@@ -146,12 +146,14 @@ describe('palette: shell and structure entries', () => {
         id: 's1',
         kind: 'script',
         connectionId: 'c1',
+        dbName: '',
+        collection: '',
         position: 0,
         isActive: true,
         openedAt: NOW,
         pinned: false,
         state: { title: 'Script', source: '1', dbName: 'shop' },
-      } as WorkspaceTab,
+      },
     ]);
     await screen.findByLabelText('Close Script');
     expect(paletteTitles('go to')).not.toEqual(expect.arrayContaining(['Go to Schema']));

@@ -134,6 +134,31 @@ Tab state lives in the renderer for responsiveness but is mirrored to main on ev
   - "New script" (stub) → toast "coming soon".
   - Separator, then recent connections → clicking one runs `tabs:openDefault(connectionId)`.
 
+### Tab context menu
+
+Right-click on a tab, or Shift+F10 / the ContextMenu key on a focused tab, opens a menu with:
+
+- **Pin tab / Unpin tab** and **Close tab**, as before.
+- **Close others** closes every other tab in the strip.
+- **Close to the right** closes every tab to the right of this one.
+- **Reveal in sidebar** shows the tab's collection in the navigator. Collection tabs only: a script tab has no navigator row, so the item is absent.
+
+Both bulk closes follow the same rules:
+
+- **Order.** "To the right" means the order on screen. Tabs render grouped by connection, so this can differ from the stored `position` order whenever the stored tabs of two connections interleave.
+- **Pinned tabs** are never closed by a bulk action, and neither is the tab the menu was opened on.
+- **Disabled when empty.** Each item is disabled when it would close nothing.
+- **Unsaved pipelines.** If any tab to be closed has an unsaved pipeline, one confirmation names how many. Cancel closes nothing. Confirm closes them all, one after another, so each close sees the active tab the previous one left.
+
+Reveal in sidebar:
+
+1. Activates the tab, waking a dormant connection the same way a click does.
+2. Opens the sidebar if it is collapsed.
+3. Expands the tab's connection root and its database.
+4. Moves the navigator's focus (its `aria-activedescendant`) to the collection row once that row is rendered, which scrolls it into view.
+
+Real DOM focus stays where the menu returns it.
+
 ## 8. New-collection-tab modal
 
 - Small centered modal:

@@ -78,6 +78,12 @@ export interface DbCollectionNavigatorProps {
   onOpenReferences?: () => void;
   /** Tree state and loaders owned by the Workspace, so they outlive a collapsed sidebar. */
   data?: NavigatorData;
+  /**
+   * "Reveal in sidebar": move the tree's focus to this row (`coll:<conn>:<db>:<coll>`)
+   * as soon as it is rendered. A new object per request, so revealing the same
+   * row twice still fires.
+   */
+  revealRequest?: { rowId: string } | null;
 }
 
 type TreeRow =
@@ -204,6 +210,7 @@ export function DbCollectionNavigator({
   onCollectionRenamed,
   onOpenReferences,
   data,
+  revealRequest,
 }: DbCollectionNavigatorProps) {
   const T = themeVars;
   // Shared with Workspace (and so the palette) when `data` is passed; the
@@ -640,6 +647,20 @@ export function DbCollectionNavigator({
   ]);
 
   const listRef = useListRef(null);
+
+  // The requested row may not exist yet (its database still loading, or the
+  // navigator only just mounted), so the request waits for the rows that hold
+  // it. Focusing it lets the focusedId effect below scroll it into view.
+  const pendingRevealRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (revealRequest) pendingRevealRef.current = revealRequest.rowId;
+  }, [revealRequest]);
+  React.useEffect(() => {
+    const id = pendingRevealRef.current;
+    if (!id || !rows.some((r) => r.id === id)) return;
+    pendingRevealRef.current = null;
+    queueMicrotask(() => setFocusedId(id));
+  }, [rows, revealRequest]);
   const rowHeight = useDynamicRowHeight({ defaultRowHeight: 26 });
 
   React.useEffect(() => {

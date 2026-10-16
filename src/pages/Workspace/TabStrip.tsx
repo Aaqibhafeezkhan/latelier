@@ -20,6 +20,10 @@ interface TabStripProps {
   onOpenNew: () => void;
   onOpenNewScript: () => void;
   onTogglePin: (id: string) => void;
+  /** Close these tabs as one action (Close others / Close to the right). */
+  onCloseMany: (ids: string[]) => void;
+  /** Show this collection tab's row in the navigator. */
+  onReveal: (id: string) => void;
 }
 
 /** A tab's read-only marker (spec §4.4). The group chip has carried one
@@ -56,6 +60,8 @@ export function TabStrip({
   onOpenNew,
   onOpenNewScript,
   onTogglePin,
+  onCloseMany,
+  onReveal,
 }: TabStripProps) {
   const T = themeVars;
   const [dragId, setDragId] = React.useState<string | null>(null);
@@ -159,6 +165,19 @@ export function TabStrip({
       })),
     [tabs, connections],
   );
+
+  // Bulk closes read the strip's on-screen (grouped) order, never the stored
+  // one, and leave pinned tabs alone.
+  const bulkTargets = React.useMemo(() => {
+    if (!menuTab) return { others: [], right: [] };
+    const onScreen = groups.flatMap((g) => g.tabs);
+    const at = onScreen.findIndex((t) => t.id === menuTab.id);
+    const closable = (t: WorkspaceTab) => t.id !== menuTab.id && !t.pinned;
+    return {
+      others: onScreen.filter(closable).map((t) => t.id),
+      right: onScreen.slice(at + 1).filter(closable).map((t) => t.id),
+    };
+  }, [groups, menuTab]);
 
   return (
     <div
@@ -466,6 +485,29 @@ export function TabStrip({
                 // docstring for why a bare ref read here is refused at lint.
                 focusReturnTo: () => stripRef.current,
               },
+              {
+                kind: 'item',
+                label: 'Close others',
+                onClick: () => onCloseMany(bulkTargets.others),
+                disabled: bulkTargets.others.length === 0,
+                disabledTitle: 'No other unpinned tabs',
+              },
+              {
+                kind: 'item',
+                label: 'Close to the right',
+                onClick: () => onCloseMany(bulkTargets.right),
+                disabled: bulkTargets.right.length === 0,
+                disabledTitle: 'No unpinned tabs to the right',
+              },
+              ...(menuTab.kind === 'collection'
+                ? [
+                    {
+                      kind: 'item' as const,
+                      label: 'Reveal in sidebar',
+                      onClick: () => onReveal(menu.tabId),
+                    },
+                  ]
+                : []),
             ],
           }}
           onClose={() => setMenu(null)}

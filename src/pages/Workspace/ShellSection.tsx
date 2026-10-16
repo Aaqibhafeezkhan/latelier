@@ -69,6 +69,57 @@ export function ShellSection({
   const T = themeVars;
   const { sidebarCollapsed, toggleSidebar, leftWidth, setLeftWidth, commitLeftWidth } = panelPrefs;
   const { openEditConnectionModal, requestDisconnect } = connectionDialogs;
+  const [revealRequest, setRevealRequest] = React.useState<{ rowId: string } | null>(null);
+
+  const activate = (id: string) => {
+    if (id !== tabs.activeId) hints.recordSessionEvent('tabSwitch', '*');
+    // Clicking a dormant tab is the wake gesture: connect its Connection, same as clicking the navigator root.
+    const target = tabs.tabs.find((t) => t.id === id);
+    if (target) {
+      const conn = connections.find((c) => c.id === target.connectionId);
+      if (isKnownNotConnected(conn)) openConnection(target.connectionId);
+    }
+    void tabs.setActive(id);
+  };
+
+  // One prompt for the lot, naming how many pipelines would be lost; then the
+  // closes run one after another so each sees the active tab the last one left.
+  const closeMany = async (ids: string[]) => {
+    const dirty = ids.filter((id) => {
+      const t = tabs.tabs.find((x) => x.id === id);
+      return t?.kind === 'collection' && !!t.state.aggregation?.dirty;
+    }).length;
+    if (dirty > 0) {
+      const proceed = await confirmDestructive({
+        title: 'Discard unsaved pipeline changes?',
+        body:
+          dirty === 1
+            ? '1 tab being closed has pipeline edits that have not been saved. Closing it discards them.'
+            : `${dirty} tabs being closed have pipeline edits that have not been saved. Closing them discards them.`,
+        confirmLabel: 'Discard and close',
+      });
+      if (!proceed) return;
+    }
+    for (const id of ids) await tabs.close(id);
+  };
+
+  // Activating the tab makes the navigator expand its database and load its
+  // collections (the active-tab follow); opening the root and the database
+  // here also covers a sidebar that is collapsed and so not following anything.
+  const reveal = (id: string) => {
+    const t = tabs.tabs.find((x) => x.id === id);
+    if (t?.kind !== 'collection') return;
+    activate(id);
+    if (sidebarCollapsed) toggleSidebar();
+    navigatorData.dispatch({ type: 'expandedConnSet', id: t.connectionId });
+    navigatorData.dispatch({
+      type: 'dbExpandedSet',
+      connectionId: t.connectionId,
+      dbName: t.dbName,
+      value: true,
+    });
+    setRevealRequest({ rowId: `coll:${t.connectionId}:${t.dbName}:${t.collection}` });
+  };
 
   return (
     <>
@@ -95,16 +146,7 @@ export function ShellSection({
             if (!scratchConnectionId) return;
             void tabs.openScript({ connectionId: scratchConnectionId });
           }}
-          onActivate={(id) => {
-            if (id !== tabs.activeId) hints.recordSessionEvent('tabSwitch', '*');
-            // Clicking a dormant tab is the wake gesture: connect its Connection, same as clicking the navigator root.
-            const target = tabs.tabs.find((t) => t.id === id);
-            if (target) {
-              const conn = connections.find((c) => c.id === target.connectionId);
-              if (isKnownNotConnected(conn)) openConnection(target.connectionId);
-            }
-            void tabs.setActive(id);
-          }}
+          onActivate={activate}
           onClose={(id) => {
             const t = tabs.tabs.find((x) => x.id === id);
             if (t?.kind === 'collection' && t.state.aggregation?.dirty) {
@@ -125,6 +167,8 @@ export function ShellSection({
             const t = tabs.tabs.find((x) => x.id === id);
             if (t) void tabs.setPinned(id, !t.pinned);
           }}
+          onCloseMany={(ids) => void closeMany(ids)}
+          onReveal={reveal}
         />
       </AppShell.Header>
 
@@ -174,6 +218,7 @@ export function ShellSection({
                 }}
                 onOpenReferences={onOpenReferences}
                 data={navigatorData}
+                revealRequest={revealRequest}
               />
               <div
                 style={{

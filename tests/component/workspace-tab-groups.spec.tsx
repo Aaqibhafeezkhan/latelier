@@ -4,10 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import {
+  collectionTabFixture,
   installAtelierMock,
   multiConnectionMock,
   uninstallAtelierMock,
 } from '../helpers/atelierMock';
+import { DEFAULT_AGGREGATION_TAB_STATE } from '@shared/defaults';
+import type { WorkspaceTab } from '@shared/types';
 
 /**
  * X16.2, spec §4.4 — a tab says which Connection it belongs to.
@@ -907,5 +910,258 @@ describe('only a genuinely Dormant Connection gets the muted treatment', () => {
 
     // Failed shows the error and a Retry on its root — also not Dormant.
     expect(muted('lima')).toBe(false);
+  });
+});
+
+describe('the tab context menu closes in bulk and reveals a tab in the sidebar', () => {
+  type TabSpec = Parameters<typeof multiConnectionMock>[0]['tabs'];
+
+  function mountTabs(tabs: TabSpec) {
+    const mock = multiConnectionMock({
+      connections: [
+        { id: 'c1', name: 'Prod' },
+        { id: 'c2', name: 'Staging', color: '#8A4B00' },
+      ],
+      tabs,
+    });
+    const close = vi.fn(mock.tabs!.close!);
+    installAtelierMock({
+      ...mock,
+      tabs: { ...mock.tabs, close, reorder: async () => ({ ok: true as const }) },
+      meta: {
+        listDatabases: async () => [{ name: 'db', sizeOnDisk: 1, empty: false }],
+        listCollections: async () =>
+          ['alpha', 'bravo', 'charlie'].map((name) => ({
+            name,
+            type: 'collection' as const,
+            documentCount: 0,
+            sizeBytes: 0,
+            indexCount: 0,
+            capped: false,
+          })),
+      },
+    });
+    render(
+      <MemoryRouter initialEntries={['/workspace']}>
+        <Workspace />
+      </MemoryRouter>,
+    );
+    return { close };
+  }
+
+  const closedIds = (close: ReturnType<typeof vi.fn>) =>
+    close.mock.calls.map(([id]) => id as string).sort((a, b) => a.localeCompare(b));
+
+  /** Mantine renders a disabled item as a disabled button, without aria-disabled. */
+  function isDisabled(name: string): boolean {
+    const el = screen.getByRole('menuitem', { name });
+    return el.hasAttribute('disabled') || el.hasAttribute('data-disabled');
+  }
+
+  it('offers Close others, Close to the right and Reveal in sidebar beside Pin and Close', async () => {
+    mountTwoConnections();
+    await waitFor(() => expect(tabOrder()).toHaveLength(4));
+
+    fireEvent.contextMenu(tab('bravo'));
+
+    const names = (await screen.findAllByRole('menuitem')).map((m) => m.textContent);
+    expect(names).toEqual([
+      'Pin tab',
+      'Close tab',
+      'Close others',
+      'Close to the right',
+      'Reveal in sidebar',
+    ]);
+  });
+
+  it('offers no Reveal in sidebar for a script tab, which has no navigator row', async () => {
+    const mock = multiConnectionMock({
+      connections: [{ id: 'c1', name: 'Prod' }],
+      tabs: [{ id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true }],
+    });
+    const script: WorkspaceTab = {
+      id: 's1',
+      kind: 'script' as const,
+      connectionId: 'c1',
+      dbName: '',
+      collection: '',
+      position: 1,
+      isActive: false,
+      openedAt: '2026-07-26T12:00:00.000Z',
+      pinned: false,
+      state: { title: 'Script', source: '1', dbName: 'db' },
+    };
+    const rows = await mock.tabs!.list!();
+    installAtelierMock({ ...mock, tabs: { ...mock.tabs, list: async () => [...rows, script] } });
+    render(
+      <MemoryRouter initialEntries={['/workspace']}>
+        <Workspace />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(tabOrder()).toHaveLength(2));
+
+    fireEvent.contextMenu(strip().getByRole('tab', { name: /^Script / }));
+
+    await screen.findByRole('menuitem', { name: 'Close others' });
+    expect(screen.queryByRole('menuitem', { name: 'Reveal in sidebar' })).toBeNull();
+  });
+
+  it('Close others closes every other unpinned tab, keeping the target and pinned tabs', async () => {
+    const { close } = mountTabs([
+      { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+      { id: 'b', connectionId: 'c1', collection: 'bravo' },
+      { id: 'x', connectionId: 'c2', collection: 'xray', pinned: true },
+      { id: 'y', connectionId: 'c2', collection: 'yankee' },
+    ]);
+    await waitFor(() => expect(tabOrder()).toHaveLength(4));
+
+    fireEvent.contextMenu(tab('bravo'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close others' }));
+
+    await waitFor(() => expect(closedIds(close)).toEqual(['a', 'y']));
+    await waitFor(() => expect(tabOrder()).toHaveLength(2));
+  });
+
+  it('Close to the right follows the strip’s grouped order, not the stored order', async () => {
+    // Stored: alpha(Prod), bravo(Staging), charlie(Prod). On screen the Prod
+    // group comes first: alpha, charlie | bravo. Right of charlie on screen is
+    // bravo; right of charlie in the stored order is nothing.
+    const { close } = mountTabs([
+      { id: 'a1', connectionId: 'c1', collection: 'alpha', isActive: true },
+      { id: 'b1', connectionId: 'c2', collection: 'bravo' },
+      { id: 'a2', connectionId: 'c1', collection: 'charlie' },
+    ]);
+    await waitFor(() => expect(tabOrder()).toHaveLength(3));
+
+    fireEvent.contextMenu(tab('charlie'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close to the right' }));
+
+    await waitFor(() => expect(closedIds(close)).toEqual(['b1']));
+  });
+
+  it('disables Close to the right on the last tab on screen, and Close others when nothing else is closable', async () => {
+    mountTabs([
+      { id: 'a1', connectionId: 'c1', collection: 'alpha', isActive: true, pinned: true },
+      { id: 'b1', connectionId: 'c2', collection: 'bravo' },
+      { id: 'a2', connectionId: 'c1', collection: 'charlie' },
+    ]);
+    await waitFor(() => expect(tabOrder()).toHaveLength(3));
+
+    // bravo is last on screen though not last in the stored order.
+    fireEvent.contextMenu(tab('bravo'));
+    await screen.findByRole('menuitem', { name: 'Close to the right' });
+    expect(isDisabled('Close to the right')).toBe(true);
+    expect(isDisabled('Close others')).toBe(false);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+
+    // charlie: the only other closable tab is bravo (alpha is pinned).
+    fireEvent.contextMenu(tab('charlie'));
+    await screen.findByRole('menuitem', { name: 'Close others' });
+    expect(isDisabled('Close to the right')).toBe(false);
+  });
+
+  it('disables Close others when every other tab is pinned', async () => {
+    mountTabs([
+      { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true, pinned: true },
+      { id: 'b', connectionId: 'c1', collection: 'bravo' },
+    ]);
+    await waitFor(() => expect(tabOrder()).toHaveLength(2));
+
+    fireEvent.contextMenu(tab('bravo'));
+    await screen.findByRole('menuitem', { name: 'Close others' });
+    expect(isDisabled('Close others')).toBe(true);
+  });
+
+  it('asks once before closing tabs with unsaved pipelines, and Cancel closes nothing', async () => {
+    const dirty = {
+      ...collectionTabFixture().state,
+      aggregation: { ...DEFAULT_AGGREGATION_TAB_STATE, dirty: true },
+    };
+    const { close } = mountTabs([
+      { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+      { id: 'b', connectionId: 'c1', collection: 'bravo', state: dirty },
+      { id: 'c', connectionId: 'c1', collection: 'charlie', state: dirty },
+    ]);
+    await waitFor(() => expect(tabOrder()).toHaveLength(3));
+
+    fireEvent.contextMenu(tab('alpha'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close to the right' }));
+
+    const dialogs = await screen.findAllByRole('dialog');
+    expect(dialogs).toHaveLength(1);
+    expect(dialogs[0]!.textContent).toMatch(/2 tabs/);
+    fireEvent.click(within(dialogs[0]!).getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(close).not.toHaveBeenCalled();
+    expect(tabOrder()).toHaveLength(3);
+  });
+
+  it('closes them all once the unsaved-pipeline prompt is confirmed', async () => {
+    const dirty = {
+      ...collectionTabFixture().state,
+      aggregation: { ...DEFAULT_AGGREGATION_TAB_STATE, dirty: true },
+    };
+    const { close } = mountTabs([
+      { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+      { id: 'b', connectionId: 'c1', collection: 'bravo', state: dirty },
+      { id: 'c', connectionId: 'c1', collection: 'charlie' },
+    ]);
+    await waitFor(() => expect(tabOrder()).toHaveLength(3));
+
+    fireEvent.contextMenu(tab('alpha'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close others' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Discard and close/ }));
+
+    await waitFor(() => expect(closedIds(close)).toEqual(['b', 'c']));
+  });
+
+  it('Reveal in sidebar opens a collapsed sidebar, activates the tab and focuses its row', async () => {
+    mountTabs([
+      { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+      { id: 'b', connectionId: 'c1', collection: 'bravo' },
+    ]);
+    await waitFor(() => expect(tabOrder()).toHaveLength(2));
+    await screen.findByTestId('nav-coll-db-alpha');
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse navigator' }));
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull());
+
+    fireEvent.contextMenu(tab('bravo'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in sidebar' }));
+
+    await waitFor(() => expect(tab('bravo').getAttribute('aria-selected')).toBe('true'));
+    const row = await screen.findByTestId('nav-coll-db-bravo');
+    await waitFor(() =>
+      expect(screen.getByRole('tree').getAttribute('aria-activedescendant')).toBe(row.id),
+    );
+  });
+
+  it('Reveal in sidebar moves the navigator’s focus to the row with the sidebar already open', async () => {
+    mountTabs([
+      { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+      { id: 'b', connectionId: 'c1', collection: 'bravo' },
+    ]);
+    await screen.findByTestId('nav-coll-db-alpha');
+    // Park the navigator's own focus on another row first (alpha → bravo → charlie).
+    const tree = screen.getByRole('tree');
+    await waitFor(() =>
+      expect(tree.getAttribute('aria-activedescendant')).toBe(
+        screen.getByTestId('nav-coll-db-alpha').id,
+      ),
+    );
+    fireEvent.keyDown(tree, { key: 'ArrowDown' });
+    fireEvent.keyDown(tree, { key: 'ArrowDown' });
+    const charlie = screen.getByTestId('nav-coll-db-charlie');
+    await waitFor(() =>
+      expect(screen.getByRole('tree').getAttribute('aria-activedescendant')).toBe(charlie.id),
+    );
+
+    fireEvent.contextMenu(tab('bravo'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in sidebar' }));
+
+    const bravo = screen.getByTestId('nav-coll-db-bravo');
+    await waitFor(() =>
+      expect(screen.getByRole('tree').getAttribute('aria-activedescendant')).toBe(bravo.id),
+    );
   });
 });
