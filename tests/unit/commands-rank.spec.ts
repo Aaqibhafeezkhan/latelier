@@ -271,9 +271,16 @@ describe('rankCommands — hideWhenEmptyQuery', () => {
     make({ id: 'ns', title: 'Open: shop.orders', hideWhenEmptyQuery: true }),
   ];
 
-  it('omits the command from an empty query, recent or not', () => {
+  it('omits the command from the empty-query catalog', () => {
     expect(rankCommands(all, '', ctx, []).map((r) => r.cmd.id)).toEqual(['plain']);
-    expect(rankCommands(all, '   ', ctx, ['ns']).map((r) => r.cmd.id)).toEqual(['plain']);
+  });
+
+  it('still lists it under Recent on an empty query when the MRU has it', () => {
+    const ranked = rankCommands(all, '   ', ctx, ['ns']);
+    expect(ranked.map((r) => [r.cmd.id, r.bucket])).toEqual([
+      ['ns', 'recent'],
+      ['plain', 'substring'],
+    ]);
   });
 
   it('shows it once there is a query', () => {
@@ -287,5 +294,29 @@ describe('groupRows — fuzzy rows', () => {
       { cmd: make({ id: 'o', title: 'Open: shop.orders', group: 'workspace' }), bucket: 'fuzzy' },
     ]);
     expect(groups.map((g) => g.key)).toEqual(['workspace']);
+  });
+});
+
+describe('rankCommands — fuzzyText', () => {
+  it('matches the subsequence against fuzzyText instead of the title', () => {
+    const all = [
+      make({ id: 'a', title: 'Open: shop.orders', fuzzyText: 'shop.orders' }),
+      make({ id: 'b', title: 'Open: crm.leads', fuzzyText: 'crm.leads' }),
+    ];
+    // "opn" is a subsequence of every "Open: …" title, but of neither namespace.
+    expect(rankCommands(all, 'opn', ctx, [])).toEqual([]);
+    expect(rankCommands(all, 'shrd', ctx, []).map((r) => [r.cmd.id, r.bucket])).toEqual([
+      ['a', 'fuzzy'],
+    ]);
+  });
+
+  it('keeps substring matching on the full title', () => {
+    const all = [make({ id: 'a', title: 'Open: shop.orders', fuzzyText: 'shop.orders' })];
+    expect(rankCommands(all, 'open', ctx, []).map((r) => r.bucket)).toEqual(['prefix']);
+  });
+
+  it('lowercases fuzzyText before matching', () => {
+    const all = [make({ id: 'a', title: 'Open: Shop.Orders', fuzzyText: 'Shop.Orders' })];
+    expect(rankCommands(all, 'shrd', ctx, []).map((r) => r.bucket)).toEqual(['fuzzy']);
   });
 });

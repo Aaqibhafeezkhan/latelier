@@ -51,7 +51,10 @@ function emit(runtime: ConnectionRuntime) {
   });
 }
 
-function mount(server: Record<string, Record<string, string[]>> = SERVER) {
+function mount(
+  server: Record<string, Record<string, string[]>> = SERVER,
+  extraTabs: ReturnType<typeof collectionTabFixture>[] = [],
+) {
   statusListeners = [];
   const listDatabases = vi.fn(async ({ connectionId }: { connectionId: string }) =>
     Object.keys(server[connectionId] ?? {}).map(db),
@@ -79,7 +82,9 @@ function mount(server: Record<string, Record<string, string[]>> = SERVER) {
           collection: 'orders',
           isActive: true,
         }),
+        ...extraTabs,
       ],
+      setActive: async (id: string) => collectionTabFixture({ id }),
       openCollection: openCollection as never,
       update: async (id: string) => collectionTabFixture({ id }),
     },
@@ -177,6 +182,58 @@ describe('palette namespace rows', () => {
 
     openPalette();
     expect(screen.getByText('Close current tab')).toBeTruthy();
+    expect(openRows()).toEqual([]);
+  });
+
+  it('shows a namespace opened from the palette under Recent on an empty query', async () => {
+    const { listCollections } = mount();
+    await settled(listCollections);
+
+    openPalette();
+    search('leads');
+    await waitFor(() => expect(openRows()).toEqual(['Open: crm.leads']));
+    fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    openPalette();
+    expect(openRows()).toEqual(['Open: crm.leads']);
+  });
+
+  it('does not count the same namespace on another connection as recent', async () => {
+    const server = { c1: { shop: ['orders'] }, c2: { shop: ['orders'] } };
+    const { listCollections } = mount(server, [
+      collectionTabFixture({ id: 't2', connectionId: 'c2', dbName: 'shop', collection: 'orders' }),
+    ]);
+    await waitFor(() => expect(listCollections).toHaveBeenCalled());
+
+    openPalette();
+    search('shop.orders');
+    await waitFor(() => expect(openRows()).toEqual(['Open: shop.orders']));
+    fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    // Focus the tab on c2, then wait for c2's namespaces to be listed.
+    fireEvent.click(screen.getAllByRole('tab', { name: /orders/ })[1]);
+    await waitFor(() =>
+      expect(listCollections.mock.calls.map(([a]) => a.connectionId)).toContain('c2'),
+    );
+    openPalette();
+    search('shop.orders');
+    await waitFor(() => expect(openRows()).toEqual(['Open: shop.orders']));
+    search('');
+
+    expect(openRows()).toEqual([]);
+  });
+
+  it('does not match every namespace on the letters of “Open”', async () => {
+    const { listCollections } = mount();
+    await settled(listCollections);
+
+    openPalette();
+    search('opn');
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
     expect(openRows()).toEqual([]);
   });
 

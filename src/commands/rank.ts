@@ -58,8 +58,9 @@ export function rankCommands(
   const visible = all.filter((cmd) => isVisible(cmd, ctx));
 
   if (!q) {
+    // Hidden from the catalog only: a recently used one still shows as Recent.
     const listed = visible.filter((cmd) => !cmd.hideWhenEmptyQuery);
-    const visibleById = new Map(listed.map((cmd) => [cmd.id, cmd]));
+    const visibleById = new Map(visible.map((cmd) => [cmd.id, cmd]));
     const out: RankedRow[] = [];
     const seen = new Set<string>();
     for (const id of recentIds) {
@@ -87,7 +88,7 @@ export function rankCommands(
     if (title.startsWith(q)) bucket = 'prefix';
     else if (title.includes(q)) bucket = 'substring';
     else if (subtitle.includes(q) || keywords.includes(q)) bucket = 'keyword';
-    else if (isSubsequence(compact, title)) bucket = 'fuzzy';
+    else if (isSubsequence(compact, (cmd.fuzzyText ?? cmd.title).toLowerCase())) bucket = 'fuzzy';
     if (bucket === null) continue;
     if (recentSet.has(cmd.id)) bucket = 'recent';
     rows.push({ cmd, bucket });

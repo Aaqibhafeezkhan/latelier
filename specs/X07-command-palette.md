@@ -82,11 +82,18 @@ export interface Command {
    */
   when?: (ctx: PaletteContext) => boolean;
   /**
-   * Listed only once the user has typed something. Set on the dynamic
+   * Left out of the empty-query catalog. Set on the dynamic
    * one-row-per-namespace commands, which would otherwise flood the empty
-   * palette and bury the commands people browse for.
+   * palette and bury the commands people browse for. A recently used one
+   * still shows under Recent.
    */
   hideWhenEmptyQuery?: boolean;
+  /**
+   * What the fuzzy match reads instead of the title. The namespace commands
+   * set it to `<db>.<coll>`, so the shared `Open: ` prefix is not a
+   * subsequence every one of them matches.
+   */
+  fuzzyText?: string;
   /**
    * Side-effecting handler. Receives the palette context. Performing a
    * command always closes the palette; v1 has no "stay open" affordance.
@@ -152,7 +159,7 @@ This is one of two coupling points between the palette and the rest of the app (
 
 ## 3. Search and ranking
 
-Filter is case-insensitive, on the trimmed query. Substring matching is tried first, against the title, then the subtitle and the keywords (joined with a space). A command none of those match falls back to a fuzzy match: every character of the query, whitespace removed, appears in the title in order (a subsequence), so `shord` finds `Open: shop.orders`. The fuzzy match is title-only and has no scoring: it is a last bucket, never a reorder of the substring ones. A one-character query cannot reach it, since one character is a subsequence exactly when it is a substring.
+Filter is case-insensitive, on the trimmed query. Substring matching is tried first, against the title, then the subtitle and the keywords (joined with a space). A command none of those match falls back to a fuzzy match: every character of the query, whitespace removed, appears in the title in order (a subsequence), so `shord` finds `Open: shop.orders`. A command with `fuzzyText` is matched against that instead of its title, so `opn` does not match every namespace through its `Open: ` prefix. The fuzzy match is title-only (or `fuzzyText`-only) and has no scoring: it is a last bucket, never a reorder of the substring ones. A one-character query cannot reach it, since one character is a subsequence exactly when it is a substring.
 
 Ranking, in order:
 1. Recently used (MRU bucket, oldest at the bottom of its bucket).
@@ -165,7 +172,7 @@ Within each rank bucket, preserve the registration order (which roughly tracks i
 
 When MRU pulls a command into the RECENT bucket, that command does **not** also appear under its own group — it moves, not duplicates. This matches VS Code / Linear behavior and avoids two same-named rows on screen.
 
-Empty query → render the RECENT bucket first (if non-empty), then every other command grouped by `group`. Commands with `hideWhenEmptyQuery` are left out of the empty query entirely, the RECENT bucket included. Section headers in registration order: `general`, `navigation`, `connection`, `workspace`, `query`, `view`, `references`, `aggregation`.
+Empty query → render the RECENT bucket first (if non-empty), then every other command grouped by `group`. Commands with `hideWhenEmptyQuery` are left out of the grouped catalog, but one the MRU holds still shows in the RECENT bucket. Section headers in registration order: `general`, `navigation`, `connection`, `workspace`, `query`, `view`, `references`, `aggregation`.
 
 ## 4. UI
 
@@ -239,7 +246,7 @@ Empty query → render the RECENT bucket first (if non-empty), then every other 
 | connection    | `connection.switch:<id>`    | `Switch to: <name>`               | always; one row per connection (subtitle = host)                                      | navigates to `/workspace` with a `switchConnectionId` intent that `Workspace` runs via `switchConnection` — registered globally by `<ConnectionPaletteCommands>`, which holds its own `useConnections()` subscription |
 | workspace     | `tab.new`                   | New tab…                          | `pathname === '/workspace'` and active connection exists                              | opens the existing `<NewTabModal>` (`setNewTabOpen(true)`)             |
 | workspace     | `tab.new.aggregation`       | New aggregation tab on this coll. | `activeTab?.kind === 'collection'`                                                    | `tabs.openAggregation({connectionId, dbName, collection})` from the active tab's coords (no modal) |
-| workspace     | `tab.open:<db>:<coll>`      | `Open: <db>.<coll>`               | on `/workspace`, one row per collection of the **focused connection** only (never an unopened connection's, per X16 §4.2); hidden on an empty query (`hideWhenEmptyQuery`) | `tabs.openCollection({connectionId, dbName, collection, reuseExisting: true})` — switches to an existing tab if one exists, otherwise creates a fresh one. Mirrors the navigator's plain-click behavior. The list is read from the navigator's own cache (W02 §2), which the Workspace sweeps once the focused connection is connected, so a collection created, renamed or dropped through the navigator shows up here too and nothing is fetched twice |
+| workspace     | `tab.open:<connectionId>:<db>:<coll>` | `Open: <db>.<coll>`     | on `/workspace`, one row per collection of the **focused connection** only (never an unopened connection's, per X16 §4.2), and none while it is not connected; left out of the empty-query catalog (`hideWhenEmptyQuery`) but listed under Recent once used. The id names the connection, so the same namespace on another connection is not recent. Fuzzy-matched on `<db>.<coll>` (`fuzzyText`) | `tabs.openCollection({connectionId, dbName, collection, reuseExisting: true})` — switches to an existing tab if one exists, otherwise creates a fresh one. Mirrors the navigator's plain-click behavior. The list is read from the navigator's own cache (W02 §2), which the Workspace sweeps once the focused connection is connected, so a collection created, renamed or dropped through the navigator shows up here too and nothing is fetched twice |
 | workspace     | `shell.toggle`              | Open Shell / Close Shell          | a focused connection exists (title flips on whether the shell pane is open)           | toggles the Mongo shell pane, the same state the TitleBar's Shell button drives |
 | workspace     | `tab.close`                 | Close current tab                 | `activeTab !== null`                                                                  | `tabs.close(activeTab.id)` from `useWorkspaceTabs`                     |
 | workspace     | `tab.pin.toggle`            | Pin current tab / Unpin           | `activeTab !== null` (title flips on `activeTab.pinned`)                              | `tabs.setPinned(activeTab.id, !activeTab.pinned)`                      |

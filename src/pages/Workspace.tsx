@@ -771,8 +771,11 @@ function WorkspaceInner() {
   const collectionCommands = React.useMemo(
     () =>
       paletteCollections.map(({ db, coll }) => ({
-        id: `tab.open:${db}:${coll}`,
+        // Connection-qualified, so the same namespace on another Connection
+        // is not "recent".
+        id: `tab.open:${focusedConnectionId}:${db}:${coll}`,
         title: `Open: ${db}.${coll}`,
+        fuzzyText: `${db}.${coll}`,
         group: 'workspace' as const,
         keywords: ['collection', 'tab', 'new', db, coll],
         hideWhenEmptyQuery: true,
