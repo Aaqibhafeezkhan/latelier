@@ -31,6 +31,7 @@
     "src/pages/Workspace/views/docFieldFlatten.ts",
     "src/pages/Workspace/views/fieldPathKey.ts",
     "src/pages/Workspace/builder.ts",
+    "src/pages/Workspace/queryCaps.ts",
     "src/pages/Workspace/projection.ts",
     "src/pages/Workspace/deleteMode.ts",
     "src/pages/Workspace/documentDiff.ts",

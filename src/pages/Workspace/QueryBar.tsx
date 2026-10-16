@@ -20,6 +20,7 @@ import { useCollectionWorkspace } from './context';
 import { api } from '../../api/atelier';
 import { ExplainDrawer } from './Aggregation/ExplainDrawer';
 import { QueryExpandModal } from './QueryExpandModal';
+import { LIMIT_EXPLANATION } from './queryCaps';
 import type { CollectionTabState, ExplainVerbosity } from '@shared/types';
 
 interface QueryBarProps {
@@ -793,21 +794,32 @@ function QueryBarInner({
         </div>
         <div id="query-bar-limit-label" style={labelCellStyle}>limit</div>
         <div style={valueCellLast}>
-          <input
-            type="number"
-            min={1}
-            value={state.builder.limit}
-            onChange={(e) => handleLimitChange(e.target.value)}
-            placeholder="—"
-            data-testid="query-bar-limit"
-            aria-labelledby="query-bar-limit-label"
-            aria-invalid={limitError !== null}
-            aria-describedby={limitError ? 'query-bar-limit-error' : undefined}
-            style={{
-              ...cellInputStyle,
-              borderBottom: `1px solid ${limitError ? T.warn : 'transparent'}`,
-            }}
-          />
+          {/* Same pattern as skip above: the Tooltip serves hover and focus,
+              the visually-hidden copy serves a screen reader. */}
+          <Tooltip
+            label={LIMIT_EXPLANATION}
+            withArrow
+            events={{ hover: true, focus: true, touch: false }}
+          >
+            <input
+              type="number"
+              min={1}
+              value={state.builder.limit}
+              onChange={(e) => handleLimitChange(e.target.value)}
+              placeholder="—"
+              data-testid="query-bar-limit"
+              aria-labelledby="query-bar-limit-label"
+              aria-invalid={limitError !== null}
+              aria-describedby={
+                limitError ? 'query-bar-limit-error query-bar-limit-help' : 'query-bar-limit-help'
+              }
+              style={{
+                ...cellInputStyle,
+                borderBottom: `1px solid ${limitError ? T.warn : 'transparent'}`,
+              }}
+            />
+          </Tooltip>
+          <VisuallyHidden id="query-bar-limit-help">{LIMIT_EXPLANATION}</VisuallyHidden>
         </div>
       </div>
 

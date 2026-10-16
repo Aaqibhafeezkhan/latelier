@@ -2,6 +2,7 @@ import React from 'react';
 import { themeVars } from '../../theme/themeVars';
 import { useIsDark } from '../../ThemeContext';
 import { api } from '../../api/atelier';
+import { notify } from '../../theme/notifications';
 import {
   classColor,
   CLASS_BADGE,
@@ -22,7 +23,9 @@ function openDocsUrl(url: string): void {
   // Electron route only. The <a href> stays for a11y (announced as "link",
   // middle-click/context-menu copy), but the click is cancelled and routed
   // through the URL-restricted IPC.
-  void api.shell.openExternal({ url }).catch(() => {});
+  void api.shell.openExternal({ url }).catch(() => {
+    notify.error('Could not open the link');
+  });
 }
 
 export function OperatorDocPanel({
