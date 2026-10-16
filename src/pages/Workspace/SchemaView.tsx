@@ -185,6 +185,8 @@ export function SchemaView({
               <tr style={{ position: 'sticky', top: 0, background: T.surface, zIndex: 1 }}>
                 <th style={cellHead(T)}>Field</th>
                 <th style={cellHead(T)}>Types</th>
+                <th style={{ ...cellHead(T), width: 90, textAlign: 'right' }}>Distinct</th>
+                <th style={cellHead(T)}>Range</th>
                 <th style={{ ...cellHead(T), width: 110, textAlign: 'right' }}>Frequency</th>
               </tr>
             </thead>
@@ -237,6 +239,14 @@ function SchemaRow({ entry }: { entry: SchemaSampleEntry }) {
           ))}
         </div>
       </td>
+      <td style={{ ...cellBody(T), textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+        {entry.distinct ?? '—'}
+      </td>
+      <td style={{ ...cellBody(T), fontVariantNumeric: 'tabular-nums' }}>
+        {entry.numeric
+          ? `${formatNumber(entry.numeric.min)} – ${formatNumber(entry.numeric.max)} · avg ${formatNumber(entry.numeric.avg)}`
+          : '—'}
+      </td>
       <td style={{ ...cellBody(T), textAlign: 'right' }}>
         <span style={{ color: T.textMuted, fontVariantNumeric: 'tabular-nums' }}>
           {Math.round(entry.frequency * 100)}%
@@ -244,6 +254,10 @@ function SchemaRow({ entry }: { entry: SchemaSampleEntry }) {
       </td>
     </tr>
   );
+}
+
+function formatNumber(n: number): string {
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 function cellHead(T: typeof themeVars): React.CSSProperties {

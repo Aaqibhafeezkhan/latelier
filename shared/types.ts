@@ -829,6 +829,17 @@ export interface SchemaSampleEntry {
   frequency: number;
   /** BSON-shaped type histogram (counts), e.g. { string: 8, null: 2 }. */
   types: Record<string, number>;
+  /**
+   * Distinct scalar values seen on this path in the sample. A count, never the
+   * values: `entries` is persisted with the tab. Absent when no scalar was seen.
+   */
+  distinct?: number;
+  /**
+   * Min, max and average over the sample's `number`/`long`/`decimal`
+   * occurrences of this path. Absent when none was finite. Dropped before
+   * persisting for a secret-named path.
+   */
+  numeric?: { min: number; max: number; avg: number };
 }
 
 export interface SchemaTabState {
