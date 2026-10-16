@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeExplain } from '../../src/utils/explainSummary';
+import { buildPlanTree, summarizeExplain } from '../../src/utils/explainSummary';
 
 describe('summarizeExplain', () => {
   it('(a) find COLLSCAN → collscan:true, usesIndex:false', () => {
@@ -287,5 +287,220 @@ describe('summarizeExplain', () => {
     // shard0.winningPlan fails isRecord, so the outer winningPlan must be left
     // alone — not replaced by the string.
     expect(summarizeExplain(plan)?.stages).toEqual(['FETCH']);
+  });
+});
+
+describe('buildPlanTree', () => {
+  const sortFetchIx = {
+    queryPlanner: {
+      winningPlan: {
+        stage: 'SORT',
+        inputStage: {
+          stage: 'FETCH',
+          inputStage: { stage: 'IXSCAN', indexName: 'a_1', keyPattern: { a: 1 } },
+        },
+      },
+    },
+    executionStats: {
+      executionStages: {
+        stage: 'SORT',
+        nReturned: 9,
+        executionTimeMillisEstimate: 2,
+        inputStage: {
+          stage: 'FETCH',
+          nReturned: 9,
+          executionTimeMillisEstimate: 1,
+          docsExamined: 10,
+          inputStage: {
+            stage: 'IXSCAN',
+            nReturned: 10,
+            executionTimeMillisEstimate: 0,
+            keysExamined: 10,
+            indexName: 'a_1',
+            keyPattern: { a: 1 },
+          },
+        },
+      },
+    },
+  };
+
+  it('(1) executionStats SORT -> FETCH -> IXSCAN is a 3-deep tree carrying each node\'s own figures', () => {
+    const root = buildPlanTree(sortFetchIx);
+    expect(root).toMatchObject({ stage: 'SORT', nReturned: 9, timeMs: 2, collscan: false });
+    expect(root?.children).toHaveLength(1);
+    const fetch = root!.children[0];
+    expect(fetch).toMatchObject({ stage: 'FETCH', nReturned: 9, timeMs: 1, docsExamined: 10 });
+    expect(fetch.keysExamined).toBeUndefined();
+    const ix = fetch.children[0];
+    expect(ix).toMatchObject({
+      stage: 'IXSCAN',
+      nReturned: 10,
+      timeMs: 0,
+      keysExamined: 10,
+      indexName: 'a_1',
+      keyPattern: { a: 1 },
+    });
+    expect(ix.docsExamined).toBeUndefined();
+    expect(ix.children).toEqual([]);
+  });
+
+  it('(2) inputStages yields one child per element, not just the first', () => {
+    const root = buildPlanTree({
+      queryPlanner: {
+        winningPlan: {
+          stage: 'SUBPLAN',
+          inputStage: {
+            stage: 'OR',
+            inputStages: [
+              { stage: 'IXSCAN', indexName: 'a_1' },
+              { stage: 'IXSCAN', indexName: 'b_1' },
+            ],
+          },
+        },
+      },
+    });
+    const or = root!.children[0];
+    expect(or.children.map((c) => c.indexName)).toEqual(['a_1', 'b_1']);
+  });
+
+  it('(3) only COLLSCAN nodes are flagged collscan', () => {
+    const root = buildPlanTree({
+      queryPlanner: { winningPlan: { stage: 'FETCH', inputStage: { stage: 'COLLSCAN' } } },
+    });
+    expect(root?.collscan).toBe(false);
+    expect(root?.children[0].collscan).toBe(true);
+  });
+
+  it('(4) a queryPlanner-only plan has the same shape with every figure undefined', () => {
+    const root = buildPlanTree({ queryPlanner: sortFetchIx.queryPlanner });
+    expect(root?.stage).toBe('SORT');
+    expect(root?.children[0].stage).toBe('FETCH');
+    const ix = root!.children[0].children[0];
+    expect(ix).toMatchObject({ stage: 'IXSCAN', indexName: 'a_1', keyPattern: { a: 1 } });
+    for (const n of [root!, root!.children[0], ix]) {
+      expect(n.nReturned).toBeUndefined();
+      expect(n.docsExamined).toBeUndefined();
+      expect(n.keysExamined).toBeUndefined();
+      expect(n.timeMs).toBeUndefined();
+    }
+  });
+
+  it('(5) an aggregation puts the $cursor subtree first under a synthetic pipeline root', () => {
+    const root = buildPlanTree({
+      stages: [
+        { $cursor: sortFetchIx },
+        { $group: { _id: '$a' }, nReturned: 4, executionTimeMillisEstimate: 3 },
+        { $sort: { n: 1 }, nReturned: 4, executionTimeMillisEstimate: 1 },
+      ],
+    });
+    expect(root?.stage).toBe('pipeline');
+    expect(root?.collscan).toBe(false);
+    expect(root?.children.map((c) => c.stage)).toEqual(['SORT', '$group', '$sort']);
+    expect(root!.children[0].children[0].stage).toBe('FETCH');
+    expect(root!.children[1]).toMatchObject({ nReturned: 4, timeMs: 3, children: [] });
+    expect(root!.children[2]).toMatchObject({ nReturned: 4, timeMs: 1 });
+  });
+
+  it('(6) SBE builds the classic-name tree from queryPlan, with no per-stage counts', () => {
+    const root = buildPlanTree({
+      queryPlanner: {
+        winningPlan: {
+          queryPlan: {
+            stage: 'FETCH',
+            inputStage: { stage: 'IXSCAN', indexName: 'x_1' },
+          },
+          slotBasedPlan: { stages: '[1] project ...' },
+        },
+      },
+      executionStats: {
+        executionStages: { stage: 'project', nReturned: 5, inputStage: { stage: 'ixseek', nReturned: 5 } },
+      },
+    });
+    expect(root?.stage).toBe('FETCH');
+    expect(root?.nReturned).toBeUndefined();
+    expect(root?.children[0]).toMatchObject({ stage: 'IXSCAN', indexName: 'x_1' });
+    expect(root?.children[0].nReturned).toBeUndefined();
+  });
+
+  it('(7) a sharded plan has one child per shard', () => {
+    const root = buildPlanTree({
+      queryPlanner: {
+        winningPlan: {
+          stage: 'SHARD_MERGE',
+          shards: [
+            { shardName: 's0', winningPlan: { stage: 'COLLSCAN' } },
+            { shardName: 's1', winningPlan: { stage: 'FETCH', inputStage: { stage: 'IXSCAN' } } },
+          ],
+        },
+      },
+    });
+    expect(root?.stage).toBe('SHARD_MERGE');
+    expect(root?.children.map((c) => c.stage)).toEqual(['COLLSCAN', 'FETCH']);
+  });
+
+  it('(7b) a sharded executionStats plan reads each shard\'s executionStages', () => {
+    const root = buildPlanTree({
+      queryPlanner: { winningPlan: { stage: 'SHARD_MERGE' } },
+      executionStats: {
+        executionStages: {
+          stage: 'SHARD_MERGE',
+          nReturned: 3,
+          shards: [{ shardName: 's0', executionStages: { stage: 'COLLSCAN', nReturned: 3, docsExamined: 8 } }],
+        },
+      },
+    });
+    expect(root?.children).toHaveLength(1);
+    expect(root?.children[0]).toMatchObject({ stage: 'COLLSCAN', nReturned: 3, docsExamined: 8, collscan: true });
+  });
+
+  it('(8) non-numeric figures are not copied', () => {
+    const root = buildPlanTree({
+      queryPlanner: { winningPlan: { stage: 'IXSCAN' } },
+      executionStats: {
+        executionStages: {
+          stage: 'IXSCAN',
+          nReturned: '9',
+          executionTimeMillisEstimate: null,
+          docsExamined: {},
+          keysExamined: 'x',
+          indexName: 5,
+        },
+      },
+    });
+    expect(root).toEqual({ stage: 'IXSCAN', collscan: false, children: [] });
+  });
+
+  it('(9) null, {}, and unknown shapes give null', () => {
+    expect(buildPlanTree(null)).toBeNull();
+    expect(buildPlanTree(undefined)).toBeNull();
+    expect(buildPlanTree('plan')).toBeNull();
+    expect(buildPlanTree({})).toBeNull();
+    expect(buildPlanTree({ weird: 1 })).toBeNull();
+    expect(buildPlanTree({ queryPlanner: { winningPlan: {} } })).toBeNull();
+    expect(buildPlanTree({ stages: [{ $group: {} }] })).toBeNull();
+  });
+
+  it('(9b) falls back to the winning plan when executionStages is not a record', () => {
+    const root = buildPlanTree({
+      queryPlanner: { winningPlan: { stage: 'COLLSCAN' } },
+      executionStats: { executionStages: 'nope' },
+    });
+    expect(root).toMatchObject({ stage: 'COLLSCAN', collscan: true });
+  });
+
+  it('(9c) skips non-record entries among inputStages and a stage with no name', () => {
+    const root = buildPlanTree({
+      queryPlanner: {
+        winningPlan: { stage: 'OR', inputStages: [null, 'x', { stage: 'IXSCAN' }, { noStage: 1 }] },
+      },
+    });
+    expect(root?.children.map((c) => c.stage)).toEqual(['IXSCAN']);
+  });
+
+  it('(10) the badge summary names the index for IXSCAN and none for COLLSCAN', () => {
+    expect(summarizeExplain(sortFetchIx)).toMatchObject({ usesIndex: true, collscan: false, indexName: 'a_1' });
+    const scan = summarizeExplain({ queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } });
+    expect(scan).toMatchObject({ collscan: true, usesIndex: false });
+    expect(scan?.indexName).toBeUndefined();
   });
 });

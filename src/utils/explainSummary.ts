@@ -123,3 +123,105 @@ export function summarizeExplain(plan: unknown): ExplainSummary | null {
 
   return summary;
 }
+
+/** One stage of a plan tree — what `PlanTree` renders a row from. */
+export interface PlanNode {
+  /** `SORT`, `FETCH`, `IXSCAN`, `COLLSCAN`, or an aggregation op like `$group`. */
+  stage: string;
+  indexName?: string;
+  keyPattern?: unknown;
+  nReturned?: number;
+  docsExamined?: number;
+  keysExamined?: number;
+  /** From `executionTimeMillisEstimate`. */
+  timeMs?: number;
+  collscan: boolean;
+  children: PlanNode[];
+}
+
+function numberField(from: Record<string, unknown>, key: string): number | undefined {
+  const v = from[key];
+  return typeof v === 'number' ? v : undefined;
+}
+
+function applyMetrics(node: PlanNode, from: Record<string, unknown>): void {
+  const nReturned = numberField(from, 'nReturned');
+  if (nReturned !== undefined) node.nReturned = nReturned;
+  const timeMs = numberField(from, 'executionTimeMillisEstimate');
+  if (timeMs !== undefined) node.timeMs = timeMs;
+  const docsExamined = numberField(from, 'docsExamined');
+  if (docsExamined !== undefined) node.docsExamined = docsExamined;
+  const keysExamined = numberField(from, 'keysExamined');
+  if (keysExamined !== undefined) node.keysExamined = keysExamined;
+}
+
+/** Child stages of one classic stage: `inputStage`, then every `inputStages`
+ * element, then each shard's own plan. */
+function childStages(stage: Record<string, unknown>): unknown[] {
+  const out: unknown[] = [];
+  if (isRecord(stage.inputStage)) out.push(stage.inputStage);
+  if (Array.isArray(stage.inputStages)) out.push(...(stage.inputStages as unknown[]));
+  if (Array.isArray(stage.shards)) {
+    for (const shard of stage.shards as unknown[]) {
+      if (!isRecord(shard)) continue;
+      out.push(isRecord(shard.executionStages) ? shard.executionStages : shard.winningPlan);
+    }
+  }
+  return out;
+}
+
+function stageToNode(raw: unknown): PlanNode | null {
+  if (!isRecord(raw) || typeof raw.stage !== 'string') return null;
+  const node: PlanNode = { stage: raw.stage, collscan: raw.stage === 'COLLSCAN', children: [] };
+  if (typeof raw.indexName === 'string') node.indexName = raw.indexName;
+  if (raw.keyPattern !== undefined) node.keyPattern = raw.keyPattern;
+  applyMetrics(node, raw);
+  for (const child of childStages(raw)) {
+    const childNode = stageToNode(child);
+    if (childNode) node.children.push(childNode);
+  }
+  return node;
+}
+
+/** Root stage of a find-shaped explain (`{ queryPlanner, executionStats? }`). */
+function findRootStage(inner: Record<string, unknown>): unknown {
+  if (!isRecord(inner.queryPlanner)) return undefined;
+  const winning: unknown = inner.queryPlanner.winningPlan;
+  if (!isRecord(winning)) return undefined;
+  // ponytail: SBE (`winningPlan.queryPlan`) carries no per-stage counts —
+  // `executionStages` there is the lowercase slot tree (`project`/`nlj`/
+  // `ixseek`), which does not line up with the classic names. Upgrade path:
+  // map slot-tree nodes onto classic ones by `planNodeId`.
+  if (isRecord(winning.queryPlan)) return winning.queryPlan;
+  const stats = inner.executionStats;
+  if (isRecord(stats) && isRecord(stats.executionStages)) return stats.executionStages;
+  return winning;
+}
+
+/**
+ * Full stage tree of an explain plan, for the drawer's stage view. Total like
+ * `summarizeExplain`: unrecognized input returns `null`, never throws.
+ *
+ * Per-stage figures exist only at `executionStats` verbosity and above; at
+ * `queryPlanner` the tree has the same shape with every figure absent.
+ */
+export function buildPlanTree(plan: unknown): PlanNode | null {
+  if (!isRecord(plan)) return null;
+  const inner = unwrapCursorStage(plan);
+  if (!inner) return null;
+  const cursorNode = stageToNode(findRootStage(inner));
+  if (!Array.isArray(plan.stages)) return cursorNode;
+  if (!cursorNode) return null;
+
+  const root: PlanNode = { stage: 'pipeline', collscan: false, children: [cursorNode] };
+  const cursorAt = plan.stages.findIndex((s) => isRecord(s) && isRecord(s.$cursor));
+  for (const entry of (plan.stages as unknown[]).slice(cursorAt + 1)) {
+    if (!isRecord(entry)) continue;
+    const op = Object.keys(entry).find((k) => k.startsWith('$'));
+    if (op === undefined) continue;
+    const node: PlanNode = { stage: op, collscan: false, children: [] };
+    applyMetrics(node, entry);
+    root.children.push(node);
+  }
+  return root;
+}
