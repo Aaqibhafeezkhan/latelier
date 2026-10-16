@@ -484,3 +484,53 @@ describe('the shared cache follows connection status while the navigator is coll
     expect(screen.queryByText('connection refused')).toBeNull();
   });
 });
+
+describe('the palette sweep on a server with many databases', () => {
+  it('lists at most 4 databases at once, and still reaches every one of them', async () => {
+    const swept = Array.from({ length: 10 }, (_, i) => `db${i}`);
+    // `shop` holds the open tab, whose header lists it on its own: answered at once.
+    const server = { c1: Object.fromEntries(['shop', ...swept].map((n) => [n, [`in_${n}`]])) };
+    const { listCollections } = mount(server);
+    const answer = (connectionId: string, dbName: string) =>
+      (server[connectionId as 'c1']?.[dbName] ?? []).map(coll);
+    // Every other listing hangs until released, so the in-flight count is observable.
+    let inFlight = 0;
+    let peak = 0;
+    const waiting: Array<() => void> = [];
+    listCollections.mockImplementation(async ({ connectionId, dbName }) => {
+      if (dbName === 'shop') return answer(connectionId, dbName);
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      return new Promise((resolve) => {
+        waiting.push(() => {
+          inFlight--;
+          resolve(answer(connectionId, dbName));
+        });
+      });
+    });
+    const listed = () =>
+      new Set(listCollections.mock.calls.map(([a]) => a.dbName).filter((n) => n !== 'shop'));
+
+    await waitFor(() => expect(listed().size).toBeGreaterThan(0));
+    for (let round = 0; round < 20 && listed().size < swept.length; round++) {
+      // Let every listing the sweep would start right now get started...
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      // ...then answer them all.
+      await act(async () => {
+        for (const release of waiting.splice(0)) release();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
+
+    expect(listed()).toEqual(new Set(swept));
+    expect(peak).toBe(4);
+    await act(async () => {
+      for (const release of waiting.splice(0)) release();
+    });
+    openPalette();
+    search('in_db9');
+    await waitFor(() => expect(openRows()).toEqual(['Open: db9.in_db9']));
+  });
+});

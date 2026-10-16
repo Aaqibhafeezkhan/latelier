@@ -44,6 +44,15 @@ describe('SettingsModal: reopen tabs on launch', () => {
     await waitFor(() => expect((sw as HTMLInputElement).checked).toBe(false));
   });
 
+  it('says that turning it off loses unsaved pipelines along with the tabs', async () => {
+    const sw = await mountModal({ get: async () => null, set: async (_k, v) => v });
+    const describedBy = sw.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'When off, the app starts with no tabs open, pinned ones included, and pipeline changes that were never saved are lost with them.',
+    );
+  });
+
   it('saves false when switched off', async () => {
     const set = vi.fn(async (_k: string, v: unknown) => v);
     const sw = await mountModal({ get: async () => null, set });

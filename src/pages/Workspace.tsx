@@ -56,6 +56,8 @@ import type { SuggestionContext } from '../features/fieldSuggestions/types';
 import { invalidateSampleSchemaCache } from '../features/fieldSuggestions/sources/sampleSchemaSource';
 
 const OK: UpdateFieldOutcome = { ok: true };
+/** Collection listings the palette sweep keeps in flight at once. */
+const SWEEP_CONCURRENCY = 4;
 
 function WorkspaceInner() {
   const T = themeVars;
@@ -754,6 +756,9 @@ function WorkspaceInner() {
     dbs: null,
     done: new Set(),
   });
+  // Databases a reconnect left with a stale listing: swept again although cached.
+  const relistRef = React.useRef<{ id: string | null; names: Set<string> }>({ id: null, names: new Set() });
+  const [relists, setRelists] = React.useState(0);
   React.useEffect(() => {
     if (!focusedConnectionId || !focusedIsConnected) return;
     if (reconnectedRef.current.delete(focusedConnectionId)) {
@@ -761,7 +766,10 @@ function WorkspaceInner() {
       const id = focusedConnectionId;
       const expanded = ownGet(navigatorTree.expanded, id) ?? {};
       void loadDbs(id, { force: true }).then((dbs) => {
-        for (const d of dbs ?? []) if (!ownGet(expanded, d.name)) void loadColls(id, d.name);
+        const names = (dbs ?? []).filter((d) => !ownGet(expanded, d.name)).map((d) => d.name);
+        relistRef.current = { id, names: new Set(names) };
+        sweptRef.current = { dbs: null, done: new Set() };
+        setRelists((n) => n + 1);
       });
       return;
     }
@@ -772,9 +780,18 @@ function WorkspaceInner() {
     }
     if (sweptRef.current.dbs !== c.dbs) sweptRef.current = { dbs: c.dbs, done: new Set() };
     const { done } = sweptRef.current;
+    const relist = relistRef.current.id === focusedConnectionId ? relistRef.current.names : null;
+    // A few listings at a time, the navigator's own included, so a server with
+    // hundreds of databases is not asked for all of them at once. Each one that
+    // settles changes the cache and so runs this again for the next.
+    let inFlight = c.dbs.filter((d) => ownGet(c.collsLoading, d.name)).length;
     for (const d of c.dbs) {
-      if (done.has(d.name) || ownGet(c.colls, d.name) || ownGet(c.collsLoading, d.name)) continue;
+      if (inFlight >= SWEEP_CONCURRENCY) break;
+      if (done.has(d.name) || ownGet(c.collsLoading, d.name)) continue;
+      if (ownGet(c.colls, d.name) && !relist?.has(d.name)) continue;
       done.add(d.name);
+      relist?.delete(d.name);
+      inFlight++;
       void loadColls(focusedConnectionId, d.name);
     }
   }, [
@@ -784,6 +801,7 @@ function WorkspaceInner() {
     loadDbs,
     loadColls,
     reconnects,
+    relists,
     navigatorTree.expanded,
   ]);
   // A disconnected Connection's cache is a snapshot that can't be opened from.

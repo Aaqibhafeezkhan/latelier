@@ -52,7 +52,7 @@ The check runs once, after the main window has been created, off the critical pa
 
 - `start()` (async, never rejects): when disabled (section 2) does nothing and never loads the updater. Otherwise loads it, sets `autoDownload = true`, `autoInstallOnAppQuit = true`, subscribes to `update-downloaded` and `error`, calls `checkForUpdates()` and logs any rejection, including a failed load.
 - State: `{ status: 'idle' } | { status: 'ready', version }`. `update-downloaded` moves it to `ready` and emits it to the renderer. Nothing else changes visible state; checking, downloading and "no update available" are invisible.
-- `restart()`: when `ready`, calls `quitAndInstall(true, true)` (silent, relaunch). When not `ready`, throws a `ValidationError` naming the actual state; it never installs speculatively.
+- `restart()`: when `ready`, calls `quitAndInstall(true, true)` (silent, relaunch). When not `ready`, throws a `ValidationError` naming the actual state; it never installs speculatively. With scripts, shell commands, imports or aggregations running, it asks the quit question (F06) first, because `quitAndInstall` starts the installer before the app's `before-quit` fires and sets a flag that ignores every later install: asking at `before-quit` would be too late to cancel. Quit installs, and the quit that follows is let through without asking again. Cancel installs nothing, keeps the state `ready` and re-sends it, so the prompt offers Restart again. An install that fails after Quit (electron-updater emits `error` from inside `quitAndInstall` and does not quit) takes the approval back, so a later quit over running work asks again, and re-sends `ready` the same way; `restart()` then answers `restarting: false`.
 - Errors: both a rejected `checkForUpdates()` and the updater's `error` event are written with `electron/log.ts` (`warn`, tag `updater`) and nothing else. Never a modal, never a notification, never thrown into the IPC envelope.
 - The updater's own logger is an adapter onto `electron/log.ts`, so its output is redacted like every other log line.
 
@@ -74,7 +74,7 @@ No payload carries a secret: no `SECRET_INPUT` tag, no allowlist entry.
 | Channel | Kind | Payload in | Payload out |
 |---|---|---|---|
 | `updates:getState` | invoke | `{}` | `UpdateState` |
-| `updates:restart` | invoke | `{}` | `{ restarting: true }` |
+| `updates:restart` | invoke | `{}` | `{ restarting: boolean }` (`false` when the quit question was cancelled) |
 | `updates:state-event` | main → renderer push | — | `UpdateState` |
 
 `getState` exists because the push can fire before the renderer has subscribed (the update may finish downloading while the window loads); the renderer asks once on mount, then listens.
@@ -139,6 +139,7 @@ Unit (`tests/unit/update-service.spec.ts`, fake `UpdaterLike`, no network):
 - `start()` enabled: `autoDownload` and `autoInstallOnAppQuit` are true; `checkForUpdates` called once.
 - `update-downloaded` → state `ready` with the version; the emitter is called with it.
 - `restart()` when ready calls `quitAndInstall(true, true)` exactly once; when idle throws and does not call it.
+- `restart()` over running work asks once before installing; Cancel installs nothing and re-sends `ready`; Quit installs once and the quit that follows asks nothing.
 - A rejected `checkForUpdates` and an `error` event are logged at warn and neither throws nor changes state.
 
 Integration (`tests/integration/updates-handlers.spec.ts`, router shim):

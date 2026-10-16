@@ -186,7 +186,7 @@ On mount of `/workspace`:
 3. Else if there's at least one saved connection → render empty state with an "Open a collection…" button that opens the new-tab modal.
 4. Else redirect to `/connections`.
 
-Settings carries a "Reopen tabs on launch" switch, stored under `ui.workspace.restoreTabs`. An unset value means on, so the behaviour above is the default. When the value is `false`, the main process closes every tab (pinned ones included) once at boot, right after the tab service is built, so the workspace opens empty. The check lives in main rather than in the `/workspace` mount because that page remounts on route changes and would wipe tabs mid-session.
+Settings carries a "Reopen tabs on launch" switch, stored under `ui.workspace.restoreTabs`. An unset value means on, so the behaviour above is the default. When the value is `false`, the main process closes every tab (pinned ones included) once at boot, right after the tab service is built, so the workspace opens empty. The check lives in main rather than in the `/workspace` mount because that page remounts on route changes and would wipe tabs mid-session. Nothing asks at quit with the setting off, so a tab holding unsaved pipeline changes is lost at the next launch along with the rest; the switch's description in Settings says so.
 
 Every renderer state change in a tab triggers `api.tabs.update(id, patchOfState)` with a **debounced** (250ms) writer. This keeps session restoration on par with the last typed-but-unsaved state without thrashing SQLite.
 
@@ -223,12 +223,17 @@ Format: `{connection.name} / {dbName} / {collection}  [· kind]` where kind is r
 - **active-follows-close.spec.ts**: open three, activate middle, close it → newly active = left neighbor.
 - **reorder.spec.ts**: reorder persists; `tabs:list` returns the new order.
 - **update-debounce.spec.ts**: rapid updates collapse (observer receives at most one write per 250ms window).
+- **restore-tabs-boot.spec.ts**: with `ui.workspace.restoreTabs` false, boot closes every tab, pinned ones included; true or unset keeps them.
 
 ### Component
 - **tab-strip-render.spec.tsx**: renders N tabs with correct icons and active styling.
 - **tab-drag.spec.tsx**: simulate drag → `api.tabs.reorder` called with the new order.
 - **new-tab-menu.spec.tsx**: click "+" → menu items visible; "New aggregation on current collection" invokes `api.tabs.openAggregation`.
 - **keyboard-switch.spec.tsx**: `⌘2` activates the second tab.
+- **collection-subtabs.spec.tsx**: the collection view strip is a tablist: arrow keys move focus and selection, Home and End move focus, only the selected tab is a tab stop, it points at a tabpanel that points back, and a click changes the view.
+- **settings-modal-restore-tabs.spec.tsx**: the "Reopen tabs on launch" switch reads on when unset and off when stored false, saves the new value, toasts and reverts a failed save, and its description says unsaved pipeline changes are lost with the tabs.
+- **workspace-tab-groups.spec.tsx** (tab context menu): Close others and Close to the right close the tabs on screen in the strip's grouped order, keep pinned tabs and collapsed groups, hand focus to the menu's tab, ask once over unsaved pipelines, and keep closing the rest when one close fails, reporting it in one toast. Reveal in sidebar opens a collapsed sidebar, clears the navigator filter, waits for or re-lists the database, focuses the row, and drops a reveal whose database failed to list or whose collection is gone.
 
 ### E2E
 - **restore.e2e.ts**: open two tabs → quit app → relaunch → both tabs present, active tab unchanged.
+- **workspace-restore.e2e.ts**: tabs survive a quit and relaunch; with "Reopen tabs on launch" off, a relaunch starts with no tabs.

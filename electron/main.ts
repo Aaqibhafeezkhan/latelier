@@ -839,6 +839,7 @@ app.whenReady().then(() => {
       userDataOverride: process.env.ATELIER_USER_DATA_DIR,
       platform: process.platform,
     }),
+    quitGate,
   );
   registerUpdatesChannels(router, updateSvc);
 

@@ -87,12 +87,14 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             <Text size="sm" fw={600}>
               Reopen tabs on launch
             </Text>
-            <Text size="xs" c="dimmed">
-              When off, the app starts with no tabs open, pinned ones included.
+            <Text id="restore-tabs-description" size="xs" c="dimmed">
+              When off, the app starts with no tabs open, pinned ones included, and pipeline
+              changes that were never saved are lost with them.
             </Text>
           </Stack>
           <Switch
             aria-label="Reopen tabs on launch"
+            aria-describedby="restore-tabs-description"
             checked={restoreTabs}
             onChange={(e) => void handleRestoreTabs(e.currentTarget.checked)}
           />

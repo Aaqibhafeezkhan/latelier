@@ -419,6 +419,20 @@ describe('MongoShellPane', () => {
     await waitFor(() => expect(screen.queryByTestId('mongo-shell-busy')).toBeNull());
   });
 
+  it('a line main refuses to send is not left running: the reason is printed instead', async () => {
+    const { mshell } = installDrivable();
+    mshell.write.mockRejectedValueOnce(new Error('This connection is read-only'));
+    mount();
+    const input = await readyInput();
+
+    submit(input, 'db.x.drop()');
+
+    expect(await screen.findByText(/could not send the command: This connection is read-only/)).toBeTruthy();
+    expect(screen.queryByTestId('mongo-shell-busy')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Interrupt' })).toBeNull();
+    expect(input.placeholder).toBe('');
+  });
+
   it('keeps accepting input while a command runs', async () => {
     const { mshell } = installDrivable();
     mount();
