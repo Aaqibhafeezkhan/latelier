@@ -146,9 +146,10 @@ Right-click on a tab, or Shift+F10 / the ContextMenu key on a focused tab, opens
 Both bulk closes follow the same rules:
 
 - **Order.** "To the right" means the order on screen. Tabs render grouped by connection, so this can differ from the stored `position` order whenever the stored tabs of two connections interleave.
+- **Collapsed groups.** A collapsed group's tabs are not on screen, so neither action closes them.
 - **Pinned tabs** are never closed by a bulk action, and neither is the tab the menu was opened on.
 - **Disabled when empty.** Each item is disabled when it would close nothing.
-- **Unsaved pipelines.** If any tab to be closed has an unsaved pipeline, one confirmation names how many. Cancel closes nothing. Confirm closes them all, one after another, so each close sees the active tab the previous one left.
+- **Unsaved pipelines.** If any tab to be closed has an unsaved pipeline, one confirmation names how many. Cancel closes nothing. Confirm closes them all. If the active tab is among them, the tab the menu was opened on is activated first, so focus never lands on a tab that is about to close.
 
 Reveal in sidebar:
 

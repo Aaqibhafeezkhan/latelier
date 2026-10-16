@@ -82,9 +82,10 @@ export function ShellSection({
     void tabs.setActive(id);
   };
 
-  // One prompt for the lot, naming how many pipelines would be lost; then the
-  // closes run one after another so each sees the active tab the last one left.
-  const closeMany = async (ids: string[]) => {
+  // One prompt for the lot, naming how many pipelines would be lost. If the
+  // active tab is among them, the tab the menu was opened on takes over first,
+  // so focus never passes through a tab that is about to close.
+  const closeMany = async (ids: string[], keepId: string) => {
     const dirty = ids.filter((id) => {
       const t = tabs.tabs.find((x) => x.id === id);
       return t?.kind === 'collection' && !!t.state.aggregation?.dirty;
@@ -100,6 +101,7 @@ export function ShellSection({
       });
       if (!proceed) return;
     }
+    if (tabs.activeId && ids.includes(tabs.activeId)) await tabs.setActive(keepId);
     for (const id of ids) await tabs.close(id);
   };
 
@@ -167,7 +169,7 @@ export function ShellSection({
             const t = tabs.tabs.find((x) => x.id === id);
             if (t) void tabs.setPinned(id, !t.pinned);
           }}
-          onCloseMany={(ids) => void closeMany(ids)}
+          onCloseMany={(ids, keepId) => void closeMany(ids, keepId)}
           onReveal={reveal}
         />
       </AppShell.Header>

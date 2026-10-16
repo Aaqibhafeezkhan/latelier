@@ -1060,6 +1060,51 @@ describe('the tab context menu closes in bulk and reveals a tab in the sidebar',
     expect(isDisabled('Close to the right')).toBe(false);
   });
 
+  it('leaves the tabs of a collapsed group alone: they are not on screen', async () => {
+    const { close } = mountTabs([
+      { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+      { id: 'b', connectionId: 'c1', collection: 'bravo' },
+      { id: 'x', connectionId: 'c2', collection: 'xray' },
+    ]);
+    await waitFor(() => expect(tabOrder()).toHaveLength(3));
+    const staging = strip().getByRole('group', { name: 'Staging' });
+    fireEvent.click(within(staging).getByRole('button', { name: 'Collapse group' }));
+    await waitFor(() => expect(tabOrder()).toHaveLength(2));
+
+    fireEvent.contextMenu(tab('alpha'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close to the right' }));
+    await waitFor(() => expect(tabOrder()).toHaveLength(1));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(closedIds(close)).toEqual(['b']);
+
+    fireEvent.contextMenu(tab('alpha'));
+    await screen.findByRole('menuitem', { name: 'Close others' });
+    expect(isDisabled('Close others')).toBe(true);
+    expect(isDisabled('Close to the right')).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+
+    fireEvent.click(within(staging).getByRole('button', { name: 'Expand group' }));
+    expect(await strip().findByRole('tab', { name: /^xray / })).toBeTruthy();
+  });
+
+  it('Close others on a background tab hands the focus to that tab, not a closed one', async () => {
+    const { close } = mountTabs([
+      { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+      { id: 'b', connectionId: 'c1', collection: 'bravo' },
+      { id: 'c', connectionId: 'c1', collection: 'charlie' },
+    ]);
+    await waitFor(() => expect(tabOrder()).toHaveLength(3));
+
+    fireEvent.contextMenu(tab('bravo'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close others' }));
+
+    await waitFor(() => expect(closedIds(close)).toEqual(['a', 'c']));
+    await waitFor(() => expect(tabOrder()).toHaveLength(1));
+    expect(tab('bravo').getAttribute('aria-selected')).toBe('true');
+  });
+
   it('disables Close others when every other tab is pinned', async () => {
     mountTabs([
       { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true, pinned: true },
