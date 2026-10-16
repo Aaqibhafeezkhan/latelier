@@ -588,6 +588,40 @@ describe('StructureView — validation rules', () => {
     expect(modify).not.toHaveBeenCalled();
   });
 
+  it('shows the next collection in read mode when the tab moves on mid-edit', async () => {
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: {
+        collectionDetails: async ({ collection }: { collection: string }) => ({
+          ...DETAILS,
+          name: collection,
+          options: { validator: RULES },
+        }),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+    const view = (collection: string) => (
+      <StructureView
+        connectionId="c1"
+        dbName="shop"
+        collection={collection}
+        state={DEFAULT_SCHEMA_TAB_STATE}
+        onPatch={vi.fn()}
+      />
+    );
+
+    const { rerender } = render(view('orders'));
+    const validation = await screen.findByRole('region', { name: 'Validation' });
+    await userEvent.click(await within(validation).findByRole('button', { name: 'Edit rules' }));
+    expect(within(validation).getByLabelText('Validator')).toBeTruthy();
+
+    rerender(view('customers'));
+
+    const next = await screen.findByRole('region', { name: 'Validation' });
+    await within(next).findByRole('button', { name: 'Edit rules' });
+    expect(within(next).queryByLabelText('Validator')).toBeNull();
+  });
+
   it('shows a refused save inline and stays in edit mode', async () => {
     installAtelierMock({
       index: { list: async () => [] },
