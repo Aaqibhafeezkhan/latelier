@@ -169,6 +169,10 @@ Behavior:
 3. **Async pass** (`useEffect` with a race-guard `reqId` ref): kicks off any
    Promise-returning sources inside an async IIFE. Late resolutions that
    predate a context change are discarded via `if (myReq !== reqId.current) return`.
+   The sources settle together (`Promise.allSettled`): a source that rejects
+   loses only its own batch, the sync items and the healthy sources still
+   show, and `loading` always returns to `false` — but only the latest request
+   may clear it, so a stale rejection never hides a newer request's spinner.
 4. **Dedupe & rank** (`useMemo`): merges by a type-prefixed key (`F:path`,
    `O:name`, or `V:value`), preferring richer records (summed frequency,
    fills in `type`). Ranks each entry by `scoreMatch(token, candidate)`:
@@ -406,6 +410,8 @@ on app restart).
   `lastRunSource` render.
 - Stale async results from a previous collection are dropped
   (race-guarded).
+- A rejecting async source never leaves `loading` stuck and never drops the
+  other sources' items.
 - `valueFor` hits are detected but do not open the popover until
   value sources land.
 - `$`-prefixed bare keys open the popover (previously suppressed);

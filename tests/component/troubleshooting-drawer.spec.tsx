@@ -1,6 +1,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
+import { notifications } from '@mantine/notifications';
+import { InlineMarkdown } from '../../src/troubleshooting/markdown';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { TroubleshootingProvider } from '../../src/troubleshooting/TroubleshootingProvider';
 import { useTroubleshooting } from '../../src/troubleshooting/TroubleshootingContext';
@@ -114,5 +116,45 @@ describe('TroubleshootingDrawer — shell', () => {
     await waitFor(() => expect(calls.length).toBe(1));
     expect(calls[0]).toMatch(/^https:\/\//);
     expect(calls[0]).toMatch(/#auth-default$/);
+  });
+});
+
+describe('TroubleshootingDrawer — a guide link that cannot open says so', () => {
+  afterEach(() => {
+    notifications.clean();
+  });
+
+  it('toasts when the full guide cannot be opened', async () => {
+    installAtelierMock({
+      app: {
+        pickFile: async () => ({ path: null }),
+        openExternal: async () => {
+          throw { code: 'VALIDATION', message: 'blocked' };
+        },
+        saveFile: async () => ({ path: null }),
+      },
+    });
+    render(<Harness initialInput={{ errorCode: 'AUTH' }} />);
+    await userEvent.click(screen.getByText('open-trigger'));
+    await userEvent.click(await screen.findByText('Open the full guide ↗'));
+
+    expect(await screen.findByText('Could not open the link')).toBeTruthy();
+  });
+
+  it('toasts when a link inside a recipe cannot be opened', async () => {
+    installAtelierMock({
+      app: {
+        pickFile: async () => ({ path: null }),
+        openExternal: async () => {
+          throw { code: 'VALIDATION', message: 'blocked' };
+        },
+        saveFile: async () => ({ path: null }),
+      },
+    });
+    render(<InlineMarkdown source="See [the guide](https://example.com/guide)." />);
+
+    await userEvent.click(screen.getByText('the guide'));
+
+    expect(await screen.findByText('Could not open the link')).toBeTruthy();
   });
 });

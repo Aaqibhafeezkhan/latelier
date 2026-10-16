@@ -88,12 +88,12 @@ export interface ShellSessionInfo {
   startedAt: string;
 }
 
-export type ShellOutputKind = 'stdout' | 'stderr' | 'exit';
+export type ShellOutputKind = 'stdout' | 'stderr' | 'prompt' | 'exit';
 
 export interface ShellOutputEvent {
   sessionId: string;
   kind: ShellOutputKind;
-  /** Present for stdout/stderr. Plain text. */
+  /** Present for stdout/stderr. Plain text. `prompt` carries none. */
   data?: string;
   /** Present only when kind === 'exit'. */
   exitCode?: number | null;
@@ -108,6 +108,11 @@ The REPL's own output, errors included, arrives as `stdout`. `stderr` and
 for a reason), and a session that ends for a reason, a connection that
 disconnected or turned read-only or a child that died on its own, first
 carries that reason as a `stderr` event. `signal` is not set.
+
+A `prompt` event means the REPL is ready for another line again, so one line
+written earlier has finished (its result, if any, was sent before it). Main
+counts lines written against prompts received, per session, which is how it
+knows a session is busy (section 3); the pane counts the same way.
 
 ## 2. IPC channels
 
@@ -174,8 +179,17 @@ Behaviour:
   settles leaves later commands working, and one that settles late prints
   after the commands typed meanwhile, and discards a multi-line command
   half typed at that moment. The pending call itself cannot be
-  cancelled; there is no interrupt until the shell has one. A cursor is not
-  a thenable and still prints its one-line hint.
+  cancelled in place. Interrupt is the way out: the pane ends the session and
+  starts another, so the call is abandoned and the variables defined in the
+  old session are lost. A cursor is not a thenable and still prints its
+  one-line hint.
+- **Busy.** The child posts a `shell-prompt` message each time the REPL
+  displays a prompt after a line, not for the prompt it shows while
+  starting. Main keeps, per session, the count of lines written whose
+  prompt has not come back (a count, because input is not paused and a
+  late result prints after later lines), emits each prompt as a `prompt`
+  event, and `busyCount()` is the number of sessions with a nonzero count.
+  An idle shell is not busy.
 - An error, thrown or rejected, prints as its one-line text, `Uncaught <name>: <message>`
   (Node puts `Uncaught:` and a line break first when the text is long or
   has several lines), with no stack and no cause. What else tells the user
@@ -200,7 +214,8 @@ Behaviour:
     deployment), or turns read-only;
   - the REPL ends itself (`.exit`);
   - the app quits: `disposeAll` is wired into `app.on('before-quit')`
-    and kills every child;
+    and kills every child. When a command is still running the app asks
+    first (F06 section 4);
   - the child dies on its own (a crash, `process.exit()` typed into the
     REPL, a kill from outside). That is a clean error, not a hang: a
     `stderr` event carrying the reason, then the `exit` event.
@@ -223,6 +238,20 @@ Behaviour:
 - Input row: a single-line `<input>` that, on Enter, calls
   `api.mshell.write(sessionId, value + '\n')` and clears.
 - Restart / Stop / Close controls in the pane header.
+- While a command runs (a line sent whose prompt has not come back) the
+  header shows a `running…` status and an Interrupt button, and the input
+  placeholder reads `running… Ctrl+C to interrupt`. Input stays enabled.
+  Ctrl+C in the input interrupts while a command runs, unless text in the
+  input is selected (that copies); with nothing running it does nothing
+  special.
+- Interrupt stops the session and starts a new one on the same connection
+  and database, keeping the scrollback and adding a line that says the call
+  was cancelled and the variables were lost. The old session's exit is not
+  shown as the new shell ending.
+- The input placeholder says what state the shell is in: `starting…` only
+  while it starts, `shell stopped — press Restart` after the session ended
+  (Stop, `.exit`, a disconnect, a crash), `shell unavailable — press
+  Restart` when it could not start.
 
 ## 5. Security
 
@@ -275,6 +304,12 @@ Behaviour:
   anything posted to it, nor in its environment or argv.
 - A child that dies unexpectedly, or a connection that disconnects,
   ends the session with an `exit` event (and a reason as `stderr`).
+- While a command runs the pane says so and offers Interrupt (button or
+  Ctrl+C); interrupting restarts the shell with the scrollback kept.
+- A stopped or unavailable shell says so in the input, never `starting…`.
+- An awaited rejection whose reason is `null` or another falsy value prints
+  nothing: Node hands the REPL a success for it, so it cannot be told from
+  `await undefined`.
 
 ## 7. Test cases
 
@@ -299,13 +334,22 @@ Behaviour:
   REPL, and that nothing posted to the child (and nothing an escape can
   read from its environment) carries a URI, user or password for a
   password-protected connection.
-- **shell-protocol.spec.ts** (unit): the message shape guards.
+  The busy signal: one `prompt` per line and none for the start-up
+  prompt, `busyCount()` while a call is pending and after, several calls
+  pending at once, and a session stopped while busy no longer counted.
+  Also pins that an awaited `Promise.reject(null)` prints nothing.
+- **shell-protocol.spec.ts** (unit): the message shape guards, including
+  `shell-prompt`.
 
 ### Component
 - **mongo-shell-pane.spec.tsx**: mounts the pane against a mocked
   `api.mshell`; verifies start-on-mount, the focused tab's database
   reaching `mshell.start` (and a tab switch not restarting the session),
-  input → `mshell.write`, and the streamed-output rendering path.
+  input → `mshell.write`, and the streamed-output rendering path. Also the
+  busy indicator and Interrupt button from send to prompt, Ctrl+C
+  interrupting (stop then start, scrollback kept, the old exit ignored) and
+  not interrupting when idle or over selected text, input staying enabled
+  while busy, and the placeholder in each state.
 - **workspace-focused-connection.spec.tsx**: the Workspace passes a
   collection tab's database, a script tab's database field (blank
   means none) and the connection's default database to the pane and the

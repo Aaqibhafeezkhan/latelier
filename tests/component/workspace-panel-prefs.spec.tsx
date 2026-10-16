@@ -8,7 +8,9 @@
 // waits past that resolution — asserting before it would read the defaults
 // and pass vacuously.
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, titleBar } from '../helpers/render';
+import { notifications } from '@mantine/notifications';
+import { render, renderHook, act, screen, fireEvent, waitFor, titleBar } from '../helpers/render';
+import { useWorkspacePanelPrefs } from '../../src/pages/Workspace/useWorkspacePanelPrefs';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { installAtelierMock, uninstallAtelierMock, connectionFixture } from '../helpers/atelierMock';
@@ -320,5 +322,47 @@ describe('workspace panel prefs (T4)', () => {
     } finally {
       process.off('unhandledRejection', onRejection);
     }
+  });
+});
+
+describe('useWorkspacePanelPrefs — a layout setting that could not be saved says so', () => {
+  afterEach(() => {
+    uninstallAtelierMock();
+    notifications.clean();
+  });
+
+  function failingSet() {
+    installAtelierMock({
+      prefs: {
+        get: async () => null,
+        set: (async () => {
+          throw { code: 'SYSTEM_ERROR', message: 'disk full' };
+        }) as never,
+      },
+    });
+  }
+
+  it('shows one toast when two writes fail, not one per write', async () => {
+    failingSet();
+    const { result } = renderHook(() => useWorkspacePanelPrefs());
+    await waitFor(() => expect(result.current.prefsReady).toBe(true));
+
+    act(() => {
+      result.current.commitLeftWidth(300);
+      result.current.commitShellSplit(40);
+    });
+
+    await waitFor(() => expect(screen.getAllByText('Could not save the layout')).toHaveLength(1));
+  });
+
+  it('toasts for the sidebar toggle, and the toggle still applies locally', async () => {
+    failingSet();
+    const { result } = renderHook(() => useWorkspacePanelPrefs());
+    await waitFor(() => expect(result.current.prefsReady).toBe(true));
+
+    act(() => result.current.toggleSidebar());
+
+    expect(result.current.sidebarCollapsed).toBe(true);
+    expect(await screen.findByText('Could not save the layout')).toBeTruthy();
   });
 });

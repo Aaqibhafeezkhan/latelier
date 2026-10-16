@@ -139,6 +139,15 @@ Reuse F05's classifier plus:
 - `err.codeName === 'Unauthorized'` → `UNAUTHORIZED`.
 - Query-shape errors (`err.code === 2` BadValue) → `VALIDATION` with `details.mongoMessage`.
 
+`query:find` words the two ceilings it enforces for the person who hit them,
+keeping the raw message in `details.mongoMessage`:
+
+- `TIMEOUT` (the 30 s `maxTimeMS`): "The query was stopped after 30 s. Add an index or narrow the filter."
+- A result over the 50 MB encoded-size cap is a `VALIDATION` error, not `INTERNAL`: "The result is larger than 50 MB. Add a filter, a projection, or lower the rows per page."
+
+Both ceilings are constructor inputs (`QueryService`'s `limits`) so a test can
+lower them rather than seed 50 MB or wait 30 s.
+
 Renderer uses these to show readable banners (W05 footer pill).
 
 ## 8. EJSON helpers
