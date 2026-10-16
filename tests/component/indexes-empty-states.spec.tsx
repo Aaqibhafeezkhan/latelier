@@ -30,3 +30,27 @@ describe('IndexesTab — error states', () => {
     });
   });
 });
+
+describe('IndexesTab — a view', () => {
+  it('makes no index.list call and says the view uses its source collection indexes', async () => {
+    const list = vi.fn(async () => []);
+    installAtelierMock({ index: { list } });
+    render(<IndexesTab connectionId="c1" dbName="shop" collection="v_paid" viewOn="orders" />);
+    expect(
+      await screen.findByText(
+        'Views have no indexes of their own. This view uses the indexes of orders, the collection it reads from.',
+      ),
+    ).toBeTruthy();
+    expect(list).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /New index/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Drop/ })).toBeNull();
+  });
+
+  it('still lists indexes for a collection', async () => {
+    const list = vi.fn(async () => []);
+    installAtelierMock({ index: { list } });
+    render(<IndexesTab connectionId="c1" dbName="shop" collection="orders" />);
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: /New index/ })).toBeTruthy();
+  });
+});

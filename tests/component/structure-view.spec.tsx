@@ -213,6 +213,27 @@ describe('StructureView — statistics section', () => {
     expect(within(stats).queryByText('Documents')).toBeNull();
   });
 
+  it('never asks a view for its indexes, not even before its details arrive', async () => {
+    const list = vi.fn(async () => []);
+    installAtelierMock({
+      index: { list },
+      meta: {
+        collectionDetails: async () => ({
+          name: 'orders',
+          type: 'view' as const,
+          capped: false,
+          options: { viewOn: 'src', pipeline: '[]' },
+        }),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+
+    expect(await screen.findByText(/This view uses the indexes of src/)).toBeTruthy();
+    expect(list).not.toHaveBeenCalled();
+  });
+
   it('shows a failed fetch inline while the indexes still render', async () => {
     installAtelierMock({
       index: { list: async () => [ID_INDEX] },

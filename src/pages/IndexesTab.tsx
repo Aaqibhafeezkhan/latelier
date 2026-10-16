@@ -104,6 +104,7 @@ export function IndexesTab({
   connectionId,
   dbName,
   collection,
+  viewOn,
   initialCreate,
   onInitialCreateConsumed,
   onChanged,
@@ -111,6 +112,12 @@ export function IndexesTab({
   connectionId: string;
   dbName: string;
   collection: string;
+  /**
+   * Set when the namespace is a view: the collection it reads from. The server
+   * rejects `listIndexes` on a view, so no list is requested and no create or
+   * drop is offered.
+   */
+  viewOn?: string;
   /** See `IndexCreateRequest`. Omitted (or `null`) outside the ExplainDrawer flow. */
   initialCreate?: IndexCreateRequest | null;
   /**
@@ -182,9 +189,10 @@ export function IndexesTab({
 
   /* eslint-disable react-hooks/set-state-in-effect */
   React.useEffect(() => {
+    if (viewOn !== undefined) return;
     void loadIndexes(target);
     setExpandedRow(null);
-  }, [target, loadIndexes]);
+  }, [target, loadIndexes, viewOn]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Opens the create-index drawer prefilled from ExplainDrawer's "Create an
@@ -224,6 +232,14 @@ export function IndexesTab({
   // plain scrolling block instead — one scroller for the whole pane — so
   // this lays out at its natural content height and lets the page provide
   // the only scrollbar.
+  if (viewOn !== undefined) {
+    return (
+      <div style={{ padding: '10px 16px', fontSize: 12, color: T.textMuted, borderBottom: `1px solid ${T.border}` }}>
+        Views have no indexes of their own. This view uses the indexes of {viewOn}, the collection it reads from.
+      </div>
+    );
+  }
+
   return (
     <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', overflow: 'visible', position: 'relative' }}>
       <div

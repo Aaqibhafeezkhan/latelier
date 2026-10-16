@@ -121,6 +121,8 @@ Behavior is today's `IndexesTab`, minus its two pickers:
   `expireAfterSeconds`, `partialFilterExpression`, collation, optional name.
 - Drop, with the existing type-to-confirm.
 
+On a view the section is a single note, naming the source collection, that views have no indexes of their own and use that collection's; no list is requested and no create or drop is offered.
+
 Nothing about the index *operations* changes. What changes is that the
 namespace is given, not chosen: the db and collection `<select>` controls and
 the `ui.indexes.lastTarget` preference are deleted, and the component takes
