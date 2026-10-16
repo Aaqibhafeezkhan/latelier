@@ -14,6 +14,9 @@ import type { IndexSuggestion } from '../../utils/indexSuggestion';
  * the provider's parent (`useCallback` / `useMemo`) so subtree re-renders
  * aren't triggered by action-identity churn.
  */
+/** How an inline field write ended; `message` is what the editor shows. */
+export type UpdateFieldOutcome = { ok: true } | { ok: false; message: string };
+
 export interface CollectionWorkspaceActions {
   /** Merge a partial state patch (debounced through `api.tabs.update`). */
   patch: (p: Partial<CollectionTabState>) => void;
@@ -59,12 +62,13 @@ export interface CollectionWorkspaceActions {
    * Optional because it's a leaf-only affordance: read-only providers
    * (saved-query preview, ScriptTab's synthetic result provider) simply omit
    * it, and consumers must treat a missing `updateField` the same as
-   * `isReadOnly` — no affordance shown. Returns the write's settlement
-   * (never its outcome — callers read notifications for that): the boolean
-   * toggle has no separate draft to gate a second click on, so it disables
-   * itself until this resolves.
+   * `isReadOnly` — no affordance shown. Returns the write's settlement and
+   * never rejects: the boolean toggle has no separate draft to gate a second
+   * click on, so it disables itself until this resolves, and the text/number
+   * editor keeps the typed value open with `message` when the write failed.
+   * The failure is also reported through `notify.error`.
    */
-  updateField?: (doc: unknown, fieldPath: string, newValue: unknown) => Promise<void>;
+  updateField?: (doc: unknown, fieldPath: string, newValue: unknown) => Promise<UpdateFieldOutcome>;
   /**
    * Open the Document Editor's insert mode pre-filled with `doc`'s EJSON
    * minus `_id` ("Duplicate document"). Optional for the same reason as

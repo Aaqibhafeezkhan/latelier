@@ -12,6 +12,7 @@ import { DEFAULT_AGGREGATION_TAB_STATE } from '@shared/defaults';
 import type { IpcError } from '@shared/ipc';
 import { confirmDestructive } from '../utils/confirm';
 import { api, isIpcError } from '../api/atelier';
+import { notify } from '../theme/notifications';
 import { applyPendingPatches, carryResultFields, stripResultPatch } from './tabResultCarry';
 
 /**
@@ -423,6 +424,7 @@ export function useWorkspaceTabs(): WorkspaceTabsState {
     await api.tabs.setPinned({ id, pinned });
   }, []);
 
+  const saveFailureShown = useRef(false);
   const scheduleFlush = useCallback(() => {
     if (flushTimer.current) return;
     flushTimer.current = setTimeout(() => {
@@ -437,8 +439,15 @@ export function useWorkspaceTabs(): WorkspaceTabsState {
           if (Object.keys(state).length === 0) return undefined;
           return api.tabs
             .update(id, { state })
+            .then(() => {
+              saveFailureShown.current = false;
+            })
             .catch(() => {
-              // best-effort; next refresh will reconcile
+              // The tab keeps working in memory; only its saved copy is
+              // behind, so tell the user once per outage, not on every flush.
+              if (saveFailureShown.current) return;
+              saveFailureShown.current = true;
+              notify.error('Tab changes could not be saved');
             });
         }),
       );

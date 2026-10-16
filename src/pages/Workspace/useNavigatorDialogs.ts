@@ -1,11 +1,12 @@
 import React from 'react';
 import type { ContextMenuState } from '../../components/ContextMenu';
+import type { LoadOptions } from './useNavigatorData';
 
 type MenuState = ContextMenuState;
 
 export function useNavigatorDialogs(deps: {
-  refreshDb: (connectionId: string, dbName: string) => void;
-  refreshAll: (connectionId: string) => Promise<void>;
+  refreshDb: (connectionId: string, dbName: string, opts?: LoadOptions) => void;
+  refreshAll: (connectionId: string, opts?: LoadOptions) => Promise<void>;
   onCollectionRenamed?: (
     connectionId: string,
     dbName: string,
@@ -70,7 +71,7 @@ export function useNavigatorDialogs(deps: {
     if (!createCollDb) return;
     const { connectionId: cid, dbName: db } = createCollDb;
     setCreateCollDb(null);
-    refreshDb(cid, db);
+    refreshDb(cid, db, { force: true });
   }, [createCollDb, refreshDb]);
 
   const cancelRename = React.useCallback(() => setRenameTarget(null), []);
@@ -79,7 +80,7 @@ export function useNavigatorDialogs(deps: {
       if (!renameTarget) return;
       const { connectionId: cid, dbName: db, collection: oldName } = renameTarget;
       setRenameTarget(null);
-      refreshDb(cid, db);
+      refreshDb(cid, db, { force: true });
       onCollectionRenamed?.(cid, db, oldName, newName);
     },
     [renameTarget, refreshDb, onCollectionRenamed],
@@ -90,7 +91,7 @@ export function useNavigatorDialogs(deps: {
     if (!dropCollTarget) return;
     const { connectionId: cid, dbName: db, collection: coll } = dropCollTarget;
     setDropCollTarget(null);
-    refreshDb(cid, db);
+    refreshDb(cid, db, { force: true });
     onCollectionDropped?.(cid, db, coll);
   }, [dropCollTarget, refreshDb, onCollectionDropped]);
 
@@ -99,14 +100,14 @@ export function useNavigatorDialogs(deps: {
     if (!dropDbTarget) return;
     const { connectionId: cid, dbName: db } = dropDbTarget;
     setDropDbTarget(null);
-    void refreshAll(cid);
+    void refreshAll(cid, { force: true });
     onDatabaseDropped?.(cid, db);
   }, [dropDbTarget, refreshAll, onDatabaseDropped]);
 
   const closeImport = React.useCallback(() => setImportTarget(null), []);
   // The dialog stays open on its report, so this refreshes without closing it.
   const handleImported = React.useCallback(() => {
-    if (importTarget) refreshDb(importTarget.connectionId, importTarget.dbName);
+    if (importTarget) refreshDb(importTarget.connectionId, importTarget.dbName, { force: true });
   }, [importTarget, refreshDb]);
 
   return {

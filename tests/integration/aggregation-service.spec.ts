@@ -671,3 +671,95 @@ describe('AggregationService — a write stage rejected by a validator', () => {
     assertPlain(errInfo, 'errInfo');
   });
 });
+
+describe('AggregationService.runningCount', () => {
+  let tmp: TempDb;
+
+  beforeAll(() => {
+    tmp = createTempDb();
+  });
+
+  afterAll(() => {
+    tmp.cleanup();
+  });
+
+  function held(outcome: 'resolve' | 'reject') {
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const started = { reached: false };
+    const toArray = async () => {
+      started.reached = true;
+      await gate;
+      if (outcome === 'reject') throw new Error('boom');
+      return [];
+    };
+    const coll = { aggregate: () => ({ toArray }) };
+    const pool = {
+      isReadOnly: () => false,
+      readDb: async () => ({ collection: () => coll }),
+    } as unknown as MongoPool;
+    const svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)));
+    return { svc, finish, started };
+  }
+
+  const input = (cancelToken?: string) =>
+    ({
+      connectionId: 'c',
+      dbName: 'd',
+      collection: 'src',
+      stages: [{ id: 's1', op: '$match', body: '{}', enabled: true }],
+      cancelToken,
+    }) as never;
+
+  const untilReached = async (started: { reached: boolean }) => {
+    for (let i = 0; i < 50 && !started.reached; i++) await new Promise((r) => setTimeout(r, 5));
+  };
+
+  it('counts a run in flight, with or without a cancel token, and not once it finishes', async () => {
+    for (const token of [undefined, 'tok']) {
+      const { svc, finish, started } = held('resolve');
+      expect(svc.runningCount()).toBe(0);
+      const run = svc.run(input(token));
+      await untilReached(started);
+      expect(svc.runningCount()).toBe(1);
+      finish();
+      await run;
+      expect(svc.runningCount()).toBe(0);
+    }
+  });
+
+  it('stops counting a run that fails', async () => {
+    const { svc, finish, started } = held('reject');
+    const run = svc.run(input()).catch((e: unknown) => e);
+    await untilReached(started);
+    expect(svc.runningCount()).toBe(1);
+    finish();
+    await run;
+    expect(svc.runningCount()).toBe(0);
+  });
+
+  it('stops counting a run once it is cancelled and has unwound', async () => {
+    const { svc, finish, started } = held('resolve');
+    const run = svc.run(input('tok')).catch((e: unknown) => e);
+    await untilReached(started);
+    svc.cancel('tok');
+    finish();
+    await run;
+    expect(svc.runningCount()).toBe(0);
+  });
+
+  it('clears the cancel token when the connection cannot be opened', async () => {
+    const pool = {
+      isReadOnly: () => false,
+      readDb: async () => {
+        throw new Error('connect failed');
+      },
+    } as unknown as MongoPool;
+    const svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)));
+    await expect(svc.run(input('tok'))).rejects.toThrow('connect failed');
+    expect((svc as unknown as { active: Map<string, unknown> }).active.size).toBe(0);
+    expect(svc.runningCount()).toBe(0);
+  });
+});

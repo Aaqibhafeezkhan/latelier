@@ -5,6 +5,8 @@ import { I } from '../../icons';
 import { STATUS_PRESENTATION, matchesConnectionQuery } from './connectionStatus';
 import { useRovingHighlight } from '../../hooks/useRovingHighlight';
 import { RowActionIcon } from './RowActionIcon';
+import { formatShortcut } from '../../commands/shortcutLabel';
+import { isMacRenderer } from '../../utils/platform';
 import type { ConnectionSummary } from '@shared/types';
 
 /**
@@ -808,8 +810,8 @@ export function ConnectionSwitcher({
           style={{ borderTop: `1px solid ${T.border}`, background: T.surfaceRaised }}
         >
           <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}><Kbd>↑↓</Kbd> navigate</Text>
-          <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}><Kbd>↵</Kbd> connect</Text>
-          <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}><Kbd>⌘E</Kbd> manage</Text>
+          <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}><Kbd>{formatShortcut('↵', isMacRenderer())}</Kbd> connect</Text>
+          <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}><Kbd>{formatShortcut('⌘E', isMacRenderer())}</Kbd> manage</Text>
         </Group>
       </Popover.Dropdown>
     </Popover>

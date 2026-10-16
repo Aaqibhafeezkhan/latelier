@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { act } from '@testing-library/react';
 import { render, screen, waitFor, fireEvent } from '../helpers/render';
 import { MongoShellPane } from '../../src/pages/Workspace/MongoShellPane';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
@@ -345,5 +346,230 @@ describe('MongoShellPane', () => {
 
     await waitFor(() => expect(output.textContent).toContain('db.stats()'));
     expect(output.scrollTop).toBe(output.scrollHeight);
+  });
+
+  // ─── Busy shell, interrupt, stopped shell ─────────────────────────────
+
+  function installDrivable(startResult?: () => Promise<ShellSessionInfo>) {
+    // Each start is a new session, s1, s2, ...
+    let started = 0;
+    const nextSession = async (): Promise<ShellSessionInfo> => ({
+      sessionId: `s${++started}`,
+      connectionId: 'c1',
+      startedAt: new Date().toISOString(),
+    });
+    let outputCb: ((evt: ShellOutputEvent) => void) | null = null;
+    const mshell = {
+      start: vi.fn<IpcApi['mshell']['start']>(startResult ?? nextSession),
+      write: vi.fn<IpcApi['mshell']['write']>(async () => undefined),
+      stop: vi.fn<IpcApi['mshell']['stop']>(async () => undefined),
+      list: async () => [],
+      onOutput: (cb: (evt: ShellOutputEvent) => void) => {
+        outputCb = cb;
+        return () => {
+          outputCb = null;
+        };
+      },
+    };
+    installAtelierMock({ mshell });
+    return {
+      mshell,
+      push: (evt: ShellOutputEvent) => act(() => outputCb!(evt)),
+    };
+  }
+
+  async function readyInput(): Promise<HTMLInputElement> {
+    const input = (await screen.findByLabelText('Mongo shell input')) as HTMLInputElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    return input;
+  }
+
+  function submit(input: HTMLInputElement, line: string) {
+    fireEvent.change(input, { target: { value: line } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+  }
+
+  it('shows that a command is running from the moment it is sent until the shell is ready again', async () => {
+    const { push } = installDrivable();
+    mount();
+    const input = await readyInput();
+    expect(screen.queryByTestId('mongo-shell-busy')).toBeNull();
+
+    submit(input, 'await db.big.find().toArray()');
+    expect((await screen.findByTestId('mongo-shell-busy')).textContent).toContain('running');
+    expect(screen.getByRole('button', { name: 'Interrupt' })).toBeTruthy();
+    expect(input.placeholder).toBe('running… Ctrl+C to interrupt');
+
+    await push({ sessionId: 's1', kind: 'prompt' });
+    await waitFor(() => expect(screen.queryByTestId('mongo-shell-busy')).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Interrupt' })).toBeNull();
+    expect(input.placeholder).toBe('');
+  });
+
+  it('stays busy until every line sent has come back with a prompt', async () => {
+    const { push } = installDrivable();
+    mount();
+    const input = await readyInput();
+
+    submit(input, 'a');
+    submit(input, 'b');
+    await push({ sessionId: 's1', kind: 'prompt' });
+    expect(screen.getByTestId('mongo-shell-busy')).toBeTruthy();
+    await push({ sessionId: 's1', kind: 'prompt' });
+    await waitFor(() => expect(screen.queryByTestId('mongo-shell-busy')).toBeNull());
+  });
+
+  it('a line main refuses to send is not left running: the reason is printed instead', async () => {
+    const { mshell } = installDrivable();
+    mshell.write.mockRejectedValueOnce(new Error('This connection is read-only'));
+    mount();
+    const input = await readyInput();
+
+    submit(input, 'db.x.drop()');
+
+    expect(await screen.findByText(/could not send the command: This connection is read-only/)).toBeTruthy();
+    expect(screen.queryByTestId('mongo-shell-busy')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Interrupt' })).toBeNull();
+    expect(input.placeholder).toBe('');
+  });
+
+  it('keeps accepting input while a command runs', async () => {
+    const { mshell } = installDrivable();
+    mount();
+    const input = await readyInput();
+
+    submit(input, 'await db.slow.find().toArray()');
+    await screen.findByTestId('mongo-shell-busy');
+    expect(input.disabled).toBe(false);
+    submit(input, '1+1');
+
+    await waitFor(() =>
+      expect(mshell.write).toHaveBeenLastCalledWith({ sessionId: 's1', data: '1+1\n' }),
+    );
+    expect(mshell.write).toHaveBeenCalledTimes(2);
+  });
+
+  it('Ctrl+C while a command runs stops the shell and starts a fresh one, keeping the scrollback', async () => {
+    const { mshell, push } = installDrivable();
+    // Stopping a session makes main announce its exit before the call returns.
+    mshell.stop.mockImplementation(async ({ sessionId }) => {
+      await push({ sessionId, kind: 'exit', exitCode: 0, signal: null });
+    });
+    mount();
+    const input = await readyInput();
+    await push({ sessionId: 's1', kind: 'stdout', data: 'earlier output\n' });
+
+    submit(input, 'await new Promise(() => {})');
+    await screen.findByTestId('mongo-shell-busy');
+    expect(mshell.start).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(input, { key: 'c', ctrlKey: true });
+
+    await waitFor(() => expect(mshell.stop).toHaveBeenCalledWith({ sessionId: 's1' }));
+    await waitFor(() => expect(mshell.start).toHaveBeenCalledTimes(2));
+    const stopOrder = mshell.stop.mock.invocationCallOrder[0]!;
+    expect(stopOrder).toBeLessThan(mshell.start.mock.invocationCallOrder[1]!);
+
+    await waitFor(() => expect(screen.queryByTestId('mongo-shell-busy')).toBeNull());
+    const output = screen.getByTestId('mongo-shell-output');
+    expect(output.textContent).toContain('earlier output');
+    expect(output.textContent).toContain('interrupted');
+    expect(output.textContent).toContain('variables were lost');
+    // The old session's goodbye must not read as the new shell ending.
+    expect(output.textContent).not.toContain('[shell session ended]');
+  });
+
+  it('the Interrupt button does the same as Ctrl+C', async () => {
+    const { mshell } = installDrivable();
+    mount();
+    const input = await readyInput();
+    submit(input, 'await new Promise(() => {})');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Interrupt' }));
+
+    await waitFor(() => expect(mshell.start).toHaveBeenCalledTimes(2));
+    expect(mshell.stop).toHaveBeenCalledWith({ sessionId: 's1' });
+  });
+
+  it('Ctrl+C with nothing running does not restart the shell', async () => {
+    const { mshell } = installDrivable();
+    mount();
+    const input = await readyInput();
+
+    fireEvent.keyDown(input, { key: 'c', ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(mshell.stop).not.toHaveBeenCalled();
+    expect(mshell.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('Ctrl+C over selected text is left to copy, even while a command runs', async () => {
+    const { mshell } = installDrivable();
+    mount();
+    const input = await readyInput();
+    submit(input, 'await new Promise(() => {})');
+    await screen.findByTestId('mongo-shell-busy');
+    fireEvent.change(input, { target: { value: 'copy me' } });
+    input.setSelectionRange(0, 4);
+
+    fireEvent.keyDown(input, { key: 'c', ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(mshell.stop).not.toHaveBeenCalled();
+  });
+
+  it('says the shell stopped, not that it is starting, once it has ended', async () => {
+    const { push } = installDrivable();
+    mount();
+    const input = await readyInput();
+    expect(input.placeholder).toBe('');
+
+    await push({ sessionId: 's1', kind: 'exit', exitCode: 0, signal: null });
+
+    await waitFor(() => expect(input.placeholder).toBe('shell stopped — press Restart'));
+    expect(input.disabled).toBe(true);
+    expect(screen.queryByTestId('mongo-shell-busy')).toBeNull();
+  });
+
+  it('says the shell is unavailable when it could not start', async () => {
+    installDrivable(async () => {
+      throw { code: 'INTERNAL', message: 'connect failed' };
+    });
+    mount();
+    const input = (await screen.findByLabelText('Mongo shell input')) as HTMLInputElement;
+
+    await waitFor(() => expect(input.placeholder).toBe('shell unavailable — press Restart'));
+  });
+
+  it('says it is starting only while it starts', async () => {
+    let release!: (info: ShellSessionInfo) => void;
+    installDrivable(
+      () =>
+        new Promise<ShellSessionInfo>((resolve) => {
+          release = resolve;
+        }),
+    );
+    mount();
+    const input = (await screen.findByLabelText('Mongo shell input')) as HTMLInputElement;
+    await waitFor(() => expect(input.placeholder).toBe('starting…'));
+
+    await act(async () => {
+      release({ sessionId: 's1', connectionId: 'c1', startedAt: new Date().toISOString() });
+    });
+
+    await waitFor(() => expect(input.placeholder).toBe(''));
+  });
+
+  it('Restart after the shell stopped starts a new session', async () => {
+    const { mshell, push } = installDrivable();
+    mount();
+    const input = await readyInput();
+    await push({ sessionId: 's1', kind: 'exit', exitCode: 0, signal: null });
+    await waitFor(() => expect(input.placeholder).toBe('shell stopped — press Restart'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restart' }));
+
+    await waitFor(() => expect(mshell.start).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(input.placeholder).toBe(''));
   });
 });

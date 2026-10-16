@@ -530,6 +530,77 @@ describe('ShellService — error output', () => {
   });
 });
 
+describe('ShellService — knowing the shell is busy', () => {
+  const prompts = (): number => events.filter((e) => e.kind === 'prompt').length;
+
+  it('says "prompt" once per line, and not for the prompt the REPL shows on start', async () => {
+    const s = setup();
+    const info = await s.start({ connectionId: 'c1' });
+    await until(() => outputOf().includes('Connected to'), 'the banner');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(prompts()).toBe(0);
+
+    await say(info.sessionId, '1+1', '2');
+    await until(() => prompts() >= 1, 'a prompt after the line');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(prompts()).toBe(1);
+  });
+
+  it('counts a session busy from the line until its prompt, and idle after', async () => {
+    const s = setup();
+    const info = await s.start({ connectionId: 'c1' });
+    expect(s.busyCount()).toBe(0);
+
+    s.write(info.sessionId, 'await new Promise((r) => setTimeout(r, 600))\n');
+    expect(s.busyCount()).toBe(1);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(s.busyCount()).toBe(1);
+    expect(prompts()).toBe(0);
+
+    await until(() => s.busyCount() === 0, 'the call to finish', 5000);
+    expect(prompts()).toBe(1);
+  });
+
+  it('counts several calls pending at once, one per line', async () => {
+    const s = setup();
+    const info = await s.start({ connectionId: 'c1' });
+    s.write(info.sessionId, 'await new Promise((r) => setTimeout(r, 500))\n');
+    s.write(info.sessionId, 'await new Promise((r) => setTimeout(r, 500))\n');
+    expect(s.busyCount()).toBe(1);
+    await until(() => s.busyCount() === 0, 'both calls to finish', 5000);
+    expect(prompts()).toBe(2);
+  });
+
+  it('is not busy once an idle session has answered', async () => {
+    const s = setup();
+    const info = await s.start({ connectionId: 'c1' });
+    await say(info.sessionId, '1+1', '2');
+    await until(() => s.busyCount() === 0, 'the prompt');
+    expect(s.busyCount()).toBe(0);
+  });
+
+  it('a session stopped while busy is no longer counted', async () => {
+    const s = setup();
+    const info = await s.start({ connectionId: 'c1' });
+    s.write(info.sessionId, 'await new Promise(() => {})\n');
+    expect(s.busyCount()).toBe(1);
+    await s.stop(info.sessionId);
+    expect(s.busyCount()).toBe(0);
+  });
+
+  it('cannot tell an awaited rejection with a null reason from a success (Node hands the REPL no error)', async () => {
+    const s = setup();
+    const info = await s.start({ connectionId: 'c1' });
+    // Node resolves the REPL's eval callback with (null, undefined) for this,
+    // the same as for `await undefined`, so it prints nothing and does not
+    // read as an uncaught rejection. Pinned so a Node that starts reporting it
+    // is noticed (a rejected-with-null message could then be added).
+    await say(info.sessionId, 'await Promise.reject(null)', '');
+    await until(() => s.busyCount() === 0, 'the prompt');
+    expect(outputOf()).not.toContain('Uncaught');
+  });
+});
+
 describe('ShellService — lifecycle', () => {
   it('stop() kills the child', async () => {
     const s = setup();

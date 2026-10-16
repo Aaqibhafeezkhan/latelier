@@ -5,9 +5,9 @@ import {
   useListRef,
   type RowComponentProps,
 } from 'react-window';
-import type { CollectionInfo, DbInfo, IpcError } from '@shared/ipc';
+import type { CollectionInfo, DbInfo } from '@shared/ipc';
 import type { ConnectionSummary, ProbeErrorCode } from '@shared/types';
-import { api, isIpcError } from '../../api/atelier';
+import { api } from '../../api/atelier';
 import { copyToClipboard } from '../../utils/clipboard';
 import { disconnectConnection } from '../../features/connections/disconnectConnection';
 import { isKnownNotConnected } from '../../state/connections';
@@ -24,7 +24,13 @@ import { ImportDialog } from './ImportDialog';
 import { DropCollectionConfirm } from './DropCollectionConfirm';
 import { DropDatabaseConfirm } from './DropDatabaseConfirm';
 import { useNavigatorDialogs } from './useNavigatorDialogs';
-import { useNavigatorTree } from './useNavigatorTree';
+import {
+  GENERIC_CONNECT_ERROR,
+  useNavigatorData,
+  useNavigatorStatusSync,
+  type LoadOptions,
+  type NavigatorData,
+} from './useNavigatorData';
 import { emptyCache } from './navigatorTreeReducer';
 import { ownGet } from '../../utils/ownProperty';
 import { isContextMenuKey, anchorForRow } from '../../utils/contextMenuKey';
@@ -76,6 +82,19 @@ export interface DbCollectionNavigatorProps {
    * "References…" item is disabled on any other row.
    */
   onOpenReferences?: () => void;
+  /** Tree state and loaders owned by the Workspace, so they outlive a collapsed sidebar. */
+  data?: NavigatorData;
+  /**
+   * "Reveal in sidebar": move the tree's focus to this collection's row as soon
+   * as it is rendered. A new object per request, so revealing the same row
+   * twice still fires.
+   */
+  revealRequest?: NavigatorOpenInput | null;
+  /**
+   * Called once the reveal has landed, or been dropped because its database
+   * settled without the collection, so it never fires later.
+   */
+  onRevealHandled?: () => void;
 }
 
 type TreeRow =
@@ -183,11 +202,6 @@ const connExpandedKey = (id: string) => `ui.workspace.navigator.connExpanded:${i
 /** Connection-colour rail down the left edge; muted when no live client. */
 const SPINE_WIDTH = 3;
 
-/** Delay before the one bounded retry on an empty `listDatabases` result. */
-const EMPTY_DB_RETRY_DELAY_MS = 300;
-
-/** Fallback when a failed connect's status event and backfill both miss the message. */
-const GENERIC_CONNECT_ERROR = 'The connection attempt failed.';
 
 export function DbCollectionNavigator({
   connections,
@@ -204,16 +218,20 @@ export function DbCollectionNavigator({
   onDatabaseDropped,
   onCollectionRenamed,
   onOpenReferences,
+  data,
+  revealRequest,
+  onRevealHandled,
 }: DbCollectionNavigatorProps) {
   const T = themeVars;
-  const { state: tree, dispatch, isMounted } = useNavigatorTree();
+  // Shared with Workspace (and so the palette) when `data` is passed; the
+  // standalone copy is what a navigator mounted on its own reads.
+  const own = useNavigatorData();
+  const { tree, dispatch, loadDbs, loadColls } = data ?? own;
   const { caches, connectErrors, expandedConnId, expanded } = tree;
   const [filter, setFilter] = React.useState('');
   const [focusedId, setFocusedId] = React.useState<string | null>(null);
   // Sticky-header trick: overflow:hidden on the container, overflow:auto only on the tree region.
   const treeRef = React.useRef<HTMLDivElement | null>(null);
-  // Set on 'disconnected'/'error', consumed on 'connected' to background-refresh expanded DBs.
-  const sawDisconnectRef = React.useRef<Set<string>>(new Set());
   const expandedRef = React.useRef(expanded);
   const activeDbNameRef = React.useRef(activeDbName);
 
@@ -232,44 +250,6 @@ export function DbCollectionNavigator({
     () => (connectionId ? ownGet(expanded, connectionId) ?? {} : {}),
     [expanded, connectionId],
   );
-
-  const loadDbs = React.useCallback(async (id: string): Promise<DbInfo[] | null> => {
-    dispatch({ type: 'dbsLoadStart', id });
-    try {
-      let rows = await api.meta.listDatabases({ connectionId: id });
-      if (rows.length === 0) {
-        // A brand-new database can be briefly invisible to listDatabases right
-        // after connect (driver/server catalog-visibility race) — one bounded retry.
-        await new Promise((resolve) => setTimeout(resolve, EMPTY_DB_RETRY_DELAY_MS));
-        // The navigator can unmount during the delay; a gone view must not
-        // spend another main-process round trip on a result nobody will read.
-        if (!isMounted()) return null;
-        rows = await api.meta.listDatabases({ connectionId: id });
-      }
-      dispatch({ type: 'dbsLoadSuccess', id, dbs: rows });
-      return rows;
-    } catch (e) {
-      const err: IpcError = isIpcError(e)
-        ? e
-        : { code: 'INTERNAL', message: String(e) };
-      dispatch({ type: 'dbsLoadError', id, err });
-      return null;
-    }
-  }, [dispatch, isMounted]);
-
-  const loadColls = React.useCallback(async (id: string, dbName: string) => {
-    dispatch({ type: 'collsLoadStart', id, dbName });
-    try {
-      const rows = await api.meta.listCollections({ connectionId: id, dbName });
-      // Sort A→Z so large databases are scannable; server returns insertion order.
-      const sorted = [...rows].sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-      );
-      dispatch({ type: 'collsLoadSuccess', id, dbName, colls: sorted });
-    } catch {
-      dispatch({ type: 'collsLoadError', id, dbName });
-    }
-  }, [dispatch]);
 
   // The expanded root follows the Focused Tab's Connection on *change*, not
   // value — a root expanded by hand while on another tab stays expanded. Only
@@ -313,38 +293,10 @@ export function DbCollectionNavigator({
     activeDbNameRef.current = activeDbName;
   }, [activeDbName]);
 
-  // One subscription for every Connection id (not per root): reconnect
-  // background-refreshes a Connection's previously-expanded DBs, and a
-  // Connection reconnecting into an empty navigator opens its root — only
-  // when nothing is already expanded.
-  React.useEffect(() => {
-    const off = api.mongo.onStatus((runtime) => {
-      // A transition away from 'error' retires the message on that root.
-      if (runtime.status === 'error') {
-        dispatch({
-          type: 'connectErrorSet',
-          id: runtime.id,
-          message: runtime.errorMessage ?? GENERIC_CONNECT_ERROR,
-          code: runtime.errorCode,
-        });
-      } else {
-        dispatch({ type: 'connectErrorClear', id: runtime.id });
-      }
-      if (runtime.status === 'disconnected' || runtime.status === 'error') {
-        sawDisconnectRef.current.add(runtime.id);
-      } else if (runtime.status === 'connected') {
-        dispatch({ type: 'expandedConnSetIfNull', id: runtime.id });
-        if (sawDisconnectRef.current.has(runtime.id)) {
-          const snapshot = ownGet(expandedRef.current, runtime.id) ?? {};
-          for (const db of Object.keys(snapshot).filter((d) => snapshot[d])) {
-            void loadColls(runtime.id, db);
-          }
-          sawDisconnectRef.current.delete(runtime.id);
-        }
-      }
-    });
-    return off;
-  }, [loadColls, dispatch]);
+  // The status subscription goes with whoever owns the tree: the Workspace
+  // when `data` is passed (so a reconnect while collapsed still lands), this
+  // navigator when it runs standalone.
+  useNavigatorStatusSync(data ? null : own);
 
   // Backfills the error message for a Connection already 'error' at mount,
   // whose failure predates this component's status subscription.
@@ -450,33 +402,37 @@ export function DbCollectionNavigator({
   );
 
   const refreshDb = React.useCallback(
-    (id: string, dbName: string) => {
-      // Dedup a rapid double-click: loadColls's own gate doesn't prevent the
-      // listCollections call itself. `ownGet`, not `?.` — a hostile `id` can
-      // resolve to a truthy inherited Object.prototype member.
+    (id: string, dbName: string, opts: LoadOptions = {}) => {
+      // A refresh after a change (`force`) must see that change, so it never
+      // joins a listing already in flight. A manual one dedups a rapid
+      // double-click: loadColls's own gate doesn't prevent the listCollections
+      // call itself. `ownGet`, not `?.` — a hostile `id` can resolve to a
+      // truthy inherited Object.prototype member.
       const c = ownGet(caches, id);
-      if (c && ownGet(c.collsLoading, dbName)) return;
-      void loadColls(id, dbName);
+      if (!opts.force && c && ownGet(c.collsLoading, dbName)) return;
+      void loadColls(id, dbName, opts);
     },
     [caches, loadColls],
   );
 
   // Re-populates every previously-expanded DB (except the active one, already
-  // re-fetched elsewhere) after a whole-connection refresh. Keyed by
-  // connectionId so an in-flight refresh on one Connection can't block another.
+  // re-fetched elsewhere) after a whole-connection refresh. Its loads are
+  // forced: an emptied cache means the old in-flight answers are not wanted.
+  // A manual refresh is skipped while one runs (keyed by connectionId, so one
+  // Connection can't block another); a refresh after a change (`force`) never is.
   const refreshInFlightRef = React.useRef<Set<string>>(new Set());
   const refreshAll = React.useCallback(
-    async (id: string) => {
-      if (refreshInFlightRef.current.has(id)) return;
+    async (id: string, opts: LoadOptions = {}) => {
+      if (!opts.force && refreshInFlightRef.current.has(id)) return;
       refreshInFlightRef.current.add(id);
       try {
         const previouslyExpanded = ownGet(expandedRef.current, id) ?? {};
         dispatch({ type: 'cacheReset', id });
-        const dbs = await loadDbs(id);
+        const dbs = await loadDbs(id, { force: true });
         const pending: Promise<void>[] = [];
         for (const db of dbs ?? []) {
           if (ownGet(previouslyExpanded, db.name) && db.name !== activeDbNameRef.current) {
-            pending.push(loadColls(id, db.name));
+            pending.push(loadColls(id, db.name, { force: true }));
           }
         }
         await Promise.allSettled(pending);
@@ -675,6 +631,45 @@ export function DbCollectionNavigator({
   ]);
 
   const listRef = useListRef(null);
+
+  // The requested row may not exist yet (its database still loading, or the
+  // navigator only just mounted), so the request waits for the rows that hold
+  // it. Focusing it lets the focusedId effect below scroll it into view.
+  // A name filter that hides the row would hold it back forever, so a reveal
+  // clears it. It also re-lists the database's collections (sharing a load
+  // already in flight): once that settles without the collection — dropped, or
+  // the listing failed — the request is spent, so it never fires later.
+  const pendingRevealRef = React.useRef<{ req: NavigatorOpenInput; listed: boolean } | null>(null);
+  const [revealListed, setRevealListed] = React.useState(0);
+  React.useEffect(() => {
+    if (!revealRequest) return;
+    const pending = { req: revealRequest, listed: false };
+    pendingRevealRef.current = pending;
+    queueMicrotask(() => setFilter(''));
+    void loadColls(revealRequest.connectionId, revealRequest.dbName).then(() => {
+      pending.listed = true;
+      setRevealListed((n) => n + 1);
+    });
+  }, [revealRequest, loadColls]);
+  React.useEffect(() => {
+    const pending = pendingRevealRef.current;
+    if (!pending) return;
+    const { req } = pending;
+    const id = `coll:${req.connectionId}:${req.dbName}:${req.collection}`;
+    if (rows.some((r) => r.id === id)) {
+      pendingRevealRef.current = null;
+      queueMicrotask(() => {
+        setFocusedId(id);
+        onRevealHandled?.();
+      });
+      return;
+    }
+    const c = ownGet(caches, req.connectionId);
+    if (!pending.listed || ownGet(c?.collsLoading ?? {}, req.dbName)) return;
+    if (ownGet(c?.colls ?? {}, req.dbName)?.some((x) => x.name === req.collection)) return;
+    pendingRevealRef.current = null;
+    queueMicrotask(() => onRevealHandled?.());
+  }, [rows, revealListed, onRevealHandled, caches]);
   const rowHeight = useDynamicRowHeight({ defaultRowHeight: 26 });
 
   React.useEffect(() => {

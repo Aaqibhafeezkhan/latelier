@@ -1,6 +1,15 @@
 import React from 'react';
 import { api } from '../../api/atelier';
+import { notify } from '../../theme/notifications';
 import { BUILDER_DEFAULT_PCT } from './panelSizes';
+
+// One fixed id: a drag fires a write per release, and a failing store would
+// otherwise stack a toast for each.
+function persistPref(key: string, value: number | boolean): void {
+  void api.prefs.set(key, value).catch(() => {
+    notify.error('Could not save the layout', { id: 'pref-save-failed' });
+  });
+}
 
 export function useWorkspacePanelPrefs(): {
   prefsReady: boolean;
@@ -62,30 +71,30 @@ export function useWorkspacePanelPrefs(): {
   const toggleSidebar = React.useCallback(() => {
     const next = !sidebarCollapsed;
     setSidebarCollapsed(next);
-    void api.prefs.set('ui.workspace.sidebarCollapsed', next).catch(() => {});
+    persistPref('ui.workspace.sidebarCollapsed', next);
   }, [sidebarCollapsed]);
 
   const commitLeftWidth = React.useCallback((v: number) => {
-    void api.prefs.set('ui.workspace.leftWidth', v).catch(() => {});
+    persistPref('ui.workspace.leftWidth', v);
   }, []);
 
   const commitRefDrawerWidth = React.useCallback((v: number) => {
-    void api.prefs.set('ui.workspace.refDrawerWidth', v).catch(() => {});
+    persistPref('ui.workspace.refDrawerWidth', v);
   }, []);
 
   const commitShellSplit = React.useCallback((v: number) => {
     setShellSplit(v);
-    void api.prefs.set('ui.workspace.shellSplit', v).catch(() => {});
+    persistPref('ui.workspace.shellSplit', v);
   }, []);
 
   const commitInnerHSplit = React.useCallback((v: number) => {
     setInnerHSplit(v);
-    void api.prefs.set('ui.workspace.innerHSplit', v).catch(() => {});
+    persistPref('ui.workspace.innerHSplit', v);
   }, []);
 
   const commitBuilderCollapsed = React.useCallback((next: boolean) => {
     setBuilderCollapsed(next);
-    void api.prefs.set('ui.workspace.builderCollapsed', next).catch(() => {});
+    persistPref('ui.workspace.builderCollapsed', next);
   }, []);
 
   return {

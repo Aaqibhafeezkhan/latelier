@@ -285,6 +285,11 @@ export class ScriptService {
     if (this.active.get(token) === ctrl) this.active.delete(token);
   }
 
+  /** Scripts in flight, from the call until it settles. */
+  runningCount(): number {
+    return this.runs.size;
+  }
+
   /** Stop all in-flight scripts and kill their processes. Wired to `app.before-quit`. */
   cancelAll(): void {
     for (const run of this.runs) run.ctrl.abort();

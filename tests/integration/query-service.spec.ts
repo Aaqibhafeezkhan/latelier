@@ -499,4 +499,51 @@ describe('QueryService', () => {
   it('cancel(token) is a no-op for a token with nothing in flight', () => {
     expect(() => svc.cancel('no-such-token')).not.toThrow();
   });
+
+  // #28 — the caps a user can hit say what they are and what to do, instead
+  // of an `INTERNAL` byte count or a raw driver "MaxTimeMS" message.
+  describe('caps explain themselves', () => {
+    const limited = (limits: { maxFindBytes?: number; queryTimeoutMs?: number }) =>
+      new QueryService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)), undefined, undefined, limits);
+
+    it('a result over the byte cap is refused as VALIDATION with what to change', async () => {
+      const client = await pool.write(connId).client();
+      const big = client.db(dbName).collection('big');
+      await big.deleteMany({});
+      await big.insertMany(Array.from({ length: 5 }, (_, i) => ({ n: i, pad: 'x'.repeat(1024) })));
+
+      const err = await limited({ maxFindBytes: 2000 })
+        .find({ connectionId: connId, dbName, collection: 'big', filter: '{}', limit: 5, skip: 0 })
+        .catch((e: unknown) => e);
+
+      expect(err).toMatchObject({ code: 'VALIDATION' });
+      expect((err as Error).message).toMatch(/larger than 2000 bytes/);
+      expect((err as Error).message).toMatch(/projection/);
+    });
+
+    it('a result under the cap is unaffected', async () => {
+      const result = await limited({ maxFindBytes: 1_000_000 }).find({
+        connectionId: connId, dbName, collection: 'big', filter: '{}', limit: 5, skip: 0,
+      });
+      expect(JSON.parse(result.documentsJson)).toHaveLength(5);
+    });
+
+    it('a query stopped by the time limit is a TIMEOUT that says how long and what to do', async () => {
+      const err = await limited({ queryTimeoutMs: 50 })
+        .find({
+          connectionId: connId,
+          dbName,
+          collection: collName,
+          filter: '{"$where":"sleep(500) || true"}',
+          limit: 10,
+          skip: 0,
+        })
+        .catch((e: unknown) => e);
+
+      expect(err).toMatchObject({ code: 'TIMEOUT' });
+      expect((err as Error).message).toMatch(/stopped after 0\.05 s/);
+      expect((err as Error).message).toMatch(/index|filter/);
+      expect((err as Error).message).not.toMatch(/MaxTimeMS/i);
+    });
+  });
 });
