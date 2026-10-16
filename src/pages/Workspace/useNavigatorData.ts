@@ -2,6 +2,7 @@ import React from 'react';
 import type { DbInfo, IpcError } from '@shared/ipc';
 import { api, isIpcError } from '../../api/atelier';
 import { useNavigatorTree } from './useNavigatorTree';
+import type { NavigatorTreeAction } from './navigatorTreeReducer';
 import { ownGet } from '../../utils/ownProperty';
 
 /** Fallback when a failed connect's status event and backfill both miss the message. */
@@ -26,7 +27,7 @@ export interface LoadOptions {
  * connection status with `useNavigatorStatusSync`.
  */
 export function useNavigatorData() {
-  const { state: tree, dispatch, isMounted } = useNavigatorTree();
+  const { state: tree, dispatch: rawDispatch, isMounted } = useNavigatorTree();
 
   // Two callers asking in the same tick (the navigator's mount effect and the
   // palette's sweep both see an empty cache) share one IPC round trip. The
@@ -49,6 +50,23 @@ export function useNavigatorData() {
       return p;
     },
     [],
+  );
+
+  // A `cacheReset` (whole-connection Refresh) forgets that connection's
+  // in-flight loads: their late answers describe the catalog before the
+  // refresh, so `isCurrent` turns false and they are dropped, and an unforced
+  // load after the reset (the active-database effect, the palette sweep)
+  // starts a fresh listing instead of joining the stale one.
+  const dispatch = React.useCallback(
+    (action: NavigatorTreeAction) => {
+      if (action.type === 'cacheReset') {
+        for (const key of [...inFlight.current.keys()]) {
+          if (key.split('\u0000')[1] === action.id) inFlight.current.delete(key);
+        }
+      }
+      rawDispatch(action);
+    },
+    [rawDispatch],
   );
 
   const loadDbs = React.useCallback(
