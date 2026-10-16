@@ -178,6 +178,8 @@ On mount of `/workspace`:
 3. Else if there's at least one saved connection → render empty state with an "Open a collection…" button that opens the new-tab modal.
 4. Else redirect to `/connections`.
 
+Settings carries a "Reopen tabs on launch" switch, stored under `ui.workspace.restoreTabs`. An unset value means on, so the behaviour above is the default. When the value is `false`, the main process closes every tab (pinned ones included) once at boot, right after the tab service is built, so the workspace opens empty. The check lives in main rather than in the `/workspace` mount because that page remounts on route changes and would wipe tabs mid-session.
+
 Every renderer state change in a tab triggers `api.tabs.update(id, patchOfState)` with a **debounced** (250ms) writer. This keeps session restoration on par with the last typed-but-unsaved state without thrashing SQLite.
 
 ## 10. Breadcrumb in title bar
@@ -199,6 +201,7 @@ Format: `{connection.name} / {dbName} / {collection}  [· kind]` where kind is r
 ## 12. Acceptance criteria
 
 - Relaunching the app restores previously open tabs, positions, active tab, and the builder state of the active collection tab (view mode, builder conditions, sort, limit).
+- With "Reopen tabs on launch" off, a relaunch starts with no tabs, pinned ones included; switching it back on restores the default behaviour.
 - Closing the last tab leaves the workspace on an empty state; reopening via "+" restores functionality.
 - Reordering tabs persists and survives relaunch.
 - Switching tabs never calls `api.meta.*` or `api.query.*` — those run on tab activation in their own spec.
