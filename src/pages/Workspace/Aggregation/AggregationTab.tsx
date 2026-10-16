@@ -37,6 +37,7 @@ import type { SuggestionContext } from '../../../features/fieldSuggestions/types
 import { invalidateSampleSchemaCache } from '../../../features/fieldSuggestions/sources/sampleSchemaSource';
 import { ExplainDrawer } from './ExplainDrawer';
 import { SaveAsCollectionModal } from './SaveAsCollectionModal';
+import { notifyCollectionChanged } from '../../../state/collectionChanges';
 import { SaveAsViewModal } from './SaveAsViewModal';
 import { saveResultMessage } from './saveResultMessage';
 import { SavePipelineModal } from './SavePipelineModal';
@@ -713,7 +714,10 @@ export function AggregationTab({
           collection={collection}
           stages={saveAsViewStages}
           onClose={() => setSaveAsViewStages(null)}
-          onCreated={(name) => notify.success(`Created view “${name}”`)}
+          onCreated={(name) => {
+            notifyCollectionChanged({ connectionId, dbName, collection: name });
+            notify.success(`Created view “${name}”`);
+          }}
         />
       )}
     </div>

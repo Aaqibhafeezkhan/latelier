@@ -29,6 +29,7 @@ import { useNavigatorDialogs } from './useNavigatorDialogs';
 import { useNavigatorTree } from './useNavigatorTree';
 import { emptyCache } from './navigatorTreeReducer';
 import { ownGet } from '../../utils/ownProperty';
+import { onCollectionChanged } from '../../state/collectionChanges';
 import { isContextMenuKey, anchorForRow } from '../../utils/contextMenuKey';
 
 export interface NavigatorOpenInput {
@@ -461,6 +462,13 @@ export function DbCollectionNavigator({
       void loadColls(id, dbName);
     },
     [caches, loadColls],
+  );
+
+  // A write made outside the tree (Save as view in a pipeline tab) lists
+  // itself here.
+  React.useEffect(
+    () => onCollectionChanged((c) => refreshDb(c.connectionId, c.dbName)),
+    [refreshDb],
   );
 
   // Re-populates every previously-expanded DB (except the active one, already
