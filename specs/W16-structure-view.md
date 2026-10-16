@@ -129,9 +129,13 @@ the `ui.indexes.lastTarget` preference are deleted, and the component takes
 - its `SchemaTabState` (name retained — it is still the *schema section's*
   state, and renaming it would churn persisted keys for nothing),
 - its deliberate rule of sampling once per mount and never re-sampling on view
-  switch, because each sample hits Mongo.
+  switch, because each sample hits Mongo,
+- its honest failure state: when the sample fails, the error banner is the
+  whole message. The "No fields found in the sample." line is reserved for a
+  sample that succeeded and came back empty, so an error never reads as an
+  empty collection.
 
-That last rule now matters more, not less: entering Structure must not fire a
+The sampling rule now matters more, not less: entering Structure must not fire a
 sample *and* an index list on every visit. Indexes are cheap and fetched on
 entry; the schema section keeps its existing once-then-manual behavior.
 

@@ -298,10 +298,29 @@ budget: page 2 of a limit-10 query returns fewer rows, past the cap
 That is a defensible design. It is also indistinguishable, from the UI, from
 "the query broke on page 3". The label is one word: `limit`.
 
+**Fix.** The limit input is described, to a hovering mouse, a focused keyboard
+and a screen reader alike (the same Tooltip + visually-hidden pattern as skip,
+§4.4): "Total across all pages. Queries stop after 30 s; results over 50 MB
+are refused." The Result bar also states the limit that really applies beside
+the count (`limit 10`) and says nothing when the limit is blank or coerced to
+none (§4.1). The sentence and the numbers live in `queryCaps.ts`, and a unit
+test pins them to the ceilings the main process enforces, so the wording can't
+drift from the behaviour.
+
 ### 4.3 The server caps limit at 1000 invisibly — P2
 
 `QueryService.ts:33`: `const limit = Math.min(input.limit, 1000);`. A user who
 asks for 5000 gets 1000, with no notice anywhere in the UI.
+
+**Resolved by finding it unreachable.** The page-size selector tops out at 500
+(`PAGE_SIZE_OPTIONS`) and `effectivePageLimit` never returns more than the page
+size, so the 1000 clamp can no longer fire from the UI; it stays as a guard on
+the IPC boundary. The ceilings a user *can* hit are the limit as a total
+budget (§4.2), the 30 s query timeout and the 50 MB result cap, and those now
+fail with a message that says what to change: `TIMEOUT` reads "The query was
+stopped after 30 s. Add an index or narrow the filter.", and a result over the
+cap is a `VALIDATION` error reading "The result is larger than 50 MB. Add a
+filter, a projection, or lower the rows per page." (W03 §7).
 
 ### 4.4 `skip` explains itself only on hover, to a mouse — P2
 
@@ -517,8 +536,8 @@ Grouped by tier so a PR can claim one tier cleanly.
 
 - The drawer states where sort / projection / limit are edited, or hosts
   them.
-- `limit`'s across-pages semantics and the 1000-document server cap are
-  discoverable without reading the source.
+- `limit`'s across-pages semantics and the time and size caps are
+  discoverable without reading the source (§4.2, §4.3).
 - Projection, preview fields, and column config each state their scope
   where they are used, and the two that are display-only say so.
 

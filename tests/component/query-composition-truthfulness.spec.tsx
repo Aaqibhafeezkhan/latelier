@@ -277,6 +277,20 @@ describe('W15 §4.1 — a coerced limit says what it actually runs as', () => {
 
 // ─── §1.1 ───────────────────────────────────────────────────────────────────
 
+describe('W15 §4.2 — the limit says what it caps and what else stops a query', () => {
+  it('describes the limit as a total across pages, with the time and size caps', async () => {
+    mountWith(makeState({ builder: { projection: [], sort: '', limit: '10' } }));
+
+    const input = await screen.findByTestId('query-bar-limit');
+    const helpId = input.getAttribute('aria-describedby')?.split(' ') ?? [];
+    const help = helpId.map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
+
+    expect(help).toContain('all pages');
+    expect(help).toContain('30 s');
+    expect(help).toContain('50 MB');
+  });
+});
+
 describe('W15 §1.1 — Copy code reproduces the query as run', () => {
   it('emits the projection, sort, skip and limit useQueryRunner would send', async () => {
     // userLimit 120, pageSize 50, page 2 → skip 100, limit 20.

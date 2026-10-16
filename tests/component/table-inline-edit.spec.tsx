@@ -15,6 +15,7 @@ import { CollectionWorkspaceProvider } from '../../src/pages/Workspace/Collectio
 import type {
   CollectionWorkspaceActions,
   CollectionWorkspaceMeta,
+  UpdateFieldOutcome,
 } from '../../src/pages/Workspace/context';
 import type { CollectionTabState, TableColumnConfig } from '@shared/types';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
@@ -87,8 +88,9 @@ function inlineEditActions(opts: {
     updateField: (doc, fieldPath, newValue) => {
       const revived = ejsonParse<unknown>(JSON.stringify(doc));
       if (!isPlainDocument(revived)) {
-        notify.error('Cannot edit a document without an _id');
-        return Promise.resolve();
+        const message = 'Cannot edit a document without an _id';
+        notify.error(message);
+        return Promise.resolve({ ok: false, message });
       }
       const original = revived as Record<string, unknown>;
       const draft = setAtSegments(original, [fieldPath], newValue);
@@ -96,10 +98,11 @@ function inlineEditActions(opts: {
       try {
         request = buildUpdateRequest(original, draft);
       } catch (e) {
-        notify.error(getErrorMessage(e, 'Cannot save this value'));
-        return Promise.resolve();
+        const message = getErrorMessage(e, 'Cannot save this value');
+        notify.error(message);
+        return Promise.resolve({ ok: false, message });
       }
-      if (request === null) return Promise.resolve(); // unchanged
+      if (request === null) return Promise.resolve({ ok: true }); // unchanged
       return api.doc
         .updateOne({
           connectionId: 'c1',
@@ -108,17 +111,19 @@ function inlineEditActions(opts: {
           filterJson: request.filterJson,
           updateJson: request.updateJson,
         })
-        .then(({ matchedCount }) => {
+        .then(({ matchedCount }): UpdateFieldOutcome => {
           if (matchedCount === 0) {
-            notify.error('This document changed since it was loaded; the edit was not saved.', {
-              title: 'Update failed',
-            });
-            return;
+            const message = 'This document changed since it was loaded; the edit was not saved.';
+            notify.error(message, { title: 'Update failed' });
+            return { ok: false, message };
           }
           opts.onRefresh?.();
+          return { ok: true };
         })
-        .catch((e: unknown) => {
-          notify.error(getErrorMessage(e, 'Update failed'), { title: 'Update failed' });
+        .catch((e: unknown): UpdateFieldOutcome => {
+          const message = getErrorMessage(e, 'Update failed');
+          notify.error(message, { title: 'Update failed' });
+          return { ok: false, message };
         });
     },
     openDuplicate: opts.openDuplicate ?? vi.fn(),
@@ -629,5 +634,217 @@ describe('TableView — inline cell editing (T2.6)', () => {
       status: { $eq: 'active' },
     });
     expect(JSON.parse(updateCalls[0]!.updateJson)).toEqual({ $set: { status: 'archived' } });
+  });
+});
+
+// A failed write used to close the editor before the write settled, so the
+// typed value was gone and the only trace of the failure was a toast.
+describe('TableView — a failed inline write keeps the typed value', () => {
+  function openEditor(getByTitle: (m: RegExp) => HTMLElement, field: string, text: string) {
+    const cell = getByTitle(new RegExp(`Drag to add "${field}`));
+    fireEvent.mouseEnter(cell);
+    fireEvent.click(within(cell).getByRole('button', { name: 'Edit cell value' }));
+    const input = within(cell).getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: text } });
+    return { cell, input };
+  }
+  const deferred = <T,>() => {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+
+  it('keeps the editor open with the draft and an inline error, and still toasts', async () => {
+    const errorSpy = vi.spyOn(notify, 'error');
+    installAtelierMock({
+      doc: {
+        updateOne: async () => {
+          throw { code: 'SYSTEM_ERROR', message: 'boom' };
+        },
+      },
+    });
+    const { getByTitle } = renderInlineEditHarness([{ _id: 1, status: 'pending' }]);
+    const { cell, input } = openEditor(getByTitle, 'status', 'shipped');
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(within(cell).getByRole('alert').textContent).toBe('boom'));
+    expect((within(cell).getByRole('textbox') as HTMLInputElement).value).toBe('shipped');
+    expect(errorSpy).toHaveBeenCalledWith('boom', expect.anything());
+  });
+
+  it('retries with an edited value, then closes the editor on success', async () => {
+    const updateCalls: Array<{ updateJson: string }> = [];
+    let fail = true;
+    installAtelierMock({
+      doc: {
+        updateOne: async (input) => {
+          updateCalls.push(input);
+          if (fail) throw { code: 'SYSTEM_ERROR', message: 'boom' };
+          return { matchedCount: 1, modifiedCount: 1 };
+        },
+      },
+    });
+    const { getByTitle } = renderInlineEditHarness([{ _id: 1, status: 'pending' }]);
+    const { cell, input } = openEditor(getByTitle, 'status', 'shipped');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(within(cell).getByRole('alert')).toBeTruthy());
+
+    fail = false;
+    fireEvent.change(input, { target: { value: 'delivered' } });
+    expect(within(cell).queryByRole('alert')).toBeNull();
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(updateCalls.length).toBe(2));
+    expect(JSON.parse(updateCalls[1]!.updateJson)).toEqual({ $set: { status: 'delivered' } });
+    await waitFor(() => expect(within(cell).queryByRole('textbox')).toBeNull());
+  });
+
+  it('does not re-send a failed write when the input merely loses focus', async () => {
+    const updateCalls: unknown[] = [];
+    installAtelierMock({
+      doc: {
+        updateOne: async (input) => {
+          updateCalls.push(input);
+          throw { code: 'SYSTEM_ERROR', message: 'boom' };
+        },
+      },
+    });
+    const { getByTitle } = renderInlineEditHarness([{ _id: 1, status: 'pending' }]);
+    const { cell, input } = openEditor(getByTitle, 'status', 'shipped');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(within(cell).getByRole('alert')).toBeTruthy());
+
+    fireEvent.blur(input);
+
+    expect(updateCalls.length).toBe(1);
+    expect(within(cell).getByRole('textbox')).toBeTruthy();
+  });
+
+  it('keeps the editor open with the draft when the document changed underneath (matchedCount: 0)', async () => {
+    installAtelierMock({ doc: { updateOne: async () => ({ matchedCount: 0, modifiedCount: 0 }) } });
+    const { getByTitle } = renderInlineEditHarness([{ _id: 1, status: 'pending' }]);
+    const { cell, input } = openEditor(getByTitle, 'status', 'shipped');
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(within(cell).getByRole('alert').textContent).toMatch(/changed since it was loaded/),
+    );
+    expect((within(cell).getByRole('textbox') as HTMLInputElement).value).toBe('shipped');
+  });
+
+  it('closes the editor on success with no error shown', async () => {
+    installAtelierMock({ doc: { updateOne: async () => ({ matchedCount: 1, modifiedCount: 1 }) } });
+    const { getByTitle } = renderInlineEditHarness([{ _id: 1, status: 'pending' }]);
+    const { cell, input } = openEditor(getByTitle, 'status', 'shipped');
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(within(cell).queryByRole('textbox')).toBeNull());
+    expect(within(cell).queryByRole('alert')).toBeNull();
+  });
+
+  it('holds the editor read-only while the write is in flight, and sends one write on Enter then blur', async () => {
+    const pending = deferred<{ matchedCount: number; modifiedCount: number }>();
+    const updateCalls: unknown[] = [];
+    installAtelierMock({
+      doc: {
+        updateOne: (input) => {
+          updateCalls.push(input);
+          return pending.promise;
+        },
+      },
+    });
+    const { getByTitle } = renderInlineEditHarness([{ _id: 1, status: 'pending' }]);
+    const { cell, input } = openEditor(getByTitle, 'status', 'shipped');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(updateCalls.length).toBe(1));
+    const held = within(cell).getByRole('textbox') as HTMLInputElement;
+    expect(held.readOnly).toBe(true);
+    expect(held.getAttribute('aria-busy')).toBe('true');
+
+    pending.resolve({ matchedCount: 1, modifiedCount: 1 });
+    await waitFor(() => expect(within(cell).queryByRole('textbox')).toBeNull());
+    expect(updateCalls.length).toBe(1);
+  });
+
+  it('Escape during a pending write closes the editor for good, even if the write then fails', async () => {
+    const pending = deferred<{ matchedCount: number; modifiedCount: number }>();
+    installAtelierMock({ doc: { updateOne: () => pending.promise } });
+    const { getByTitle } = renderInlineEditHarness([{ _id: 1, status: 'pending' }]);
+    const { cell, input } = openEditor(getByTitle, 'status', 'shipped');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(within(cell).queryByRole('textbox')).toBeNull();
+
+    await act(async () => {
+      pending.reject({ code: 'SYSTEM_ERROR', message: 'late boom' });
+      await pending.promise.catch(() => undefined);
+    });
+
+    expect(within(cell).queryByRole('textbox')).toBeNull();
+    expect(within(cell).queryByRole('alert')).toBeNull();
+  });
+
+  it('a stale failure does not touch the editor of the row the cell was rebound to', async () => {
+    const pending = deferred<{ matchedCount: number; modifiedCount: number }>();
+    installAtelierMock({ doc: { updateOne: () => pending.promise } });
+    const { getByTitle, rerenderDocs } = renderRerenderableInlineEditHarness([
+      { _id: 1, status: 'pending' },
+    ]);
+    const { input } = openEditor(getByTitle, 'status', 'shipped');
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    rerenderDocs([{ _id: 2, status: 'active' }]);
+    const { cell: cellB, input: inputB } = openEditor(getByTitle, 'status', 'archived');
+
+    await act(async () => {
+      pending.reject({ code: 'SYSTEM_ERROR', message: 'late boom' });
+      await pending.promise.catch(() => undefined);
+    });
+
+    expect(within(cellB).queryByRole('alert')).toBeNull();
+    expect((within(cellB).getByRole('textbox') as HTMLInputElement).value).toBe('archived');
+    expect(inputB.readOnly).toBe(false);
+  });
+
+  it('a stale success does not close the editor of the row the cell was rebound to', async () => {
+    const pending = deferred<{ matchedCount: number; modifiedCount: number }>();
+    installAtelierMock({ doc: { updateOne: () => pending.promise } });
+    const { getByTitle, rerenderDocs } = renderRerenderableInlineEditHarness([
+      { _id: 1, status: 'pending' },
+    ]);
+    const { input } = openEditor(getByTitle, 'status', 'shipped');
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    rerenderDocs([{ _id: 2, status: 'active' }]);
+    const { cell: cellB } = openEditor(getByTitle, 'status', 'archived');
+
+    await act(async () => {
+      pending.resolve({ matchedCount: 1, modifiedCount: 1 });
+      await pending.promise;
+    });
+
+    expect((within(cellB).getByRole('textbox') as HTMLInputElement).value).toBe('archived');
+  });
+
+  it('keeps a number cell open with its draft and an error when the write fails', async () => {
+    installAtelierMock({
+      doc: {
+        updateOne: async () => {
+          throw { code: 'SYSTEM_ERROR', message: 'boom' };
+        },
+      },
+    });
+    const { getByTitle } = renderInlineEditHarness([{ _id: 1, amount: { $numberInt: '5' } }]);
+    const { cell, input } = openEditor(getByTitle, 'amount', '9');
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(within(cell).getByRole('alert').textContent).toBe('boom'));
+    expect((within(cell).getByRole('textbox') as HTMLInputElement).value).toBe('9');
   });
 });

@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { renderHook, act, waitFor } from '../helpers/render';
+import { notifications } from '@mantine/notifications';
+import { notify } from '../../src/theme/notifications';
+import { renderHook, act, waitFor, screen } from '../helpers/render';
 import { useWorkspaceTabs } from '../../src/state/workspaceTabs';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import type { CollectionTab, WorkspaceTab } from '@shared/types';
@@ -202,5 +204,64 @@ describe('useWorkspaceTabs — optimistic local updates', () => {
 
     expect(result.current.tabs).toEqual([]);
     expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useWorkspaceTabs — tab state that could not be saved says so', () => {
+  afterEach(() => {
+    notifications.clean();
+  });
+
+  it('toasts once for a burst of failed flushes, not once per flush', async () => {
+    const errorSpy = vi.spyOn(notify, 'error');
+    installAtelierMock({
+      tabs: {
+        list: async () => [collectionTab({ id: 't1' })],
+        update: (async () => {
+          throw { code: 'SYSTEM_ERROR', message: 'disk full' };
+        }) as never,
+      },
+    });
+    const { result } = renderHook(() => useWorkspaceTabs());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => result.current.patchCollectionState('t1', { page: 1 }));
+    await screen.findByText('Tab changes could not be saved');
+    act(() => result.current.patchCollectionState('t1', { page: 2 }));
+    await new Promise((r) => setTimeout(r, 400));
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByText('Tab changes could not be saved')).toHaveLength(1);
+  });
+
+  it('toasts again for a second outage after a flush succeeded in between', async () => {
+    const errorSpy = vi.spyOn(notify, 'error');
+    let failing = true;
+    let updates = 0;
+    installAtelierMock({
+      tabs: {
+        list: async () => [collectionTab({ id: 't1' })],
+        update: (async () => {
+          updates += 1;
+          if (failing) throw { code: 'SYSTEM_ERROR', message: 'disk full' };
+          return collectionTab({ id: 't1' });
+        }) as never,
+      },
+    });
+    const { result } = renderHook(() => useWorkspaceTabs());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => result.current.patchCollectionState('t1', { page: 1 }));
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledTimes(1));
+
+    failing = false;
+    act(() => result.current.patchCollectionState('t1', { page: 2 }));
+    await waitFor(() => expect(updates).toBe(2));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+
+    failing = true;
+    act(() => result.current.patchCollectionState('t1', { page: 3 }));
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledTimes(2));
   });
 });

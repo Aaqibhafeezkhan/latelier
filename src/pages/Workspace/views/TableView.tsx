@@ -181,6 +181,15 @@ function TableCell({
   // re-enable the toggle while the newer write is still in flight.
   const boolWriteRef = React.useRef(0);
   const commitGuardRef = React.useRef(false);
+  // The text/number editor stays mounted while its write is in flight, so a
+  // failed write still has the typed value to show again. Only the latest
+  // edit may settle it: Escape, a rebind to another document and a fresh
+  // edit each bump the token, which orphans any write still in the air.
+  const [saving, setSaving] = React.useState(false);
+  const editTokenRef = React.useRef(0);
+  // After a failed write, losing focus must not re-send it (and re-toast)
+  // on every blur; Enter or an edit of the draft re-arms the commit.
+  const writeFailedRef = React.useRef(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   // W18 §8 — the cell's real BSON kind, revived from the wire sentinel once
@@ -203,7 +212,10 @@ function TableCell({
     if (editing) {
       // eslint-disable-next-line react-hooks/refs
       commitGuardRef.current = true;
+      // eslint-disable-next-line react-hooks/refs
+      editTokenRef.current++;
       setEditing(false);
+      setSaving(false);
       setDraft('');
       setInputError(null);
     }
@@ -247,17 +259,42 @@ function TableCell({
     }
     setInputError(null);
     commitGuardRef.current = false;
+    writeFailedRef.current = false;
+    editTokenRef.current++;
+    setSaving(false);
     setEditing(true);
   };
   const cancelEdit = () => {
     // Unmounting a focused element fires a trailing real-browser blur (jsdom
     // doesn't reproduce it) that would otherwise commit the cancelled draft.
     commitGuardRef.current = true;
+    editTokenRef.current++;
+    setSaving(false);
     setEditing(false);
     setInputError(null);
   };
-  // Guarded against a double-fire: Enter's setEditing(false) unmounts the
-  // input, and the browser also emits a blur for the same interaction.
+  // Holds the editor open until `updateField` settles: success closes it, a
+  // failure keeps the draft in place with the reason beside it. The commit
+  // guard stays set meanwhile, so Enter's trailing blur can't double-send.
+  const submit = (next: unknown) => {
+    commitGuardRef.current = true;
+    const token = ++editTokenRef.current;
+    setSaving(true);
+    setInputError(null);
+    void Promise.resolve(actions.updateField?.(doc, fieldPath, next)).then((outcome) => {
+      if (editTokenRef.current !== token) return;
+      setSaving(false);
+      if (outcome?.ok === false) {
+        writeFailedRef.current = true;
+        commitGuardRef.current = false;
+        setInputError(outcome.message);
+        return;
+      }
+      setEditing(false);
+    });
+  };
+  // Guarded against a double-fire: the editor stays mounted while the write
+  // is in flight, and the browser also emits a blur for Enter's interaction.
   const commitEdit = () => {
     if (commitGuardRef.current) return;
     if (isNumericKind) {
@@ -268,20 +305,13 @@ function TableCell({
         setInputError(parsed.error);
         return;
       }
-      commitGuardRef.current = true;
-      setEditing(false);
-      setInputError(null);
-      // `updateField` never rejects: its own `.catch` reports the failure
-      // through `notify.error`, so there is nothing left to handle here.
-      void actions.updateField?.(doc, fieldPath, parsed.value);
+      submit(parsed.value);
       return;
     }
-    commitGuardRef.current = true;
-    setEditing(false);
     // An unchanged value still reaches `updateField`, which is now the same
     // guarded builder the Document Editor uses (W18 §5b: an empty diff sends
     // no request) — one no-op rule instead of a second one duplicated here.
-    void actions.updateField?.(doc, fieldPath, draft);
+    submit(draft);
   };
 
   // S9379 — an `autoFocus` attribute is a Sonar finding regardless of intent;
@@ -395,9 +425,12 @@ function TableCell({
             aria-label={`Edit ${fieldPath}`}
             value={draft}
             inputMode={isNumericKind ? 'decimal' : undefined}
+            readOnly={saving}
+            aria-busy={saving || undefined}
             onChange={(e) => {
               setDraft(e.target.value);
               setInputError(null);
+              writeFailedRef.current = false;
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -410,7 +443,9 @@ function TableCell({
                 cancelEdit();
               }
             }}
-            onBlur={commitEdit}
+            onBlur={() => {
+              if (!writeFailedRef.current) commitEdit();
+            }}
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}

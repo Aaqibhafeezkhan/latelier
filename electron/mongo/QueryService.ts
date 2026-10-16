@@ -3,6 +3,7 @@ import type { FileHandle } from 'node:fs/promises';
 import type { Sort } from 'mongodb';
 import type { FindInput, FindResultWire, ExplainInput, QueryExportInput, QueryExportResult } from '@shared/types';
 import {
+  ByteCapExceededError,
   DEFAULT_MAX_EJSON_BYTES,
   ejsonEncode,
   ejsonEncodeArrayJson,
@@ -10,7 +11,7 @@ import {
   parseEjsonDocument,
 } from './ejson.ts';
 import { classifyMongoOpError } from './errors.ts';
-import { SystemError, ValidationError } from '../errors.ts';
+import { SystemError, ValidationError, type AppError } from '../errors.ts';
 import type { MongoPool } from './MongoPool.ts';
 import type { Logger } from '../log.ts';
 import { logRecentWriteFailure, type RecentQueryService } from '../services/RecentQueryService.ts';
@@ -49,14 +50,36 @@ function jsonArrayElementText(text: string): string {
     .join('\n');
 }
 
+/** The ceilings `find` enforces; a constructor input so a test can lower them. */
+export interface QueryLimits {
+  maxFindBytes?: number;
+  queryTimeoutMs?: number;
+}
+
+const MIB = 1024 * 1024;
+
+function describeBytes(bytes: number): string {
+  return bytes >= MIB ? `${bytes / MIB} MB` : `${bytes} bytes`;
+}
+
 export class QueryService {
   private pool: MongoPool;
   private recent: RecentQueryService;
   private active = new Map<string, AbortController>();
   private exportCap: number;
   private log: Logger | undefined;
+  private maxFindBytes: number;
+  private queryTimeoutMs: number;
 
-  constructor(pool: MongoPool, recent: RecentQueryService, exportCap = DEFAULT_EXPORT_CAP, log?: Logger) {
+  constructor(
+    pool: MongoPool,
+    recent: RecentQueryService,
+    exportCap = DEFAULT_EXPORT_CAP,
+    log?: Logger,
+    limits: QueryLimits = {},
+  ) {
+    this.maxFindBytes = limits.maxFindBytes ?? DEFAULT_MAX_EJSON_BYTES;
+    this.queryTimeoutMs = limits.queryTimeoutMs ?? QUERY_TIMEOUT_MS;
     this.pool = pool;
     this.recent = recent;
     this.exportCap = exportCap;
@@ -96,13 +119,13 @@ export class QueryService {
           limit,
           skip: input.skip,
           signal: ctrl.signal,
-          maxTimeMS: QUERY_TIMEOUT_MS,
+          maxTimeMS: this.queryTimeoutMs,
         })
         .toArray();
       const durationMs = Date.now() - t0;
       const documentsJson = ejsonEncodeArrayJson(docs, {
         relaxed: input.ejsonRelaxed ?? false,
-        maxBytes: DEFAULT_MAX_EJSON_BYTES,
+        maxBytes: this.maxFindBytes,
       });
       // Fire-and-forget: writing recent-query history must not block the
       // result returning to the renderer, nor may its failure fail the query.
@@ -113,7 +136,7 @@ export class QueryService {
       return { documentsJson, durationMs, hasMore: docs.length === limit };
     } catch (err) {
       const durationMs = Date.now() - t0;
-      const classified = classifyMongoOpError(err);
+      const classified = this.explainFindCap(classifyMongoOpError(err));
       void this.recent
         .recordFind(input, durationMs, 0, classified.code)
         .catch((e: unknown) => logRecentWriteFailure(this.log, e));
@@ -121,6 +144,28 @@ export class QueryService {
     } finally {
       if (input.cancelToken) this.active.delete(input.cancelToken);
     }
+  }
+
+  /**
+   * The two ceilings a find can hit say what they are and what to change,
+   * not a byte count under `INTERNAL` or the driver's "MaxTimeMS" wording.
+   * The raw message stays in `details` for the log and the diagnostic bundle.
+   */
+  private explainFindCap(err: AppError): AppError {
+    if (err instanceof ByteCapExceededError) {
+      return new ValidationError(
+        `The result is larger than ${describeBytes(this.maxFindBytes)}. Add a filter, a projection, or lower the rows per page.`,
+        { mongoMessage: err.message },
+      );
+    }
+    if (err.code === 'TIMEOUT') {
+      return new SystemError(
+        'TIMEOUT',
+        `The query was stopped after ${this.queryTimeoutMs / 1000} s. Add an index or narrow the filter.`,
+        { mongoMessage: err.message },
+      );
+    }
+    return err;
   }
 
   async count(

@@ -21,6 +21,7 @@ import { groupTabsByConnection } from './Workspace/tabGroups';
 import {
   type CollectionWorkspaceActions,
   type CollectionWorkspaceMeta,
+  type UpdateFieldOutcome,
 } from './Workspace/context';
 import { useQueryRunner } from './Workspace/useQueryRunner';
 import type { RunnerTarget } from './Workspace/useQueryRunner';
@@ -50,6 +51,8 @@ import {
 } from './Workspace/builder';
 import type { SuggestionContext } from '../features/fieldSuggestions/types';
 import { invalidateSampleSchemaCache } from '../features/fieldSuggestions/sources/sampleSchemaSource';
+
+const OK: UpdateFieldOutcome = { ok: true };
 
 function WorkspaceInner() {
   const T = themeVars;
@@ -402,13 +405,14 @@ function WorkspaceInner() {
   // has landed to disable itself and stop a second click mid-flight from
   // firing a guard built on the value the first click is still saving.
   const updateField = React.useCallback(
-    (doc: unknown, fieldPath: string, newValue: unknown): Promise<void> => {
+    (doc: unknown, fieldPath: string, newValue: unknown): Promise<UpdateFieldOutcome> => {
       const a = activeCollectionRef.current;
-      if (!a) return Promise.resolve();
+      if (!a) return Promise.resolve({ ok: false, message: 'No collection is open to save to' });
       const revived = ejsonParse<unknown>(JSON.stringify(doc));
       if (!isPlainDocument(revived)) {
-        notify.error('Cannot edit a document without an _id');
-        return Promise.resolve();
+        const message = 'Cannot edit a document without an _id';
+        notify.error(message);
+        return Promise.resolve({ ok: false, message });
       }
       const original = revived as Record<string, unknown>;
       const draft = setAtSegments(original, [fieldPath], newValue);
@@ -416,10 +420,11 @@ function WorkspaceInner() {
       try {
         request = buildUpdateRequest(original, draft);
       } catch (e) {
-        notify.error(getErrorMessage(e, 'Cannot save this value'));
-        return Promise.resolve();
+        const message = getErrorMessage(e, 'Cannot save this value');
+        notify.error(message);
+        return Promise.resolve({ ok: false, message });
       }
-      if (request === null) return Promise.resolve(); // unchanged — same field, same value
+      if (request === null) return Promise.resolve(OK); // unchanged — same field, same value
       return api.doc
         .updateOne({
           connectionId: a.connectionId,
@@ -428,14 +433,13 @@ function WorkspaceInner() {
           filterJson: request.filterJson,
           updateJson: request.updateJson,
         })
-        .then(({ matchedCount, auditId }) => {
+        .then(({ matchedCount, auditId }): Promise<UpdateFieldOutcome> | UpdateFieldOutcome => {
           // Guarded: nothing matching means the field (or the document)
           // changed since it was loaded, not that the write landed unseen.
           if (matchedCount === 0) {
-            notify.error('This document changed since it was loaded; the edit was not saved.', {
-              title: 'Update failed',
-            });
-            return;
+            const message = 'This document changed since it was loaded; the edit was not saved.';
+            notify.error(message, { title: 'Update failed' });
+            return { ok: false, message };
           }
           // Quick Edit can change a field's type, and never passes through
           // `useDocumentDialogs`, so it drops the field-suggestion sample itself.
@@ -459,10 +463,12 @@ function WorkspaceInner() {
             invalidateSampleSchemaCache(a.connectionId, a.dbName, a.collection);
             void rerunEdited();
           });
-          return refreshed;
+          return refreshed.then(() => OK);
         })
-        .catch((e: unknown) => {
-          notify.error(getErrorMessage(e, 'Update failed'), { title: 'Update failed' });
+        .catch((e: unknown): UpdateFieldOutcome => {
+          const message = getErrorMessage(e, 'Update failed');
+          notify.error(message, { title: 'Update failed' });
+          return { ok: false, message };
         });
     },
     [activeCollectionRef, resolveRunnerTarget, run],
