@@ -1,6 +1,7 @@
 import React from 'react';
 import { api, getErrorMessage } from '../../api/atelier';
 import type { CollectionDetails } from '@shared/ipc';
+import { onCollectionChanged } from '../../state/collectionChanges';
 
 /**
  * One collection's `meta:collectionDetails`, read on entry and on `reload`.
@@ -45,6 +46,15 @@ export function useCollectionDetails(connectionId: string, dbName: string, colle
     };
   }, [reload]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  // A view modified from the navigator changes what this tab shows ("View on X").
+  React.useEffect(
+    () =>
+      onCollectionChanged((c) => {
+        if (c.connectionId === connectionId && c.dbName === dbName && c.collection === collection) void reload();
+      }),
+    [connectionId, dbName, collection, reload],
+  );
 
   return { details, error, loading, reload };
 }

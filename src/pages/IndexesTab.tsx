@@ -106,6 +106,7 @@ export function IndexesTab({
   collection,
   initialCreate,
   onInitialCreateConsumed,
+  onChanged,
 }: {
   connectionId: string;
   dbName: string;
@@ -121,6 +122,8 @@ export function IndexesTab({
    * ago. Omitted for the same reason `initialCreate` can be omitted.
    */
   onInitialCreateConsumed?: () => void;
+  /** An index was created or dropped, so figures derived from them (the statistics header) are stale. */
+  onChanged?: () => void;
 }) {
   const T = themeVars;
   const target = React.useMemo(() => ({ dbName, collection }), [dbName, collection]);
@@ -307,6 +310,7 @@ export function IndexesTab({
               setDrawerOpen(false);
               setCreatePrefill(null);
               void loadIndexes(target);
+              onChanged?.();
             }}
             connectionId={connectionId}
             initialFields={createPrefill?.keys.map((k) => ({ field: k.field, direction: k.direction }))}
@@ -322,6 +326,7 @@ export function IndexesTab({
             onDropped={() => {
               setDropName(null);
               void loadIndexes(target);
+              onChanged?.();
             }}
             returnFocusTo={dropReturnFocus}
             connectionId={connectionId}

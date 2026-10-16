@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { StructureView } from '../../src/pages/Workspace/StructureView';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
+import { notifyCollectionChanged } from '../../src/state/collectionChanges';
 import { DEFAULT_SCHEMA_TAB_STATE } from '@shared/defaults';
 import type { CollectionDetails } from '@shared/ipc';
 import { ejsonParse, ejsonStringify } from '../../src/utils/ejson';
@@ -790,5 +791,109 @@ describe('Structure view — header count on return to Documents', () => {
 
     await waitFor(() => expect(screen.getByText('25')).toBeTruthy());
     expect(listCollections.mock.calls.length).toBeGreaterThan(callsBeforeReturn);
+  });
+});
+
+describe('StructureView — the statistics header follows writes', () => {
+  const NAMED_INDEX: IndexInfo = { ...ID_INDEX, name: 'email_1', isIdIndex: false, key: [{ field: 'email', direction: 1 }] };
+  const withIndexCount = (indexCount: number): CollectionDetails => ({
+    ...DETAILS,
+    stats: { ...DETAILS.stats!, indexCount, totalIndexSizeBytes: 4096 * indexCount },
+  });
+
+  it('shows the new index count and size after an index is created', async () => {
+    let created = false;
+    installAtelierMock({
+      index: {
+        list: async () => (created ? [ID_INDEX, NAMED_INDEX] : [ID_INDEX]),
+        create: async () => {
+          created = true;
+          return { name: 'email_1' };
+        },
+      },
+      meta: {
+        collectionDetails: async () => withIndexCount(created ? 3 : 2),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('2 · 8.0 KB')).toBeTruthy());
+
+    await userEvent.click(screen.getByText('+ New index'));
+    await userEvent.type(await screen.findByLabelText('Field 1'), 'email');
+    await userEvent.click(screen.getByText('Create index'));
+
+    await waitFor(() => expect(within(stats).getByText('3 · 12.0 KB')).toBeTruthy());
+  });
+
+  it('shows the new index count after an index is dropped', async () => {
+    let dropped = false;
+    installAtelierMock({
+      index: {
+        list: async () => (dropped ? [ID_INDEX] : [ID_INDEX, NAMED_INDEX]),
+        drop: async () => {
+          dropped = true;
+          return { dropped: true as const };
+        },
+      },
+      meta: {
+        collectionDetails: async () => withIndexCount(dropped ? 1 : 2),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('2 · 8.0 KB')).toBeTruthy());
+
+    await userEvent.click(await screen.findByLabelText('Drop index email_1'));
+    await userEvent.type(await screen.findByLabelText('Confirm index name'), 'email_1');
+    await userEvent.click(screen.getByText('Drop').closest('button')!);
+
+    await waitFor(() => expect(within(stats).getByText('1 · 4.0 KB')).toBeTruthy());
+  });
+
+  it('shows the new source when its view is modified from the navigator', async () => {
+    let viewOn = 'src';
+    const collectionDetails = vi.fn(async () => ({
+      name: 'orders',
+      type: 'view' as const,
+      capped: false,
+      options: { viewOn, pipeline: '[]' },
+    }));
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
+    });
+
+    renderStructure();
+    const stats = await screen.findByRole('region', { name: 'Statistics' });
+    await waitFor(() => expect(within(stats).getByText('View on src')).toBeTruthy());
+
+    viewOn = 'dst';
+    act(() => notifyCollectionChanged({ connectionId: 'c1', dbName: 'shop', collection: 'orders' }));
+
+    await waitFor(() => expect(within(stats).getByText('View on dst')).toBeTruthy());
+  });
+
+  it('ignores a change to another collection', async () => {
+    const collectionDetails = vi.fn(async () => DETAILS);
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: { collectionDetails, sampleSchema: async () => ({ docs: [] }) },
+    });
+
+    renderStructure();
+    await waitFor(() => expect(collectionDetails).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      notifyCollectionChanged({ connectionId: 'c1', dbName: 'shop', collection: 'customers' });
+      notifyCollectionChanged({ connectionId: 'c2', dbName: 'shop', collection: 'orders' });
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(collectionDetails).toHaveBeenCalledTimes(1);
   });
 });
