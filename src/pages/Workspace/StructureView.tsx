@@ -51,7 +51,8 @@ export function StructureView({
         initialCreate={initialCreate}
         onInitialCreateConsumed={onInitialCreateConsumed}
       />
-      {details && details.type !== 'view' && (
+      {/* The server refuses collMod rules on a view and on a time-series collection. */}
+      {details?.type === 'collection' && (
         <ValidationSection
           connectionId={connectionId}
           dbName={dbName}

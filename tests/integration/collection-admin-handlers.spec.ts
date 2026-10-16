@@ -200,6 +200,7 @@ describe('collection:* / database:* handlers via router', () => {
     it.each([
       ['validation keys', { validator: '{}', validationLevel: 'moderate', validationAction: 'warn' }],
       ['view keys', { viewOn: 'src', pipeline: '[]' }],
+      ['the errorAndLog action', { validationAction: 'errorAndLog' }],
     ])('forwards a valid payload with %s to the service', async (_label, options) => {
       const spy = vi.fn(async () => ({ ok: true as const }));
       setupWith({ modify: spy });

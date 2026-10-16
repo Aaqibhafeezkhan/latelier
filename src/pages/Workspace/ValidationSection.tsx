@@ -3,6 +3,8 @@ import { Button } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
 import { api, getErrorMessage } from '../../api/atelier';
+import { SubmitButton } from '../../components/SubmitButton';
+import { ejsonParse, ejsonStringifyReadable } from '../../utils/ejson';
 import type { CollectionDetails } from '@shared/ipc';
 import type { ValidationAction, ValidationLevel } from '@shared/types';
 
@@ -16,7 +18,7 @@ interface Props {
 }
 
 const LEVELS: ValidationLevel[] = ['off', 'strict', 'moderate'];
-const ACTIONS: ValidationAction[] = ['error', 'warn'];
+const ACTIONS: ValidationAction[] = ['error', 'warn', 'errorAndLog'];
 
 /**
  * Structure's validation rules (W16 §15): the collection's validator, level
@@ -30,9 +32,10 @@ export function ValidationSection({ connectionId, dbName, collection, details, o
   // listCollections reports only what was set, so an absent value is the server default.
   const level = details.options.validationLevel ?? 'strict';
   const action = details.options.validationAction ?? 'error';
-  // A cleared validator reads back as `{}`, which is no rules at all.
-  const rules = validator ? (JSON.parse(validator) as Record<string, unknown>) : {};
-  const pretty = Object.keys(rules).length > 0 ? JSON.stringify(rules, null, 2) : '';
+  // A cleared validator reads back as `{}`, which is no rules at all. Shown and
+  // edited without canonical wrappers; the readable form re-parses to the same BSON.
+  const rules = validator ? ejsonParse<Record<string, unknown>>(validator) : {};
+  const pretty = Object.keys(rules).length > 0 ? ejsonStringifyReadable(rules, 2) : '';
 
   const [editing, setEditing] = React.useState(false);
   const [text, setText] = React.useState('');
@@ -65,8 +68,9 @@ export function ValidationSection({ connectionId, dbName, collection, details, o
         collection,
         options: { validator: nextRules, validationLevel: draftLevel, validationAction: draftAction },
       });
-      setEditing(false);
+      // Leave edit mode only once the new details are in, so the old rules never flash back.
       await onSaved();
+      setEditing(false);
     } catch (e) {
       setError(getErrorMessage(e, 'Could not save the rules'));
     } finally {
@@ -163,9 +167,9 @@ export function ValidationSection({ connectionId, dbName, collection, details, o
               <Button size="compact-xs" variant="subtle" onClick={() => setEditing(false)} disabled={saving}>
                 Cancel
               </Button>
-              <Button size="compact-xs" variant="filled" onClick={() => void save()} disabled={saving}>
+              <SubmitButton size="compact-xs" variant="filled" onClick={() => void save()} submitting={saving}>
                 Save
-              </Button>
+              </SubmitButton>
             </div>
           </>
         ) : (

@@ -19,7 +19,7 @@ const CreateOptions = z.object({
   collation: z.string().optional(),
   validator: z.string().optional(),
   validationLevel: z.enum(['off', 'strict', 'moderate']).optional(),
-  validationAction: z.enum(['error', 'warn']).optional(),
+  validationAction: z.enum(['error', 'warn', 'errorAndLog']).optional(),
   viewOn: NonEmpty.optional(),
   pipeline: z.string().optional(),
 }).refine((o) => o.pipeline === undefined || o.viewOn !== undefined, {
@@ -35,7 +35,7 @@ const ModifyOptions = z
   .object({
     validator: z.string().optional(),
     validationLevel: z.enum(['off', 'strict', 'moderate']).optional(),
-    validationAction: z.enum(['error', 'warn']).optional(),
+    validationAction: z.enum(['error', 'warn', 'errorAndLog']).optional(),
     viewOn: NonEmpty.optional(),
     pipeline: z.string().optional(),
   })

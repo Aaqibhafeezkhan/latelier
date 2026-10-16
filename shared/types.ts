@@ -1131,7 +1131,8 @@ export interface IndexDropInput {
 // ─── Collection / database admin (T1.1) ──────────────────────────────────────
 
 export type ValidationLevel = 'off' | 'strict' | 'moderate';
-export type ValidationAction = 'error' | 'warn';
+/** `errorAndLog` is newer than MongoDB 8.0: 8.0.5 refuses it in `collMod` as an invalid enum value. */
+export type ValidationAction = 'error' | 'warn' | 'errorAndLog';
 
 export interface CollectionCreateOptions {
   capped?: boolean;
