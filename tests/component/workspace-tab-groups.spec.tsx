@@ -11,6 +11,7 @@ import {
 } from '../helpers/atelierMock';
 import { DEFAULT_AGGREGATION_TAB_STATE } from '@shared/defaults';
 import type { WorkspaceTab } from '@shared/types';
+import { notify } from '../../src/theme/notifications';
 
 /**
  * X16.2, spec §4.4 — a tab says which Connection it belongs to.
@@ -1110,6 +1111,36 @@ describe('the tab context menu closes in bulk and reveals a tab in the sidebar',
     await waitFor(() => expect(closedIds(close)).toEqual(['a', 'c']));
     await waitFor(() => expect(tabOrder()).toHaveLength(1));
     expect(tab('bravo').getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('a tab that fails to close is reported, and the rest still close', async () => {
+    const { close } = mountTabs([
+      { id: 'a', connectionId: 'c1', collection: 'alpha', isActive: true },
+      { id: 'b', connectionId: 'c1', collection: 'bravo' },
+      { id: 'c', connectionId: 'c1', collection: 'charlie' },
+      { id: 'd', connectionId: 'c1', collection: 'delta' },
+    ]);
+    const realClose = close.getMockImplementation()!;
+    close.mockImplementation(async (id: string) => {
+      if (id === 'c') throw new Error('database is locked');
+      return realClose(id);
+    });
+    const notifyError = vi.spyOn(notify, 'error');
+    try {
+      await waitFor(() => expect(tabOrder()).toHaveLength(4));
+
+      fireEvent.contextMenu(tab('alpha'));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Close others' }));
+
+      await waitFor(() => expect(closedIds(close)).toEqual(['b', 'c', 'd']));
+      await waitFor(() =>
+        expect(notifyError).toHaveBeenCalledWith('1 tab could not be closed: database is locked'),
+      );
+      await waitFor(() => expect(tabOrder()).toHaveLength(2));
+      expect(strip().getByRole('tab', { name: /^charlie / })).toBeTruthy();
+    } finally {
+      notifyError.mockRestore();
+    }
   });
 
   it('disables Close others when every other tab is pinned', async () => {

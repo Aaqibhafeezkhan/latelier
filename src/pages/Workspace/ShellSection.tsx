@@ -3,6 +3,8 @@ import { AppShell } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { isKnownNotConnected } from '../../state/connections';
 import { confirmDestructive } from '../../utils/confirm';
+import { getErrorMessage } from '../../api/atelier';
+import { notify } from '../../theme/notifications';
 import type { WorkspaceTab, ConnectionSummary } from '@shared/types';
 import type { WorkspaceTabsState } from '../../state/workspaceTabs';
 import { ConnectionSwitcher, type ConnectionSwitcherProps } from '../../features/connections/ConnectionSwitcher';
@@ -101,8 +103,30 @@ export function ShellSection({
       });
       if (!proceed) return;
     }
-    if (tabs.activeId && ids.includes(tabs.activeId)) await tabs.setActive(keepId);
-    for (const id of ids) await tabs.close(id);
+    // One tab failing to close (or to take focus) never stops the rest; the
+    // failures are reported once at the end.
+    if (tabs.activeId && ids.includes(tabs.activeId)) {
+      try {
+        await tabs.setActive(keepId);
+      } catch (err) {
+        notify.error(getErrorMessage(err, 'Could not switch to the tab'));
+      }
+    }
+    let failed = 0;
+    let lastError: unknown;
+    for (const id of ids) {
+      try {
+        await tabs.close(id);
+      } catch (err) {
+        failed++;
+        lastError = err;
+      }
+    }
+    if (failed > 0) {
+      notify.error(
+        `${failed === 1 ? '1 tab' : `${failed} tabs`} could not be closed: ${getErrorMessage(lastError, 'close failed')}`,
+      );
+    }
   };
 
   // Activating the tab makes the navigator expand its database and load its
