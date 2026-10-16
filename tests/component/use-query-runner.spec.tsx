@@ -625,37 +625,122 @@ describe('useQueryRunner', () => {
       expect(planned[0][1].lastRun.documents).toBe(documents);
     });
 
-    it('re-explains on a page change, with the same filter, so the badge follows every run', async () => {
-      const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
+    // Shared by the page-change tests below: a runner whose first run has
+    // fully landed (documents, then its plan) before the next run starts.
+    async function runnerAfterFirstRun(explainImpl?: IpcApi['query']['explain']) {
+      const explainSpy = vi.fn<IpcApi['query']['explain']>(
+        explainImpl ?? (async () => ({ plan, verbosity: 'queryPlanner' })),
+      );
       installAtelierMock({
         query: {
-          find: async () => ({ documents: [], durationMs: 1, hasMore: false }),
+          find: async () => ({ documents: [{ _id: 1 }], durationMs: 1, hasMore: false }),
           count: async () => ({ count: 0 }),
           explain: explainSpy,
         },
       });
       const patch = vi.fn();
-      const { result } = renderHook(() =>
-        useQueryRunner({
-          active: makeTarget({ queryRaw: '{"a":1}' }),
-          patchCollectionState: patch,
-          loadingDelayMs: 0,
-        }),
+      const target = makeTarget({ queryRaw: '{"a":1}' });
+      const { result, rerender } = renderHook(
+        ({ active }) => useQueryRunner({ active, patchCollectionState: patch, loadingDelayMs: 0 }),
+        { initialProps: { active: target } },
       );
+      await act(async () => {
+        await result.current.run();
+      });
+      return { explainSpy, patch, target, result, rerender };
+    }
+    const planPatches = (patch: ReturnType<typeof vi.fn>) =>
+      patch.mock.calls.filter((c) => c[1].lastRun?.plan === plan);
+
+    it('does not explain again on a page change, and the new page keeps the plan badge', async () => {
+      const { explainSpy, patch, result } = await runnerAfterFirstRun();
+      await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+
+      await act(async () => {
+        await result.current.run({ page: 2 });
+      });
+
+      expect(explainSpy).toHaveBeenCalledTimes(1);
+      // The page's own result carries the plan from the start, not a badge-less gap.
+      expect(planPatches(patch)).toHaveLength(2);
+    });
+
+    it('does not explain again when only the page size changes', async () => {
+      const { explainSpy, patch, result } = await runnerAfterFirstRun();
+      await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+
+      await act(async () => {
+        await result.current.run({ pageSize: 25, page: 0 });
+      });
+
+      expect(explainSpy).toHaveBeenCalledTimes(1);
+      expect(planPatches(patch)).toHaveLength(2);
+    });
+
+    it('explains again on an explicit Run of the same query', async () => {
+      const { explainSpy, patch, result } = await runnerAfterFirstRun();
+      await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
 
       await act(async () => {
         await result.current.run();
       });
+
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+    });
+
+    it('explains a page change again while the first plan has not arrived', async () => {
+      const { explainSpy, result } = await runnerAfterFirstRun(() => new Promise<never>(() => {}));
+
       await act(async () => {
         await result.current.run({ page: 2 });
       });
 
       await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
-      expect(explainSpy.mock.calls[1][0].filter).toBe('{"a":1}');
-      expect(explainSpy.mock.calls[1][0]).not.toHaveProperty('skip');
-      await waitFor(() =>
-        expect(patch.mock.calls.filter((c) => c[1].lastRun?.plan === plan)).toHaveLength(2),
-      );
+    });
+
+    // A page change reads the tab's current query, which may differ from the
+    // one last explained (edited since, not yet Run).
+    it.each([
+      ['filter', { queryRaw: '{"a":2}' }],
+      ['sort', { queryRaw: '{"a":1}', builder: { projection: [], sort: '{"b":1}', limit: '' } }],
+      ['projection', { queryRaw: '{"a":1}', builder: { projection: [], sort: '', limit: '', projectionRaw: '{"a":1}' } }],
+      ['limit', { queryRaw: '{"a":1}', builder: { projection: [], sort: '', limit: '100' } }],
+    ] as [string, Partial<CollectionTabState>][])(
+      'explains a page change again when the %s differs from the explained query',
+      async (_, state) => {
+        const { explainSpy, patch, result, rerender } = await runnerAfterFirstRun();
+        await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+        rerender({ active: makeTarget(state) });
+
+        await act(async () => {
+          await result.current.run({ page: 1 });
+        });
+
+        await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+      },
+    );
+
+    it('explains again when the filter changes together with the page', async () => {
+      const { explainSpy, patch, result } = await runnerAfterFirstRun();
+      await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+
+      await act(async () => {
+        await result.current.run({ queryRaw: '{"a":2}', page: 1 });
+      });
+
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+    });
+
+    it('explains again for another collection on a page change', async () => {
+      const { explainSpy, patch, target, result } = await runnerAfterFirstRun();
+      await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+
+      await act(async () => {
+        await result.current.run({ page: 1 }, { ...target, collection: 'orders' });
+      });
+
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+      expect(explainSpy.mock.calls[1][0].collection).toBe('orders');
     });
 
     it('does not explain on the past-cap short-circuit', async () => {
