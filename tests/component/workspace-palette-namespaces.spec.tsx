@@ -272,9 +272,9 @@ describe('the palette shares the navigator’s cache', () => {
     expect(listDatabases).toHaveBeenCalledTimes(1);
     const perDb = listCollections.mock.calls.map(([a]) => `${a.connectionId}/${a.dbName}`);
     // One listing per database for the navigator and the palette together.
-    // The second `shop` call is the open tab's header reading fresh document
-    // and index counts, a separate consumer that never used either cache.
-    expect(perDb.sort((a, b) => a.localeCompare(b))).toEqual(['c1/crm', 'c1/shop', 'c1/shop']);
+    // The open tab's header reads its counts through collectionDetails, not
+    // listCollections, so it adds no listing of its own.
+    expect(perDb.sort((a, b) => a.localeCompare(b))).toEqual(['c1/crm', 'c1/shop']);
   });
 
   it('keeps the namespaces with the navigator collapsed, without fetching again', async () => {

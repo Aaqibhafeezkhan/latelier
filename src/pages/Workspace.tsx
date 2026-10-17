@@ -347,10 +347,29 @@ function WorkspaceInner() {
     const target = structureScrollRef.current;
     if (!target || activeView !== 'structure') return;
     structureScrollRef.current = null;
-    document
-      .querySelector<HTMLElement>(`[role="region"][aria-label="${target}"]`)
-      // jsdom has no scrollIntoView.
-      ?.scrollIntoView?.({ block: 'start' });
+    const find = () =>
+      document.querySelector<HTMLElement>(`[role="region"][aria-label="${target}"]`);
+    // jsdom has no scrollIntoView.
+    const scroll = (el: HTMLElement) => el.scrollIntoView?.({ block: 'start' });
+    const now = find();
+    if (now) {
+      scroll(now);
+      return;
+    }
+    // Structure holds its sections back until the collection details settle,
+    // so the region may mount after this effect; wait for it, but not forever.
+    const observer = new MutationObserver(() => {
+      const el = find();
+      if (!el) return;
+      observer.disconnect();
+      scroll(el);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    const timer = window.setTimeout(() => observer.disconnect(), 5000);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(timer);
+    };
   }, [structureScrollNonce, activeView]);
 
   // Stable callbacks for the major panels, reading state via the `*Ref` bag
