@@ -601,6 +601,26 @@ describe('WorkspaceStateService', () => {
     expect(storedScript.source).toBe('db.c.find()');
   });
 
+  it('update stores the schema numeric range of a plain field but not of a secret-named one', () => {
+    const coll = svc.openCollection({ connectionId: 'conn', dbName: 'd', collection: 'c' });
+    const numeric = { min: 1, max: 9, avg: 4.5 };
+    svc.update(coll.id, {
+      state: {
+        schema: {
+          sampleSize: 100,
+          entries: [
+            { path: 'price', frequency: 1, types: { number: 3 }, distinct: 3, numeric },
+            { path: 'user.password', frequency: 1, types: { number: 3 }, distinct: 3, numeric },
+          ],
+        },
+      },
+    });
+    const entries = (rawState(coll.id).schema as { entries: Array<Record<string, unknown>> }).entries;
+    expect(entries[0]).toMatchObject({ path: 'price', distinct: 3, numeric });
+    expect(entries[1]).toMatchObject({ path: 'user.password', distinct: 3 });
+    expect(entries[1]).not.toHaveProperty('numeric');
+  });
+
   it('a later update does not resurrect or re-store results, and legacy stored results are cleaned on the next write', () => {
     const coll = svc.openCollection({ connectionId: 'conn', dbName: 'd', collection: 'c' });
     tmp.db

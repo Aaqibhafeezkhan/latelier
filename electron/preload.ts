@@ -42,6 +42,7 @@ const api: IpcApi = {
   conn: {
     list: () => call(IPC_CHANNELS.connList),
     get: (id) => call(IPC_CHANNELS.connGet, { id }),
+    getUri: (id) => call(IPC_CHANNELS.connGetUri, { id }),
     create: (input) => call(IPC_CHANNELS.connCreate, input),
     update: (id, patch) => call(IPC_CHANNELS.connUpdate, { id, patch }),
     delete: (id) => call(IPC_CHANNELS.connDelete, { id }),
@@ -99,6 +100,7 @@ const api: IpcApi = {
     listDatabases: (input) => call(IPC_CHANNELS.metaListDatabases, input),
     listCollections: (input) => call(IPC_CHANNELS.metaListCollections, input),
     sampleSchema: (input) => call(IPC_CHANNELS.metaSampleSchema, input),
+    collectionDetails: (input) => call(IPC_CHANNELS.metaCollectionDetails, input),
   },
 
   index: {
@@ -111,6 +113,7 @@ const api: IpcApi = {
     create: (input) => call(IPC_CHANNELS.collectionCreate, input),
     drop: (input) => call(IPC_CHANNELS.collectionDrop, input),
     rename: (input) => call(IPC_CHANNELS.collectionRename, input),
+    modify: (input) => call(IPC_CHANNELS.collectionModify, input),
   },
 
   database: {

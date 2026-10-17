@@ -81,6 +81,7 @@
     "src/features/fieldSuggestions/aggGrammar.ts",
     "src/features/fieldSuggestions/placement.ts",
     "src/pages/Workspace/schemaSummary.ts",
+    "src/utils/humanBytes.ts",
     "src/commands/rank.ts",
     "src/commands/shortcutLabel.ts",
     "electron/services/tabStateResults.ts",

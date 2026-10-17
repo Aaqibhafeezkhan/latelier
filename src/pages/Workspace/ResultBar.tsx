@@ -9,6 +9,9 @@ import { notify } from '../../theme/notifications';
 import { DEFAULT_PAGE_SIZE_PREF_KEY, PAGE_SIZE_OPTIONS } from '../../state/workspaceTabs';
 import { FieldsControl } from './FieldsControl';
 import { ExportDialog } from './ExportDialog';
+import { ExplainDrawer } from './Aggregation/ExplainDrawer';
+import { useFindExplain } from './useFindExplain';
+import { summarizeExplain } from '../../utils/explainSummary';
 import { ImportDialog } from './ImportDialog';
 import { compileFindOptions, findProblem } from './builder';
 import { LIMIT_EXPLANATION, limitChipText } from './queryCaps';
@@ -47,6 +50,10 @@ export function ResultBar() {
   const isReadOnly = !!meta.isReadOnly;
   const [exportOpen, setExportOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
+  const [planOpen, setPlanOpen] = React.useState(false);
+  // The plan badge's drawer re-fetches only when the verbosity changes, and
+  // then asks about the committed filter text, like any other read surface.
+  const { runExplain, onCreateIndex } = useFindExplain(() => state.queryRaw);
 
   // X14 §5 — the dangerous half of the defect this ticket exists for.
   // A refused filter never re-runs, so `lastRun` keeps describing the query
@@ -64,6 +71,15 @@ export function ResultBar() {
   // have no working `run`, so they keep the plain label.
   const canRunHere = !isReadOnly && !isLoading && runProblem === null;
 
+  // #160 — what the last run's query did: the index it used, or a collection
+  // scan. Stale on the same rule as the count: the plan describes the query
+  // that ran, not the text now in the box.
+  const planSummary = summarizeExplain(lastRun?.plan);
+  const planLabel = planSummary?.collscan
+    ? 'no index'
+    : planSummary?.usesIndex
+      ? (planSummary.indexName ?? 'index')
+      : null;
   // The limit that actually applies (a coerced one shows as what it runs as).
   const limitChip = limitChipText(compileFindOptions(state.builder).limit);
 
@@ -278,6 +294,34 @@ export function ResultBar() {
 
       <span style={{ flex: 1 }} />
 
+      {planLabel !== null && (
+        <button
+          type="button"
+          data-testid="plan-badge"
+          aria-label={`Query plan: ${planLabel}${isStale ? ' (not current)' : ''}`}
+          title={planLabel}
+          onClick={() => setPlanOpen(true)}
+          style={{
+            fontSize: 10,
+            padding: '1px 6px',
+            maxWidth: 220,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+            borderRadius: T.rs,
+            cursor: 'pointer',
+            ...(isStale
+              ? { background: T.surface, color: T.textGhost, border: `1px solid ${T.border}` }
+              : planSummary?.collscan
+                ? { background: T.warnSoft, color: T.warnText, border: `1px solid ${T.warnBorder}` }
+                : { background: T.surfaceRaised, color: T.text, border: `1px solid ${T.border}` }),
+          }}
+        >
+          {planLabel}
+        </button>
+      )}
+
       {/* Fields control — one control for all three views; each view reads
           the same per-tab `columnConfig`. */}
       <FieldsControl />
@@ -352,6 +396,19 @@ export function ResultBar() {
             </Menu.Item>
           </Menu.Dropdown>
         </Menu>
+      )}
+
+      {planOpen && (
+        <ExplainDrawer
+          onClose={() => setPlanOpen(false)}
+          initialPlan={lastRun?.plan}
+          initialVerbosity="queryPlanner"
+          runExplain={runExplain}
+          stale={isStale}
+          // A suggestion built from the query now on screen would not be about
+          // the plan being read.
+          onCreateIndex={isStale ? undefined : onCreateIndex}
+        />
       )}
 
       {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}

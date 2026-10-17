@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { queryObjects } from 'node:v8';
 import type { IpcApi } from '@shared/ipc';
 import { act, renderHook, waitFor } from '../helpers/render';
 import { useQueryRunner } from '../../src/pages/Workspace/useQueryRunner';
@@ -444,6 +445,367 @@ describe('useQueryRunner', () => {
     expect(emptyCall).toBeDefined();
   });
 
+  describe('plan side-fire (plan badge)', () => {
+    const plan = { queryPlanner: { winningPlan: { stage: 'IXSCAN', indexName: 'a_1' } } };
+
+    it('explains a successful find once at queryPlanner and patches lastRun.plan', async () => {
+      const documents = [{ _id: 1 }];
+      const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents, durationMs: 4, hasMore: false }),
+          count: async () => ({ count: 1 }),
+          explain: explainSpy,
+        },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({
+          active: makeTarget({
+            queryRaw: '{"a":1}',
+            builder: { projection: [], sort: '{"b":-1}', limit: '', projectionRaw: '{"a":1}' },
+          }),
+          patchCollectionState: patch,
+          loadingDelayMs: 0,
+        }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+
+      await waitFor(() => {
+        const planned = patch.mock.calls.find((c) => c[1].lastRun?.plan !== undefined);
+        expect(planned?.[1].lastRun.plan).toBe(plan);
+        // The plan rides on the same run's result, not a fresh blank one.
+        expect(planned?.[1].lastRun.documents).toBe(documents);
+        expect(planned?.[1].lastRun.durationMs).toBe(4);
+      });
+      expect(explainSpy).toHaveBeenCalledTimes(1);
+      expect(explainSpy).toHaveBeenCalledWith({
+        connectionId: 'c1',
+        dbName: 'app',
+        collection: 'users',
+        filter: '{"a":1}',
+        sort: '{"b":-1}',
+        projection: '{"a":1}',
+        verbosity: 'queryPlanner',
+      });
+    });
+
+    it('does not delay the documents or the count behind the explain', async () => {
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents: [], durationMs: 1, hasMore: false }),
+          count: async () => ({ count: 9 }),
+          explain: () => new Promise<never>(() => {}),
+        },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({ active: makeTarget(), patchCollectionState: patch, loadingDelayMs: 0 }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+
+      await waitFor(() =>
+        expect(patch.mock.calls.some((c) => c[1].totalCount === 9)).toBe(true),
+      );
+      expect(patch.mock.calls.some((c) => c[1].lastRun?.documents !== undefined)).toBe(true);
+    });
+
+    it('a rejected explain leaves the documents patched, with no plan and no error', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents: [{ _id: 1 }], durationMs: 4, hasMore: false }),
+          count: async () => ({ count: 1 }),
+          explain: async () => {
+            throw new Error('explain refused');
+          },
+        },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({ active: makeTarget(), patchCollectionState: patch, loadingDelayMs: 0 }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+
+      await waitFor(() => expect(warn).toHaveBeenCalled());
+      const runs = patch.mock.calls.filter((c) => c[1].lastRun !== undefined);
+      expect(runs).toHaveLength(1);
+      expect(runs[0][1].lastRun.documents).toEqual([{ _id: 1 }]);
+      expect(runs[0][1].lastRun.plan).toBeUndefined();
+      expect(runs[0][1].lastRun.error).toBeUndefined();
+    });
+
+    it('a run superseded before its explain resolves never patches that stale plan', async () => {
+      let resolveExplain1: ((v: { plan: unknown; verbosity: string }) => void) | undefined;
+      const explain1 = new Promise<{ plan: unknown; verbosity: string }>((res) => {
+        resolveExplain1 = res;
+      });
+      const explainSpy = vi
+        .fn<IpcApi['query']['explain']>()
+        .mockImplementationOnce(() => explain1)
+        .mockImplementationOnce(async () => ({
+          plan: { queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } },
+          verbosity: 'queryPlanner',
+        }));
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents: [], durationMs: 1, hasMore: false }),
+          count: async () => ({ count: 0 }),
+          explain: explainSpy,
+        },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({ active: makeTarget(), patchCollectionState: patch, loadingDelayMs: 0 }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(1));
+      await act(async () => {
+        await result.current.run();
+      });
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+
+      await act(async () => {
+        resolveExplain1!({ plan, verbosity: 'queryPlanner' });
+        await explain1;
+      });
+      const planPatches = patch.mock.calls.filter((c) => c[1].lastRun?.plan !== undefined);
+      expect(planPatches).toHaveLength(1);
+      expect(planPatches[0][1].lastRun.plan).not.toBe(plan);
+    });
+
+    it('keeps run N\'s plan when the run that followed it was cancelled before it wrote anything', async () => {
+      let resolveExplain1: ((v: { plan: unknown; verbosity: string }) => void) | undefined;
+      const explain1 = new Promise<{ plan: unknown; verbosity: string }>((res) => {
+        resolveExplain1 = res;
+      });
+      const explainSpy = vi.fn<IpcApi['query']['explain']>().mockImplementationOnce(() => explain1);
+      const documents = [{ _id: 1 }];
+      const findSpy = vi
+        .fn<IpcApi['query']['find']>()
+        .mockImplementationOnce(async () => ({ documents, durationMs: 1, hasMore: false }))
+        .mockImplementationOnce(() => new Promise<never>(() => {}));
+      installAtelierMock({
+        query: { find: findSpy, count: async () => ({ count: 1 }), explain: explainSpy, cancel: async () => {} },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({ active: makeTarget(), patchCollectionState: patch, loadingDelayMs: 0 }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(1));
+      // Run N+1 starts (its find never settles) and is cancelled: it wrote no lastRun.
+      act(() => {
+        void result.current.run();
+      });
+      await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(2));
+      act(() => result.current.cancel());
+
+      await act(async () => {
+        resolveExplain1!({ plan, verbosity: 'queryPlanner' });
+        await explain1;
+      });
+
+      const planned = patch.mock.calls.filter((c) => c[1].lastRun?.plan === plan);
+      expect(planned).toHaveLength(1);
+      expect(planned[0][1].lastRun.documents).toBe(documents);
+    });
+
+    // Shared by the page-change tests below: a runner whose first run has
+    // fully landed (documents, then its plan) before the next run starts.
+    async function runnerAfterFirstRun(explainImpl?: IpcApi['query']['explain']) {
+      const explainSpy = vi.fn<IpcApi['query']['explain']>(
+        explainImpl ?? (async () => ({ plan, verbosity: 'queryPlanner' })),
+      );
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents: [{ _id: 1 }], durationMs: 1, hasMore: false }),
+          count: async () => ({ count: 0 }),
+          explain: explainSpy,
+        },
+      });
+      const patch = vi.fn();
+      const target = makeTarget({ queryRaw: '{"a":1}' });
+      const { result, rerender } = renderHook(
+        ({ active }) => useQueryRunner({ active, patchCollectionState: patch, loadingDelayMs: 0 }),
+        { initialProps: { active: target } },
+      );
+      await act(async () => {
+        await result.current.run();
+      });
+      return { explainSpy, patch, target, result, rerender };
+    }
+    const planPatches = (patch: ReturnType<typeof vi.fn>) =>
+      patch.mock.calls.filter((c) => c[1].lastRun?.plan === plan);
+
+    it('does not explain again on a page change, and the new page keeps the plan badge', async () => {
+      const { explainSpy, patch, result } = await runnerAfterFirstRun();
+      await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+
+      await act(async () => {
+        await result.current.run({ page: 2 });
+      });
+
+      expect(explainSpy).toHaveBeenCalledTimes(1);
+      // The page's own result carries the plan from the start, not a badge-less gap.
+      expect(planPatches(patch)).toHaveLength(2);
+    });
+
+    it('does not explain again when only the page size changes', async () => {
+      const { explainSpy, patch, result } = await runnerAfterFirstRun();
+      await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+
+      await act(async () => {
+        await result.current.run({ pageSize: 25, page: 0 });
+      });
+
+      expect(explainSpy).toHaveBeenCalledTimes(1);
+      expect(planPatches(patch)).toHaveLength(2);
+    });
+
+    it('explains again on an explicit Run of the same query', async () => {
+      const { explainSpy, patch, result } = await runnerAfterFirstRun();
+      await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+
+      await act(async () => {
+        await result.current.run();
+      });
+
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+    });
+
+    it('explains a page change again while the first plan has not arrived', async () => {
+      const { explainSpy, result } = await runnerAfterFirstRun(() => new Promise<never>(() => {}));
+
+      await act(async () => {
+        await result.current.run({ page: 2 });
+      });
+
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+    });
+
+    // A page change reads the tab's current query, which may differ from the
+    // one last explained (edited since, not yet Run).
+    it.each([
+      ['filter', { queryRaw: '{"a":2}' }],
+      ['sort', { queryRaw: '{"a":1}', builder: { projection: [], sort: '{"b":1}', limit: '' } }],
+      ['projection', { queryRaw: '{"a":1}', builder: { projection: [], sort: '', limit: '', projectionRaw: '{"a":1}' } }],
+      ['limit', { queryRaw: '{"a":1}', builder: { projection: [], sort: '', limit: '100' } }],
+    ] as [string, Partial<CollectionTabState>][])(
+      'explains a page change again when the %s differs from the explained query',
+      async (_, state) => {
+        const { explainSpy, patch, result, rerender } = await runnerAfterFirstRun();
+        await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+        rerender({ active: makeTarget(state) });
+
+        await act(async () => {
+          await result.current.run({ page: 1 });
+        });
+
+        await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+      },
+    );
+
+    it('explains again when the filter changes together with the page', async () => {
+      const { explainSpy, patch, result } = await runnerAfterFirstRun();
+      await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+
+      await act(async () => {
+        await result.current.run({ queryRaw: '{"a":2}', page: 1 });
+      });
+
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+    });
+
+    it('explains again for another collection on a page change', async () => {
+      const { explainSpy, patch, target, result } = await runnerAfterFirstRun();
+      await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+
+      await act(async () => {
+        await result.current.run({ page: 1 }, { ...target, collection: 'orders' });
+      });
+
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+      expect(explainSpy.mock.calls[1][0].collection).toBe('orders');
+    });
+
+    it('does not explain on the past-cap short-circuit', async () => {
+      const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
+      installAtelierMock({
+        query: {
+          find: async () => ({ documents: [], durationMs: 0, hasMore: false }),
+          count: async () => ({ count: 0 }),
+          explain: explainSpy,
+        },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({
+          active: makeTarget({
+            page: 1,
+            pageSize: 50,
+            builder: { projection: [], sort: '', limit: '10' },
+          }),
+          patchCollectionState: patch,
+          loadingDelayMs: 0,
+        }),
+      );
+
+      await act(async () => {
+        await result.current.run();
+      });
+
+      expect(explainSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not explain a refused filter or a failed find', async () => {
+      const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
+      installAtelierMock({
+        query: {
+          find: async () => {
+            throw Object.assign(new Error('nope'), { code: 'INTERNAL' });
+          },
+          count: async () => ({ count: 0 }),
+          explain: explainSpy,
+        },
+      });
+      const patch = vi.fn();
+      const refused = renderHook(() =>
+        useQueryRunner({
+          active: makeTarget({ queryRaw: 'not json' }),
+          patchCollectionState: patch,
+          loadingDelayMs: 0,
+        }),
+      );
+      await act(async () => {
+        await refused.result.current.run();
+      });
+      const failed = renderHook(() =>
+        useQueryRunner({ active: makeTarget(), patchCollectionState: patch, loadingDelayMs: 0 }),
+      );
+      await act(async () => {
+        await failed.result.current.run();
+      });
+
+      expect(explainSpy).not.toHaveBeenCalled();
+    });
+  });
+
   it('records a session event with queryRunKey when a recorder is supplied', async () => {
     installAtelierMock({
       query: {
@@ -831,5 +1193,38 @@ describe('useQueryRunner', () => {
 
       expect(recordFieldValues).not.toHaveBeenCalled();
     });
+  });
+
+  // Workspace keeps one runner mounted for every tab, so whatever it keeps
+  // per tab outlives the tab. Its record of the last result written must not
+  // hold that result's documents, or each closed tab leaves a page behind.
+  it('keeps no result documents alive once the run has been written', async () => {
+    class ResultRow {}
+    installAtelierMock({
+      query: {
+        find: async () => ({ documents: [new ResultRow(), new ResultRow()], durationMs: 1, hasMore: false }),
+        count: async () => ({ count: 2 }),
+        explain: async () => ({ plan: {}, verbosity: 'queryPlanner' }),
+      },
+    });
+    let written = 0;
+    const { result } = renderHook(() =>
+      useQueryRunner({
+        active: makeTarget(),
+        // Counts the writes without keeping them, so only the runner can hold a row.
+        patchCollectionState: (_id, p) => {
+          if (p.lastRun) written++;
+        },
+        loadingDelayMs: 0,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.run();
+    });
+    // The result, then the same result with its plan.
+    await waitFor(() => expect(written).toBe(2));
+
+    expect(queryObjects(ResultRow, { format: 'count' })).toBe(0);
   });
 });

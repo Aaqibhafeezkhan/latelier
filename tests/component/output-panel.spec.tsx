@@ -39,6 +39,7 @@ function renderPanel(
     running?: boolean;
     onViewChange?: (v: ResultViewMode) => void;
     onSaveAsCollection?: () => void;
+    onSaveAsView?: () => void;
   } = {},
 ) {
   return render(
@@ -52,6 +53,7 @@ function renderPanel(
         onHeightCommit={vi.fn()}
         onViewChange={overrides.onViewChange ?? vi.fn()}
         onSaveAsCollection={overrides.onSaveAsCollection ?? vi.fn()}
+        onSaveAsView={overrides.onSaveAsView ?? vi.fn()}
       />
   );
 }
@@ -175,6 +177,7 @@ function ControlledOutputPanel() {
       onHeightCommit={() => {}}
       onViewChange={() => {}}
       onSaveAsCollection={() => {}}
+      onSaveAsView={() => {}}
     />
   );
 }
@@ -255,5 +258,22 @@ describe('OutputPanel resize keyboard support (#56)', () => {
     } finally {
       Object.defineProperty(window, 'innerHeight', { value: originalInnerHeight, configurable: true });
     }
+  });
+});
+
+describe('OutputPanel — Save as view', () => {
+  it('is enabled with no output rows and calls onSaveAsView', () => {
+    const onSaveAsView = vi.fn();
+    renderPanel({ onSaveAsView });
+
+    const button = screen.getByRole('button', { name: /Save as view/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    expect(onSaveAsView).toHaveBeenCalledTimes(1);
+  });
+
+  it('is disabled while the pipeline runs', () => {
+    renderPanel({ running: true });
+    expect((screen.getByRole('button', { name: /Save as view/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

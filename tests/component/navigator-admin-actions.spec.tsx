@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { notifications } from '@mantine/notifications';
 import { render, screen, waitFor, fireEvent } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import {
@@ -11,6 +12,7 @@ import {
   uninstallAtelierMock,
 } from '../helpers/atelierMock';
 import type { CollectionInfo } from '../../shared/ipc';
+import { onCollectionChanged } from '../../src/state/collectionChanges';
 
 function mountNavigator(props: Partial<DbCollectionNavigatorProps> = {}) {
   const baseProps: DbCollectionNavigatorProps = {
@@ -487,5 +489,151 @@ describe('DbCollectionNavigator — an admin action runs against the row’s own
 
     expect(screen.getByText('This connection is read-only. Dropping is disabled.')).toBeTruthy();
     expect((screen.getByText('Drop').closest('button') as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe('DbCollectionNavigator — views and the connection string', () => {
+  // Mantine's notification store outlives an unmount, so one test's toast
+  // would otherwise be found by the next one's alert query.
+  afterEach(() => notifications.clean());
+
+  const VIEW_ROWS = [
+    { name: 'orders', type: 'collection' as const, documentCount: 0, sizeBytes: 0, indexCount: 0, capped: false },
+    { name: 'recent', type: 'view' as const, capped: false },
+  ];
+
+  it('connection menu "Copy connection string" copies the URI main built, and says the password is left out', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const getUri = vi.fn(async () => ({ uri: 'mongodb://alice@db.example:27017/?tls=false' }));
+    baseMocks({ conn: { list: async () => [], getUri } });
+
+    mountNavigator();
+    fireEvent.contextMenu(await screen.findByTestId('nav-connection'));
+    const item = screen.getByRole('menuitem', { name: 'Copy connection string' });
+    expect(item.getAttribute('aria-disabled')).not.toBe('true');
+    fireEvent.click(item);
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('mongodb://alice@db.example:27017/?tls=false'));
+    expect(getUri).toHaveBeenCalledWith('c1');
+    await screen.findByText(/password not included/);
+  });
+
+  it('connection menu "Copy connection string" reports a failure to build the URI', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    baseMocks({
+      conn: {
+        list: async () => [],
+        getUri: async () => {
+          throw { code: 'NOT_FOUND', message: 'connection c1 not found' };
+        },
+      },
+    });
+
+    mountNavigator();
+    fireEvent.contextMenu(await screen.findByTestId('nav-connection'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy connection string' }));
+
+    await screen.findByText(/connection c1 not found/);
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('view menu "Modify view" opens a dialog prefilled from the view’s definition; Save modifies it and refreshes the DB', async () => {
+    const listCollections = vi.fn(async () => VIEW_ROWS);
+    const collectionDetails = vi.fn(async () => ({
+      name: 'recent',
+      type: 'view' as const,
+      capped: false,
+      options: { viewOn: 'orders', pipeline: '[{"$match":{"a":{"$numberInt":"1"}}}]' },
+    }));
+    const modify = vi.fn(async () => ({ ok: true as const }));
+    baseMocks({
+      meta: { listDatabases: async () => [{ name: 'shop', sizeOnDisk: 1, empty: false }], listCollections, collectionDetails },
+      collection: { modify },
+    });
+
+    mountNavigator();
+    await screen.findByText('recent');
+    const initialCalls = listCollections.mock.calls.length;
+    // What an open Structure tab on the view listens for.
+    const changes: unknown[] = [];
+    const off = onCollectionChanged((c) => changes.push(c));
+
+    fireEvent.contextMenu(screen.getByTestId('nav-coll-shop-recent'));
+    const item = screen.getByRole('menuitem', { name: 'Modify view' });
+    expect(item.getAttribute('aria-disabled')).not.toBe('true');
+    fireEvent.click(item);
+
+    const source = (await screen.findByLabelText('Source collection')) as HTMLInputElement;
+    await waitFor(() => expect(source.value).toBe('orders'));
+    const pipeline = screen.getByLabelText('Pipeline') as HTMLTextAreaElement;
+    expect(JSON.parse(pipeline.value)).toEqual([{ $match: { a: 1 } }]);
+    expect(collectionDetails).toHaveBeenCalledWith({ connectionId: 'c1', dbName: 'shop', collection: 'recent' });
+
+    fireEvent.change(pipeline, { target: { value: '[{"$match":{"a":2}}]' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(modify).toHaveBeenCalledWith({
+        connectionId: 'c1',
+        dbName: 'shop',
+        collection: 'recent',
+        options: { viewOn: 'orders', pipeline: '[{"$match":{"a":2}}]' },
+      }),
+    );
+    await waitFor(() => expect(listCollections.mock.calls.length).toBeGreaterThan(initialCalls));
+    await waitFor(() => expect(screen.queryByLabelText('Pipeline')).toBeNull());
+    expect(changes).toEqual([{ connectionId: 'c1', dbName: 'shop', collection: 'recent' }]);
+    off();
+  });
+
+  it('"Modify view" refuses a pipeline that is not a JSON array, inline and without a call', async () => {
+    const modify = vi.fn(async () => ({ ok: true as const }));
+    baseMocks({
+      meta: {
+        listDatabases: async () => [{ name: 'shop', sizeOnDisk: 1, empty: false }],
+        listCollections: async () => VIEW_ROWS,
+        collectionDetails: async () => ({
+          name: 'recent', type: 'view' as const, capped: false, options: { viewOn: 'orders', pipeline: '[]' },
+        }),
+      },
+      collection: { modify },
+    });
+
+    mountNavigator();
+    await screen.findByText('recent');
+    fireEvent.contextMenu(screen.getByTestId('nav-coll-shop-recent'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Modify view' }));
+    const pipeline = (await screen.findByLabelText('Pipeline')) as HTMLTextAreaElement;
+    await waitFor(() => expect(pipeline.value).toBe('[]'));
+
+    for (const bad of ['[{"$match":', '{"$match":{}}']) {
+      fireEvent.change(pipeline, { target: { value: bad } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      expect((await screen.findByRole('alert')).textContent).toMatch(/JSON array/);
+    }
+    expect(modify).not.toHaveBeenCalled();
+  });
+
+  it('no menu item is left as a "Coming soon" stub', async () => {
+    baseMocks({
+      meta: {
+        listDatabases: async () => [{ name: 'shop', sizeOnDisk: 1, empty: false }],
+        listCollections: async () => VIEW_ROWS,
+      },
+    });
+
+    mountNavigator();
+    await screen.findByText('recent');
+
+    fireEvent.contextMenu(screen.getByTestId('nav-connection'));
+    expect(screen.getByRole('menuitem', { name: 'Copy connection string' })).toBeTruthy();
+    expect(screen.queryByTitle('Coming soon')).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+
+    fireEvent.contextMenu(screen.getByTestId('nav-coll-shop-recent'));
+    expect(screen.getByRole('menuitem', { name: 'Modify view' })).toBeTruthy();
+    expect(screen.queryByTitle('Coming soon')).toBeNull();
   });
 });

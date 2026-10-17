@@ -22,11 +22,11 @@ Snapshot of what's currently shipped in `src/pages/Workspace/DbCollectionNavigat
 | Tree rendering (connection / db / coll / view / ts) | ✅ live         | §1, §7                             |
 | Filter (with force-load of unexpanded DBs)          | ✅ live         | §4                                 |
 | Click modifiers (plain / Cmd / Alt / right-click)   | ✅ live         | §5.1                               |
-| Context menu — connection row                       | ✅ live (some disabled) | §5.2; Disconnect/Reconnect/Refresh/Edit live; "Copy connection string" disabled pending URI IPC |
-| Context menu — DB row                               | ✅ live (some disabled) | §5.2; Refresh/Copy-name live; Create-collection/Drop-database disabled pending IPC + W02b, W02d |
-| Context menu — collection/view/ts row               | ✅ live (some disabled) | §5.2; Open/Copy live; Rename/Drop disabled pending IPC + W02a, W02c |
-| Hover action bar on DB rows                         | ✅ live (partial) | §5b; Refresh-collections live; Create-collection disabled pending IPC |
-| Destructive-action modal convention                 | 🚧 not yet triggered | §5c; no destructive action is enabled in the UI, so the modal spec isn't exercised yet |
+| Context menu — connection row                       | ✅ live         | §5.2; Disconnect/Reconnect/Refresh/Edit live; "Copy connection string" live through `conn:getUri`, without the password |
+| Context menu — DB row                               | ✅ live         | §5.2; Create collection, Refresh, Copy DB name and Drop database are all live |
+| Context menu — collection/view/ts row               | ✅ live         | §5.2; Open, Copy, Import documents, Rename (collections), Modify view (views) and Drop are all live |
+| Hover action bar on DB rows                         | ✅ live         | §5b; Create collection and Refresh collections |
+| Destructive-action modal convention                 | ✅ live         | §5c; Drop collection / view and Drop database confirm by typing the name |
 | Connection tree node (Path 2)                       | ✅ live         | §7; status dot tracks `mongo.onStatus`; Reconnect menu item surfaces when not connected |
 | `aria-level` (1 / 2 / 3) + `aria-expanded` + `aria-selected` | ✅ live | §9                                 |
 | Keyboard nav: ↑ / ↓ / ← / → / Enter / Home / End    | ✅ live         | §9; extras (`*`, letter type-ahead) deferred |
@@ -37,7 +37,7 @@ Snapshot of what's currently shipped in `src/pages/Workspace/DbCollectionNavigat
 | Connection dropdown (switch-to-other-connection)    | superseded     | See [X16](./X16-multi-connection.md) — shipped as one navigator root per Connection, not a dropdown |
 | Inline error card per-DB (`listCollections` failure)| ❌ not built    | §8; only top-level `listDatabases` error is surfaced |
 | Sub-specs W02a / W02b / W02c / W02d                 | ❌ not authored | §13                                |
-| IPC: `mongo:dropCollection` / `dropDatabase` / `renameCollection` / `createCollection` | ❌ not built | §12 |
+| IPC: create / drop / rename collection, drop database, modify | ✅ live | §12; shipped as `collection:create`, `collection:drop`, `collection:rename`, `database:drop` and `collection:modify` rather than the `mongo:*` names below |
 
 Legend: ✅ shipped · 🚧 partial / aspirational · ❌ deferred.
 
@@ -216,11 +216,11 @@ Every row's context menu is composed from its row-kind entry below plus any inhe
 
 | Item               | Icon  | Destructive | Status | IPC requirement            |
 |--------------------|-------|-------------|--------|----------------------------|
-| Create collection  | Plus  | no          | 🚧     | `mongo:createCollection` (§12) → W02d |
+| Create collection  | Plus  | no          | ✅     | `collection:create` |
 | Refresh collections| Sync  | no          | ✅     | existing `meta:listCollections` |
 | Copy DB name       | Copy  | no          | ✅     | — (clipboard)              |
 | ───                |       |             |        |                            |
-| Drop database      | Trash | **yes**     | 🚧     | `mongo:dropDatabase` (§12) → W02b |
+| Drop database      | Trash | **yes**     | ✅     | `database:drop` |
 
 #### Collection row (standard)
 
@@ -233,8 +233,8 @@ Every row's context menu is composed from its row-kind entry below plus any inhe
 | Copy name          | Copy      | no          | ✅     | — (clipboard)                |
 | Copy namespace     | Copy      | no          | ✅     | — (clipboard, `${db}.${coll}`) |
 | ───                |           |             |        |                              |
-| Rename collection  | Edit      | no          | 🚧     | `mongo:renameCollection` (§12) → W02c |
-| Drop collection    | Trash     | **yes**     | 🚧     | `mongo:dropCollection` (§12) → W02a |
+| Rename collection  | Edit      | no          | ✅     | `collection:rename` |
+| Drop collection    | Trash     | **yes**     | ✅     | `collection:drop` |
 
 #### View row
 
@@ -242,9 +242,9 @@ Same as collection row minus Rename (views are immutable by name), plus:
 
 | Item            | Icon | Destructive | IPC requirement                                |
 |-----------------|------|-------------|------------------------------------------------|
-| Duplicate view  | Copy | no          | `mongo:createCollection` with `viewOn` + `pipeline` |
-| Modify view     | Edit | no          | `mongo:collMod` or equivalent — **very likely punt to a follow-up**; mark disabled with "Not yet implemented" tooltip until its own spec lands |
-| Drop view       | Trash| **yes**     | `mongo:dropCollection` (§12) → W02a            |
+| Duplicate view  | Copy | no          | 🚧 not built (an open navigator issue tracks it); would call `collection:create` with `viewOn` + `pipeline` |
+| Modify view     | Edit | no          | ✅ `meta:collectionDetails` to prefill, `collection:modify` (`collMod`) to save. A dialog with a "Source collection" input and a plain "Pipeline" textarea (resizable), prefilled as readable JSON (`0`, not `{"$numberInt":"0"}`); a pipeline that is not a JSON array is refused inline. Escape, the close button, the backdrop and Cancel ask "Discard changes?" once either field differs from what was loaded, and nothing closes the dialog while a save is in flight. Saving refreshes the database |
+| Drop view       | Trash| **yes**     | ✅ `collection:drop` (§12)                      |
 
 #### Timeseries row
 
@@ -265,7 +265,7 @@ Limited variant (MongoDB doesn't support rename on TS collections):
 |-----------------------|------------|-------------|--------|---------------------------|
 | Refresh databases     | Sync       | no          | ✅     | existing `meta:listDatabases` |
 | Edit connection       | Edit       | no          | ✅     | existing — route to `/connections/:id` via `onEditConnection` prop |
-| Copy connection string| Copy       | no          | 🚧     | needs a `conn:getUri` IPC that assembles the URI in main (password handling TBD) |
+| Copy connection string| Copy       | no          | ✅     | `conn:getUri` builds the URI in main from the saved connection **without its password**: the username, host, options and TLS flags are kept, the stored secret never crosses IPC or reaches the clipboard. The toast says the password is not included |
 | ───                   |            |             |        |                           |
 | Disconnect            | Disconnect | **yes**     | ✅     | existing `mongo:disconnect`. Tabs are **not** auto-closed on disconnect — see §14 deliberate choice |
 | Reconnect             | Sync       | no          | ✅     | existing `mongo:connect`. Shown in place of Disconnect when current status is not `connected` |
@@ -425,25 +425,23 @@ While any mutation IPC is in flight (drop / rename / create): affected row shows
 - Switching tabs within the same connection does not re-fetch.
 - Refresh button invalidates cache for the current connection only.
 - Refresh re-populates every previously-expanded database, not only the active one.
-- Right-clicking a collection opens the collection context menu from §5.2 at the cursor, clamped to viewport. Rename / Drop render disabled.
-- Right-clicking a DB row opens the DB context menu from §5.2. Create / Drop render disabled; Refresh and Copy-name are live.
+- Right-clicking a collection opens the collection context menu from §5.2 at the cursor, clamped to viewport. Rename and Drop are live.
+- Right-clicking a DB row opens the DB context menu from §5.2. Create, Refresh, Copy-name and Drop are live.
 - Right-clicking the connection row opens the Connection context menu from §5.2, with Disconnect ↔ Reconnect swapped based on live status.
 - View rows show the view icon and `VIEW` badge; timeseries rows show `TS`.
 - `aria-level` is 1 / 2 / 3 for connection / DB / collection; `aria-expanded` is present on connection and DB rows; `aria-selected` is present on the active collection.
 - Keyboard map required rows (↑ / ↓ / ← / → / Enter / Home / End / Escape) fully wired across all three tree levels.
 - Focused row has an outline-style ring distinct from the active-tab highlight; arrow-key nav does not move the active highlight.
-- Hover action bar shows on DB rows on hover/focus with Create (disabled) + Refresh (live).
+- Hover action bar shows on DB rows on hover/focus with Create and Refresh, both live.
 - The connection row is auto-expanded on first activation; user collapse persists across app launches via `prefs`.
 - Connection status (`connected` / `connecting` / `disconnected` / `error`) is reflected live in the dot color.
 - Navigator switches to the new connection when arriving via `openForConnection`; old tabs close; no NewTabPicker modal (§1b).
 - The three-column layout renders even with zero tabs — navigator is always the discovery surface.
+- The tab strip follows the mutations: dropping a collection or view closes its open tabs, dropping a database closes every tab on it, and renaming a collection re-points an open tab at the new name.
 
 ### Deferred (blocked on IPC / sub-specs)
 
-- Destructive actions (drop collection / drop DB / rename / create / duplicate view / modify view) go through confirmation modals per W02a–d. Today every destructive menu item is `disabled` with a "Coming soon" tooltip.
-- Action definitions are authored once per row kind in a shared `actions.ts` module. Currently each menu is built inline in the navigator; refactor lands when the first live mutation (W02d likely) is implemented.
-- Tab strip updates (close tabs on dropped namespace, rename tabs on namespace rename) — not exercised until mutation IPC lands.
-- Copy connection string (needs `conn:getUri`-equivalent IPC).
+- Duplicate view is the one menu action not built yet (the open "Navigator: Duplicate view" issue tracks it); it stays out of the view menu until it is. Drop collection, drop database, rename, create and modify view are live and go through the confirmation modals and dialogs of W02a–d.
 - Inline per-DB error cards for `listCollections` failures (§8).
 - Keyboard stretch (Home / End are live; `*` expand-siblings and letter type-ahead remain deferred).
 
@@ -501,6 +499,8 @@ The following channels are **prerequisites** for the matching §5 actions. Each 
 | `mongo:dropDatabase`      | `{ connectionId; dbName }`                                          | `{ dropped: boolean }`  | no            | W02b           |
 | `mongo:renameCollection`  | `{ connectionId; dbName; collection; newName; dropTarget?: boolean }` | `{ newNamespace: string }` | no         | W02c           |
 | `mongo:createCollection`  | `{ connectionId; dbName; name; options? }` (options covers capped, timeseries, viewOn+pipeline) | `{ namespace: string }` | no | W02d, hover bar |
+| `collection:modify`       | `{ connectionId; dbName; collection; options }`: either `validator`/`validationLevel`/`validationAction`, or `viewOn` + `pipeline` together | `{ ok: true }` | no | Modify view, W16 §15 |
+| `conn:getUri`             | `{ id }`                                                            | `{ uri: string }`, never with the password | no | Copy connection string |
 
 Non-functional requirements for the new handlers:
 - Errors must surface as `AppError` subclasses: `NotFoundError` (db/coll missing), `ConflictError` (rename target exists), `MongoOpError` (wrapping the driver error). `electron/errors.ts` already covers these.
@@ -520,7 +520,7 @@ The destructive and creation flows each need their own spec before shipping:
 | W02c   | Rename collection modal + tab-namespace migration | `mongo:renameCollection` |
 | W02d   | Create collection modal (name + capped/timeseries/view options) | `mongo:createCollection` |
 
-Each sub-spec must follow the destructive-action convention in §5c. They can be authored in parallel; none of them block W02's context-menu skeleton from shipping (the menu items render as disabled with a tooltip until their backing IPC + modal land).
+Each sub-spec must follow the destructive-action convention in §5c. They can be authored in parallel; none of them block W02's context-menu skeleton from shipping (an item whose backing IPC + modal had not landed rendered disabled with a tooltip; all four have landed).
 
 ---
 
@@ -534,7 +534,7 @@ Documented so reviewers don't reopen these:
 - **Virtualized list.** Defer indefinitely; pure-flex layout (§1a of the redesign analysis) is simpler and sufficient.
 - **Multi-connection drawer.** Unchanged from v1 — stays deferred *as originally scoped here*. Shipped instead as one navigator root per Connection; see [X16](./X16-multi-connection.md).
 - **MongoDB shell, performance metrics, query insights, cluster overview.** Compass-only; do not port.
-- **Modify view.** Requires its own A-series pipeline editor spec. Context-menu entry stays disabled with a tooltip until then.
+- **Modify view in an aggregation tab.** Modify view edits the pipeline as JSON in a textarea dialog; editing it stage by stage in the aggregation builder is a later enhancement, not planned here.
 
 ---
 

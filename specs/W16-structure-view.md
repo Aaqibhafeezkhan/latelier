@@ -1,6 +1,6 @@
 # W16 — Structure: the collection's shape and access paths
 
-> **Status: Accepted.** Tiers 1, 2 and 4 shipped. Tier 3, the plan badge, is not built.
+> **Status: Implemented.**
 
 ## Purpose
 
@@ -33,10 +33,12 @@ the user has to think to ask.
   (§3); a **Create this index** action in `ExplainDrawer`, prefilled from the
   executed query in ESR order (§4); the persisted-`activeView` migration that
   makes all of it safe to ship (§8).
-- **Out**: collection stats and schema depth — cardinality, numeric
-  stats, sample values. Both are *sections poured into the container
-  this spec builds*, not changes to it. Deliberately deferred so this ships as
-  four tickets rather than six; see §11.
+- **In, later tiers**: the statistics section (§13, Tier 5) and schema depth —
+  distinct counts and numeric range (§14, Tier 6). Both are *sections poured
+  into the container this spec builds*, not changes to it, and shipped after
+  Tiers 1–4.
+- **Out**: sample values and value distributions in the schema section. §14.3
+  records why they stay out.
 - **Out**: composition-time index awareness — W15 §14.2. That is a different
   half of the same idea and the boundary is stated in §5, not left to whoever
   picks up second.
@@ -91,12 +93,15 @@ and schema-depth items (§11) land.
 
 Structure is a single vertically scrolling pane holding sections in order:
 
-1. **Indexes** — the list, with create and drop.
-2. **Schema** — today's `SchemaView`, unchanged in behavior, demoted from a
-   view to a section.
+1. **Statistics** — one collection's counts and sizes (§13).
+2. **Indexes** — the list, with create and drop.
+3. **Validation** — the validation rules, level and action, editable (§15).
+   Plain collections only.
+4. **Schema** — today's `SchemaView`, demoted from a view to a section, with
+   per-field depth (§14).
 
-Later, without a strip change: a stats header above indexes, and depth
-inside the schema section.
+The statistics section and the schema depth arrived after Tiers 1–4 without a
+strip change.
 
 The stacking is the point, not an economy. The insight this view exists to
 produce is a *join across two sections* — "I filter on `status`; the schema
@@ -115,6 +120,8 @@ Behavior is today's `IndexesTab`, minus its two pickers:
 - Create, via the existing drawer: multi-field with direction, TTL
   `expireAfterSeconds`, `partialFilterExpression`, collation, optional name.
 - Drop, with the existing type-to-confirm.
+
+On a view the section is a single note, naming the source collection, that views have no indexes of their own and use that collection's; no list is requested and no create or drop is offered.
 
 Nothing about the index *operations* changes. What changes is that the
 namespace is given, not chosen: the db and collection `<select>` controls and
@@ -197,16 +204,23 @@ So the badge names the plan; it does not count documents. Counts stay in
 signal that appears only sometimes is one users learn to ignore rather than
 read, which is why a duration-threshold variant is rejected too.
 
-### 3.2 No plan cache
+### 3.2 The plan is kept across a page change, and nowhere else
 
 `ExplainInput` is `Omit<FindInput, 'limit' | 'skip' | 'cancelToken'>` plus
 verbosity. Paging changes only `skip` and `limit` — neither reaches the
-explain — so the plan is page-independent *by construction*, and re-explaining
-on each page re-asks a question with the same answer at negligible cost.
+explain — so the plan is page-independent *by construction*, and a page change
+that left the connection, database, collection, filter, sort, projection and
+limit as the last explained run had them reuses that run's plan instead of
+asking the server the same question again. The new page's result carries the
+plan from the start, so the badge never blinks off between pages.
 
-Caching it would be worse than useless: the moment the cached answer is most
-wrong is immediately after the user creates the missing index, which is the
-exact moment §4 is designed to produce. No cache.
+That is the whole cache, one plan per tab, and it is deliberately narrow. An
+explicit Run always explains, as does any run that changes the query, the
+collection or the limit, and a page change while the previous plan has not
+arrived yet. Anything broader would be worse than useless: the moment a cached
+answer is most wrong is immediately after the user creates the missing index,
+which is the exact moment §4 is designed to produce, and §4's flow ends in an
+explicit Run.
 
 ### 3.3 Content and placement
 
@@ -225,7 +239,15 @@ omitting the execution metrics rather than throwing:
 
 The badge is a button. Activating it opens `ExplainDrawer` on the plan already
 fetched, from which the user can request a heavier verbosity or, per §4,
-create the index.
+create the index. The plan reaches the drawer as `initialPlan`: opening it
+makes no request, and only changing the verbosity fetches. The plan lives on
+`lastRun.plan` in renderer memory, never persisted with the tab.
+
+While the badge is stale (§3.4) the drawer's title reads *Explain plan (not
+current)* and it offers no create-index action, since a suggestion built from
+the query now on screen would not be about the plan being read. Changing the
+verbosity there still explains the query as it is now, not the run that
+produced the plan.
 
 **The explain never blocks or fails the run.** It is issued after the find
 resolves; if it errors or is cancelled, the rows still render and the badge is
@@ -409,8 +431,9 @@ unusable from the explain path and harder to test.
 
 ## 7. IPC contract
 
-**No new channel. One existing validator must widen.** Every channel this spec
-needs exists:
+**Tiers 1–4 add no channel. One existing validator must widen.** Every channel
+those tiers need exists (Tier 5 adds one read channel, `meta:collectionDetails`,
+specified in §13.2):
 
 - `query:explain` already takes `verbosity: 'queryPlanner' | 'executionStats' | 'allPlansExecution'`;
 - `index:list` / `index:create` / `index:drop` are unchanged and already
@@ -531,8 +554,9 @@ it is the smallest, and it puts the idea in the running app soonest.
   find; rows render regardless.
 - The badge is a button; activating it opens `ExplainDrawer` on the
   already-fetched plan.
-- The badge updates on every run, including page changes, and reflects a
-  newly created index without an app restart.
+- The badge follows every run, and reflects a newly created index without an
+  app restart. A page change keeps the plan of the same query and sends no
+  second explain; an explicit Run, or any change to the query, does.
 - While the result count is marked not current (X14 §5), the badge is
   dimmed on the same condition, and its accessible name says so in words
   (§3.4).
@@ -552,12 +576,20 @@ it is the smallest, and it puts the idea in the running app soonest.
 
 ### Invariants (all tiers)
 
-- No new IPC channel. The only contract change is the `activeView` enum in
-  `electron/ipc/handlers/tabs.ts` widening in step with `CollectionView`
-  (§7.1) — no channel gains, loses, or retypes any other field.
+- Tiers 1–4 add no IPC channel. Their only contract change is the `activeView`
+  enum in `electron/ipc/handlers/tabs.ts` widening in step with `CollectionView`
+  (§7.1) — no channel gains, loses, or retypes any other field. Tier 5 adds
+  `meta:collectionDetails` (§13.2) and Tier 7 adds `collection:modify` (§15.3).
+  The base these tiers ship in adds two more contract changes of its own:
+  `conn:getUri` (the navigator's "Copy connection string") and the `viewOn` and
+  `pipeline` options on `collection:create` (Save as view).
 - No renderer import of a forbidden module; the suggestion module is pure
   and imports nothing from `electron/`.
-- No behavior change to `IndexService`, `MetaService`, or `QueryService`.
+- No behavior change to `IndexService` or `QueryService`. Tiers 1–4 leave
+  `MetaService` unchanged; Tier 5 adds `collectionDetails` to it. Its other
+  methods' results stay as they were, though `listCollections` now takes its
+  figures from the same storage-stats read as `collectionDetails` (§13.2) and
+  skips a view, which has no storage and which `$collStats` refuses.
 
 ## 10. Test cases
 
@@ -640,7 +672,10 @@ than clicking the strip:
 - a `COLLSCAN` shows `no index` with its warning treatment;
 - a rejected explain leaves rows rendered and no badge;
 - activating the badge opens the drawer;
-- a page change re-runs the explain and updates the badge;
+- a page change, or a page-size change, sends no second explain and the new
+  page keeps the badge; an explicit Run of the same query, a changed filter,
+  sort, projection, limit or collection, and a page change before the first
+  plan arrived, each explain again;
 - editing the filter to something `findProblem` refuses dims the badge beside
   the already-stale count, and its accessible name carries the same fact —
   the assertion is on the name, not the colour (§3.4).
@@ -668,8 +703,10 @@ are specified but untracked") is what that failure looks like once it has aged:
 
 | Deferred | Where it is tracked |
 | --- | --- |
-| Collection stats header | **needs re-scoping**: it is filed as a *navigation* change ("clicking a collection opens a stats view"). Under this spec a nav click still opens a tab on Documents, and stats become a section of Structure. Left as filed, someone will change what a nav click does. |
-| Schema depth — cardinality, numeric stats, samples | tracked separately, unchanged; lands inside the schema section |
+| Collection stats header | shipped as a Structure section, §13 (not as a navigation change: a nav click still opens a tab on Documents) |
+| Schema depth — cardinality, numeric stats | shipped inside the schema section, §14 |
+| Schema sample values and value distributions | out of scope, §14.3 |
+| Validation rules | shipped as a Structure section, §15 |
 | Composition-time index marking | W15 §14.2; sequence after Tier 1 and reuse its collection-scoped list (§5) |
 | Suggesting an extension to an existing index | §4.4; no issue yet — file if it survives first use |
 | Cross-collection index overview | §2; no issue, and no demand |
@@ -679,3 +716,283 @@ are specified but untracked") is what that failure looks like once it has aged:
 
 Removed — see the note at the end of `W15-query-composition.md` §15. The live
 mapping is GitHub Issues, which cite this spec's tiers in their bodies.
+
+---
+
+## 13. Statistics section (Tier 5)
+
+### 13.1 What it shows
+
+A `Statistics` region at the top of the Structure pane, above Indexes. For a
+collection or time-series collection it shows documents, data size, storage
+size, average document size, indexes (count and total index size) and whether
+the collection is capped. A figure the server did not report, or that could not
+be read, renders `—`, not `0`. While the first reply is pending the section says
+`Loading…`, and a switch to another collection drops the previous collection's
+figures rather than showing them under the new name. For a view it shows `View on <source>` and no figures. It fetches on entry
+and on its own Refresh button, and a failed fetch is an inline alert in the
+section: the indexes and the schema still render.
+
+The collection header keeps its own count, read from `meta:listCollections`.
+Both sources read `$collStats`, so they agree; moving the header onto the new
+channel is not part of this tier.
+
+### 13.2 `meta:collectionDetails`
+
+A read channel taking `{ connectionId, dbName, collection }` and returning
+`CollectionDetails` (`shared/ipc.ts`): `name`, `type`, `capped`, `stats?` and
+`options`.
+
+- `stats` is `documentCount`, `sizeBytes`, `indexCount`, `storageSizeBytes`,
+  `avgObjSizeBytes` and `totalIndexSizeBytes`, each present only when the server
+  reported it. A sharded cluster answers `$collStats` with one document per
+  shard: counts and sizes are summed, the index count (the same on every shard)
+  is the largest, and the average is recomputed from the totals. A time-series
+  collection reports no count, so it is read with `estimatedDocumentCount`.
+  `stats` is absent for a view.
+- `$collStats` refused for lack of privilege, or by a tier that does not offer it,
+  falls back to `estimatedDocumentCount` for the count and `indexes()` for the
+  index count; the sizes are absent, and the refusal is logged. Any other
+  failure of `$collStats` (a timeout, a dropped connection) is an error of the
+  call. If the refusal fallback cannot read either estimate, the call is an
+  error too: unreadable figures are never reported as `0`.
+- `options` carries what `listCollections` reports: `viewOn` as a plain string,
+  `pipeline` and `validator` as canonical EJSON strings, and the validation
+  level and action. A later tier that edits a view or a validator reads them
+  from here.
+- A collection that does not exist is `NOT_FOUND`. A missing field in the payload
+  is `VALIDATION`.
+
+`MetaService.listCollections` and `collectionDetails` share one storage-stats
+read, so the `$collStats` call and its fallback exist once. A collection whose
+read fails is still listed, without figures, so one bad collection does not
+blank the navigator. A view is listed without figures and without a
+`$collStats` call, which a view refuses.
+
+### 13.3 Acceptance criteria
+
+- Structure renders a Statistics region above the Indexes region.
+- Entering Structure calls `meta:collectionDetails` once for the tab's
+  collection; Refresh calls it again.
+- A collection shows its document count and its sizes in human units; an absent
+  figure, including the count of a time-series collection whose estimate failed,
+  shows `—`.
+- The section says `Loading…` until its first reply, and switching collection
+  clears the previous figures.
+- A view shows `View on <source>` and no document count.
+- A rejected fetch shows a `role="alert"` inside the section and does not stop
+  the Indexes or Schema sections rendering.
+- A reply for a collection the tab has since left never overwrites the one
+  on screen.
+- Creating or dropping an index in Structure, and modifying the view from the
+  navigator, read the details again, so the figures and `View on <source>` are
+  never older than the change. A reload captured for a collection the tab has
+  since left does nothing.
+- The collection header's document and index counts come from the same
+  `meta:collectionDetails` read, one collection rather than the whole database;
+  a figure the server did not report is hidden, never `0`.
+- `meta:collectionDetails` has its schema, preload binding, handler registration
+  and shared type, and no `SECRET_INPUT` tag (the payload carries no secret).
+
+### 13.4 Test cases
+
+- Integration, `MetaService.collectionDetails`: a collection with an extra index
+  (type, count, index count of 2, positive sizes); a capped collection; a
+  collection with a validator, level and action (the validator parses back to
+  the document); a view (no stats, `viewOn`, parsed pipeline); a missing
+  collection (`NOT_FOUND`); `$collStats` refused (estimate, optional sizes
+  absent, the refusal logged); a populated time-series collection (real count,
+  here and in `listCollections`); `$collStats` failing for another reason
+  (classified error); refused with both estimates failing (error, no zeros).
+- Unit, `foldStorageStats`: single node, a two-shard reply, a missing count,
+  empty reply.
+- Integration, router: empty `collection` is `VALIDATION`; a valid payload is
+  `{ ok: true }`; a missing collection is `NOT_FOUND`.
+- Unit, `humanBytes`: units, the petabyte ceiling, non-finite input.
+- Component, `StructureView`: the cases in §13.3.
+
+---
+
+## 14. Schema depth (Tier 6)
+
+### 14.1 What it adds
+
+Two columns in the schema table, both computed from the sample the section
+already fetches (no IPC change):
+
+- **Distinct** — how many different scalar values the field held in the sample.
+- **Range** — `min – max · avg x` over the field's numeric occurrences
+  (`number`, `long`, `decimal`), or `—`.
+
+A scalar is a value that is neither an array nor a plain sub-document, so
+`null` is one. An EJSON
+sentinel (`ObjectId`, `Date`, a number) is one scalar. `1` and `"1"`, and an
+`Int32` 1 and a `Long` 1, are different values. The scalar elements of an array
+are not counted — the walk still looks only at an array's object elements, as
+before — so an array field has neither column.
+
+The sample arrives as canonical EJSON, so a number is a `$numberInt`,
+`$numberDouble`, `$numberLong` or `$numberDecimal` wrapper. Its string is read
+with `Number.parseFloat`; `NaN` and the infinities are ignored. `$numberLong` and
+`$numberDecimal` values past 2^53, or with more than about 15 significant
+digits, are therefore approximate in the range. A field whose average overflows
+to infinity has no range at all, because the persisted JSON would turn it into
+`null`.
+
+### 14.2 What is persisted
+
+`SchemaSampleEntry` gains `distinct?: number` and
+`numeric?: { min; max; avg }`. `schema.entries` is persisted with the tab, so
+both are numbers derived from the sample, like `frequency`.
+
+`numeric.min` and `numeric.max` are literal values of single documents, which
+makes them results in all but name. Main therefore drops `numeric` from an
+entry whose path is secret-named (`isSecretFieldPath`, the rule the log
+redactor and the recent-value recorder already share) before the tab is
+written to SQLite; the renderer, which cannot import that rule, keeps it in
+memory for the session. `distinct` is a count and is kept. A restored tab shows
+`—` in Range for such a field until the next sample.
+
+### 14.3 What stays out
+
+Sample values and value distributions ("top values") are out of scope. They
+would write user document values into SQLite with the tab, and the feature this
+tier answers asks only for cardinality and numeric range.
+
+Known ceiling: the sample is the most recent documents plus a random draw, so a
+document can appear twice. `distinct` is unaffected; `avg` is weighted by the
+duplicates.
+
+### 14.4 The sample-size bound
+
+The sample size selector offers 50, 100 and 200 — `SCHEMA_SAMPLE_MAX`
+(`shared/defaults.ts`), the bound `meta:sampleSchema` validates. Raising it is
+unsafe on its own: the `recent` and `random` branches (n documents each) share
+one `$facet` output document with BSON's 16 MB cap, and a breach fails open to
+an empty sample. A tab persisted with a larger size samples at the bound.
+
+### 14.5 Acceptance criteria
+
+- `distinct` counts unique scalar values per path; a sentinel is a scalar, a
+  sub-document and an array are not; an array's scalar elements are not
+  counted.
+- `numeric` is the min, max and average over finite numeric occurrences and
+  ignores `NaN` and infinities; a path with none has no `numeric`.
+- No sample value is stored on an entry.
+- The persisted tab state has no `numeric` on a secret-named path and keeps it
+  on others.
+- The schema table shows Distinct and Range, `—` where absent.
+- The sample-size selector offers exactly 50, 100 and 200, and a tab persisted
+  with a size above the bound samples at the bound.
+
+### 14.6 Test cases
+
+- Unit, `summarizeSchema`: distinct counts, sentinel and sub-document
+  handling, array elements, numeric over mixed wrappers, `NaN`, string-only
+  path, no stored values.
+- Unit and integration, tab-state serialisation: a `password` or `pwd` field
+  loses `numeric` and keeps `distinct`; a `price` field keeps both.
+- Component, `StructureView`: the Distinct and Range cells; the three sample
+  sizes; a restored size above the bound.
+
+---
+
+## 15. Validation rules (Tier 7)
+
+### 15.1 Where it lives
+
+A collection's validator is collection-scoped admin state, so under the §2
+rule it lives in Structure, not in the Connection Manager or a dialog off the
+navigator. It sits **between Indexes and Schema**: the shape the server
+enforces next to the shape the sample observed.
+
+### 15.2 What it shows and edits
+
+A `Validation` region. Read mode shows the validator pretty-printed as
+readable JSON (`"minimum": 0`, not `{"$numberInt":"0"}`; only wrappers that
+re-parse to the same BSON are dropped), or `No validation rules` when there is
+none (an empty `{}` validator counts as none), then `Level: <level>` and
+`Action: <action>`. `listCollections` reports
+the level and action only once they were set, so an absent one shows the
+server default, `strict` and `error`.
+
+`Edit rules` swaps in a `Validator` textarea prefilled with the same readable
+rules, so saving them unchanged sends the same BSON, a `Validation level`
+select (off, strict, moderate) and a `Validation action` select (error, warn,
+errorAndLog), with Save and Cancel. `errorAndLog` round-trips when the server
+reports it; MongoDB 8.0.5 refuses it in `collMod`, and that refusal shows
+inline like any other. Save requires the text to parse as
+a JSON document (not an array, not `null`, not a bare EJSON value such as
+`{"$date":…}`, the same rule main applies) and says so inline otherwise, with
+no call. An emptied textarea saves `{}`, which clears the rules. The region
+renders for a plain collection only: a view has no validation rules, and the
+server refuses `collMod` validation options on a time-series collection
+(MongoDB 8.0.5 answers `InvalidOptions`, code 72, for both `validator` and
+`validationLevel`).
+
+Save calls `collection:modify` with `{ validator, validationLevel,
+validationAction }` and then reads the details again; the button stays in its
+submitting state and the editor stays open until that read is in, so the old
+rules never flash back. A refusal, a read-only
+connection's included, is a `role="alert"` in the section and the editor stays
+open; like the indexes section, nothing is greyed out up front, and main is the
+guard (ADR 0005).
+
+The region reads `CollectionDetails.options` from the same
+`meta:collectionDetails` reply the statistics section shows: Structure reads it
+once on entry and hands it to both, so a save refreshes the figures too. While
+that read is pending or has failed, the region is not rendered, and the
+statistics section carries the alert.
+
+### 15.3 `collection:modify`
+
+A write channel taking `{ connectionId, dbName, collection, options }` and
+returning `{ ok: true }`. It runs `collMod` on the metadata budget. The options
+are either validation keys (`validator`, `validationLevel`,
+`validationAction`) or a view's definition (`viewOn` and `pipeline`, together),
+never both: the router refuses an empty `options`, half a view definition and a
+mix as `VALIDATION` before the service runs. Main parses `validator` as an EJSON
+document and `pipeline` as an EJSON array of single-operator stages with no
+`$out` or `$merge`, and refuses anything else as `VALIDATION` naming the field.
+A missing collection is `NOT_FOUND`, and a read-only connection is refused by
+the write grant. W02's Modify view is the channel's other caller.
+
+### 15.4 Acceptance criteria
+
+- Structure renders a Validation region after Indexes and before the schema
+  section.
+- The region shows the validator, level and action from
+  `meta:collectionDetails`; with none set it says `No validation rules`,
+  `Level: strict`, `Action: error`.
+- Edit rules, a changed level, Save calls `collection:modify` with the
+  validator, level and action, then reads the details again, and read mode
+  shows the new level only once that read is in.
+- Rules are shown and edited as readable JSON, and saving them unchanged
+  sends an equivalent validator.
+- The action select offers `errorAndLog`, and a reported `errorAndLog` shows.
+- An emptied validator saves `{}`; text that is not a JSON document is refused
+  inline with no call.
+- A refused save shows inline and keeps the editor open.
+- A view, a time-series collection and a failed details read render no
+  Validation region.
+- Entering Structure still reads `meta:collectionDetails` once.
+- `collection:modify` sets a validator the server then enforces, clears it with
+  `{}`, updates level and action alone, and replaces a view's definition;
+  invalid EJSON, a non-document validator and a write stage are `VALIDATION`;
+  a missing collection is `NOT_FOUND`; a read-only connection is refused; the
+  command carries `maxTimeMS`.
+- `collection:modify` has its schema, preload binding, handler registration and
+  shared type, is classified as a write channel, and carries no `SECRET_INPUT`
+  tag.
+
+### 15.5 Test cases
+
+- Integration, `CollectionAdminService.modify` and view create: the cases in
+  §15.4 against the memory server.
+- Integration, router: empty options, half a view, mixed keys and an unknown
+  action are `VALIDATION`; valid payloads of both kinds reach the service.
+- Component, `StructureView`: placement, read mode, `{}` as no rules, edit and
+  save with refetch, `{}` on an empty textarea, invalid input, a refused save,
+  a view.
+- E2E, `w02-views-validation.e2e.ts`: Edit rules saves a `$jsonSchema` that the
+  section then shows.

@@ -3,6 +3,7 @@ import { themeVars } from '../../theme/themeVars';
 import { Button } from '@mantine/core';
 import { api, getErrorMessage, isIpcError } from '../../api/atelier';
 import type { SchemaSampleEntry, SchemaTabState } from '@shared/types';
+import { SCHEMA_SAMPLE_MAX } from '@shared/defaults';
 import { summarizeSchema } from './schemaSummary';
 
 interface Props {
@@ -13,7 +14,9 @@ interface Props {
   onPatch: (patch: Partial<SchemaTabState>) => void;
 }
 
-const SAMPLE_SIZE_OPTIONS = [50, 100, 250, 500, 1000];
+// Bounded by `meta:sampleSchema`'s zod max: a larger size is refused with
+// VALIDATION before the service runs (see SCHEMA_SAMPLE_MAX).
+const SAMPLE_SIZE_OPTIONS = [50, 100, SCHEMA_SAMPLE_MAX];
 
 export function SchemaView({
   connectionId,
@@ -24,6 +27,8 @@ export function SchemaView({
 }: Props) {
   const T = themeVars;
   const [sampling, setSampling] = React.useState(false);
+  // A tab persisted before the bound came down can carry 250/500/1000.
+  const sampleSize = Math.min(state.sampleSize, SCHEMA_SAMPLE_MAX);
 
   const runSample = React.useCallback(async () => {
     if (!connectionId || !dbName || !collection) return;
@@ -34,7 +39,7 @@ export function SchemaView({
         connectionId,
         dbName,
         collection,
-        size: state.sampleSize,
+        size: sampleSize,
       });
       const entries = summarizeSchema(docs);
       onPatch({
@@ -56,7 +61,7 @@ export function SchemaView({
     } finally {
       setSampling(false);
     }
-  }, [connectionId, dbName, collection, state.sampleSize, onPatch]);
+  }, [connectionId, dbName, collection, sampleSize, onPatch]);
 
   // Auto-sample on first open. We intentionally do not re-sample on tab
   // switches: the user explicitly hits Refresh to update, since each sample
@@ -103,7 +108,7 @@ export function SchemaView({
         <div style={{ color: T.textMuted, flex: 1 }}>
           {state.ranAt ? (
             <>
-              Sampled {state.sampledCount ?? 0} of {state.sampleSize} documents
+              Sampled {state.sampledCount ?? 0} of {sampleSize} documents
               {typeof state.durationMs === 'number' && (
                 <span style={{ color: T.textMuted }}> · {state.durationMs}ms</span>
               )}
@@ -116,7 +121,7 @@ export function SchemaView({
           <span>Sample size</span>
           <select
             aria-label="Sample size"
-            value={state.sampleSize}
+            value={sampleSize}
             onChange={(e) => onPatch({ sampleSize: Number(e.target.value) })}
             disabled={sampling}
             style={{
@@ -188,6 +193,8 @@ export function SchemaView({
               <tr style={{ position: 'sticky', top: 0, background: T.surface, zIndex: 1 }}>
                 <th style={cellHead(T)}>Field</th>
                 <th style={cellHead(T)}>Types</th>
+                <th style={{ ...cellHead(T), width: 90, textAlign: 'right' }}>Distinct</th>
+                <th style={cellHead(T)}>Range</th>
                 <th style={{ ...cellHead(T), width: 110, textAlign: 'right' }}>Frequency</th>
               </tr>
             </thead>
@@ -240,6 +247,14 @@ function SchemaRow({ entry }: { entry: SchemaSampleEntry }) {
           ))}
         </div>
       </td>
+      <td style={{ ...cellBody(T), textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+        {entry.distinct ?? '—'}
+      </td>
+      <td style={{ ...cellBody(T), fontVariantNumeric: 'tabular-nums' }}>
+        {entry.numeric
+          ? `${formatNumber(entry.numeric.min)} – ${formatNumber(entry.numeric.max)} · avg ${formatNumber(entry.numeric.avg)}`
+          : '—'}
+      </td>
       <td style={{ ...cellBody(T), textAlign: 'right' }}>
         <span style={{ color: T.textMuted, fontVariantNumeric: 'tabular-nums' }}>
           {Math.round(entry.frequency * 100)}%
@@ -247,6 +262,10 @@ function SchemaRow({ entry }: { entry: SchemaSampleEntry }) {
       </td>
     </tr>
   );
+}
+
+function formatNumber(n: number): string {
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 function cellHead(T: typeof themeVars): React.CSSProperties {

@@ -449,4 +449,189 @@ describe('CollectionAdminService', () => {
       ).toBe(ADMIN_LONG_TIMEOUT_MS);
     });
   });
+
+  // Views go through collection:create with viewOn + pipeline; collMod edits a
+  // view's definition or a collection's validation rules in place.
+  describe('views and collMod', () => {
+    async function direct<T>(fn: (db: Db) => Promise<T>): Promise<T> {
+      const client = new MongoClient(server.getUri());
+      try {
+        await client.connect();
+        return await fn(client.db(DB));
+      } finally {
+        await client.close();
+      }
+    }
+    const optionsOf = (name: string) =>
+      direct(async (db) => {
+        const [spec] = await db.listCollections({ name }).toArray();
+        return spec as { type: string; options: Record<string, unknown> } | undefined;
+      });
+
+    it('create with viewOn + pipeline makes a view that returns only the matching documents', async () => {
+      setup();
+      await direct((db) => db.collection('view_src').insertMany([{ a: 1 }, { a: 2 }, { a: 1 }]));
+
+      await svc.create({
+        connectionId: connId,
+        dbName: DB,
+        collection: 'view_a1',
+        options: { viewOn: 'view_src', pipeline: '[{"$match":{"a":{"$numberInt":"1"}}}]' },
+      });
+
+      const spec = await optionsOf('view_a1');
+      expect(spec?.type).toBe('view');
+      expect(spec?.options).toMatchObject({ viewOn: 'view_src', pipeline: [{ $match: { a: 1 } }] });
+      const docs = await direct((db) => db.collection('view_a1').find({}, { projection: { _id: 0 } }).toArray());
+      expect(docs).toEqual([{ a: 1 }, { a: 1 }]);
+    });
+
+    it.each([
+      ['a $out stage', '[{"$match":{}},{"$out":"elsewhere"}]'],
+      ['a $merge stage', '[{"$merge":{"into":"elsewhere"}}]'],
+      ['a pipeline that is not an array', '{"$match":{}}'],
+      ['a stage with two operators', '[{"$match":{},"$limit":1}]'],
+      ['a stage key without $', '[{"match":{}}]'],
+      ['a stage that is not a document', '[1]'],
+      ['invalid EJSON', '[{"$match":'],
+    ])('create refuses %s with VALIDATION and creates nothing', async (_label, pipeline) => {
+      setup();
+      await expect(
+        svc.create({ connectionId: connId, dbName: DB, collection: 'bad_view', options: { viewOn: 'view_src', pipeline } }),
+      ).rejects.toMatchObject({ code: 'VALIDATION', details: { field: 'pipeline' } });
+      expect(await listNames(DB)).not.toContain('bad_view');
+    });
+
+    it('modify sets a validator that the server then enforces, and {} clears it', async () => {
+      setup();
+      await svc.create({ connectionId: connId, dbName: DB, collection: 'validated', options: {} });
+
+      const res = await svc.modify({
+        connectionId: connId,
+        dbName: DB,
+        collection: 'validated',
+        options: { validator: '{"$jsonSchema":{"required":["name"]}}' },
+      });
+      expect(res).toEqual({ ok: true });
+      expect((await optionsOf('validated'))?.options.validator).toEqual({ $jsonSchema: { required: ['name'] } });
+      await expect(direct((db) => db.collection('validated').insertOne({ other: 1 }))).rejects.toThrow(
+        /validation/i,
+      );
+
+      await svc.modify({ connectionId: connId, dbName: DB, collection: 'validated', options: { validator: '{}' } });
+      expect((await optionsOf('validated'))?.options.validator ?? {}).toEqual({});
+      await direct((db) => db.collection('validated').insertOne({ other: 1 }));
+      expect(await direct((db) => db.collection('validated').countDocuments({ other: 1 }))).toBe(1);
+    });
+
+    it('modify updates the level and the action on their own', async () => {
+      setup();
+      await svc.create({
+        connectionId: connId,
+        dbName: DB,
+        collection: 'levels',
+        options: { validator: '{"a":{"$exists":true}}' },
+      });
+
+      await svc.modify({
+        connectionId: connId,
+        dbName: DB,
+        collection: 'levels',
+        options: { validationLevel: 'moderate', validationAction: 'warn' },
+      });
+
+      expect((await optionsOf('levels'))?.options).toMatchObject({
+        validator: { a: { $exists: true } },
+        validationLevel: 'moderate',
+        validationAction: 'warn',
+      });
+    });
+
+    it('modify on a view replaces its source and pipeline', async () => {
+      setup();
+      await direct((db) => db.collection('view_src2').insertMany([{ b: 1 }, { b: 2 }]));
+      await svc.create({
+        connectionId: connId,
+        dbName: DB,
+        collection: 'view_mod',
+        options: { viewOn: 'view_src', pipeline: '[]' },
+      });
+
+      await svc.modify({
+        connectionId: connId,
+        dbName: DB,
+        collection: 'view_mod',
+        options: { viewOn: 'view_src2', pipeline: '[{"$match":{"b":{"$numberInt":"2"}}}]' },
+      });
+
+      expect((await optionsOf('view_mod'))?.options).toMatchObject({
+        viewOn: 'view_src2',
+        pipeline: [{ $match: { b: 2 } }],
+      });
+      const docs = await direct((db) => db.collection('view_mod').find({}, { projection: { _id: 0 } }).toArray());
+      expect(docs).toEqual([{ b: 2 }]);
+    });
+
+    it.each([
+      ['invalid EJSON', '{"$jsonSchema":', 'bad_validator_ejson'],
+      ['a value that is not a document', '[1]', 'bad_validator_array'],
+    ])('modify refuses a validator that is %s with VALIDATION', async (_label, validator, collection) => {
+      setup();
+      await svc.create({ connectionId: connId, dbName: DB, collection, options: {} });
+      await expect(
+        svc.modify({ connectionId: connId, dbName: DB, collection, options: { validator } }),
+      ).rejects.toMatchObject({ code: 'VALIDATION', details: { field: 'validator' } });
+    });
+
+    it('modify refuses a write stage in a view pipeline with VALIDATION', async () => {
+      setup();
+      await expect(
+        svc.modify({
+          connectionId: connId,
+          dbName: DB,
+          collection: 'view_mod',
+          options: { viewOn: 'view_src', pipeline: '[{"$out":"x"}]' },
+        }),
+      ).rejects.toMatchObject({ code: 'VALIDATION', details: { field: 'pipeline' } });
+    });
+
+    it('modify on a missing collection is NOT_FOUND', async () => {
+      setup();
+      await expect(
+        svc.modify({ connectionId: connId, dbName: DB, collection: 'ghost_coll', options: { validator: '{}' } }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('modify rejects on a read-only connection and succeeds on the writable one', async () => {
+      tmp = createTempDb();
+      const vault = new SecretsVault(tmp.db, createSafeStorageMock());
+      pool = new MongoPool({
+        repo: makeReader([
+          makeConnection('mod-rw', hp, { defaultDb: DB }),
+          makeConnection('mod-ro', hp, { defaultDb: DB, readOnly: true }),
+        ]),
+        vault,
+      });
+      svc = new CollectionAdminService(pool);
+      await svc.create({ connectionId: 'mod-rw', dbName: DB, collection: 'ro_guard_modify', options: {} });
+      const input = { dbName: DB, collection: 'ro_guard_modify', options: { validator: '{"a":{"$exists":true}}' } };
+
+      await expect(svc.modify({ connectionId: 'mod-ro', ...input })).rejects.toMatchObject({ code: 'READ_ONLY' });
+      expect((await optionsOf('ro_guard_modify'))?.options.validator).toBeUndefined();
+
+      await svc.modify({ connectionId: 'mod-rw', ...input });
+      expect((await optionsOf('ro_guard_modify'))?.options.validator).toEqual({ a: { $exists: true } });
+    });
+
+    it('modify sends maxTimeMS: STATS_TIMEOUT_MS on the collMod command', async () => {
+      setup();
+      await svc.create({ connectionId: connId, dbName: DB, collection: 'maxtimems_modify', options: {} });
+      const commandSpy = vi.spyOn(Db.prototype, 'command');
+
+      await svc.modify({ connectionId: connId, dbName: DB, collection: 'maxtimems_modify', options: { validator: '{}' } });
+
+      const collMod = commandSpy.mock.calls.find(([cmd]) => 'collMod' in (cmd as object));
+      expect(collMod?.[0]).toMatchObject({ collMod: 'maxtimems_modify', maxTimeMS: STATS_TIMEOUT_MS });
+    });
+  });
 });

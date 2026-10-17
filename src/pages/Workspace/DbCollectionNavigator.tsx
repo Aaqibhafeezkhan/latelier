@@ -7,7 +7,8 @@ import {
 } from 'react-window';
 import type { CollectionInfo, DbInfo } from '@shared/ipc';
 import type { ConnectionSummary, ProbeErrorCode } from '@shared/types';
-import { api } from '../../api/atelier';
+import { api, getErrorMessage } from '../../api/atelier';
+import { notify } from '../../theme/notifications';
 import { copyToClipboard } from '../../utils/clipboard';
 import { disconnectConnection } from '../../features/connections/disconnectConnection';
 import { isKnownNotConnected } from '../../state/connections';
@@ -20,6 +21,7 @@ import {
 } from '../../components/ContextMenu';
 import { CreateCollectionDrawer } from './CreateCollectionDrawer';
 import { RenameCollectionModal } from './RenameCollectionModal';
+import { ModifyViewModal } from './ModifyViewModal';
 import { ImportDialog } from './ImportDialog';
 import { DropCollectionConfirm } from './DropCollectionConfirm';
 import { DropDatabaseConfirm } from './DropDatabaseConfirm';
@@ -33,6 +35,7 @@ import {
 } from './useNavigatorData';
 import { emptyCache } from './navigatorTreeReducer';
 import { ownGet } from '../../utils/ownProperty';
+import { onCollectionChanged } from '../../state/collectionChanges';
 import { isContextMenuKey, anchorForRow } from '../../utils/contextMenuKey';
 
 export interface NavigatorOpenInput {
@@ -415,6 +418,13 @@ export function DbCollectionNavigator({
     [caches, loadColls],
   );
 
+  // A write made outside the tree (Save as view in a pipeline tab) lists
+  // itself here.
+  React.useEffect(
+    () => onCollectionChanged((c) => refreshDb(c.connectionId, c.dbName)),
+    [refreshDb],
+  );
+
   // Re-populates every previously-expanded DB (except the active one, already
   // re-fetched elsewhere) after a whole-connection refresh. Its loads are
   // forced: an emptied cache means the old in-flight answers are not wanted.
@@ -447,6 +457,7 @@ export function DbCollectionNavigator({
     menu,
     createCollDb,
     renameTarget,
+    modifyViewTarget,
     dropCollTarget,
     dropDbTarget,
     importTarget,
@@ -454,6 +465,7 @@ export function DbCollectionNavigator({
     setMenu,
     setCreateCollDb,
     setRenameTarget,
+    setModifyViewTarget,
     setDropCollTarget,
     setDropDbTarget,
     setImportTarget,
@@ -463,6 +475,8 @@ export function DbCollectionNavigator({
     handleCollectionCreated,
     cancelRename,
     handleCollectionRenamed,
+    cancelModifyView,
+    handleViewModified,
     cancelDropColl,
     handleCollectionDropped,
     cancelDropDb,
@@ -903,9 +917,12 @@ export function DbCollectionNavigator({
           kind: 'item',
           label: 'Modify view',
           icon: I.edit,
-          onClick: () => {},
-          disabled: true,
-          disabledTitle: 'Coming soon',
+          onClick: () =>
+            setModifyViewTarget({
+              connectionId: row.connectionId,
+              dbName: row.dbName,
+              collection: row.coll.name,
+            }),
         }
       : {
           kind: 'item',
@@ -930,7 +947,7 @@ export function DbCollectionNavigator({
         }),
       destructive: true,
     },
-  ], [openFromRow, setRenameTarget, setDropCollTarget, setImportTarget, onOpenReferences]);
+  ], [openFromRow, setRenameTarget, setModifyViewTarget, setDropCollTarget, setImportTarget, onOpenReferences]);
 
   const buildDbMenu = React.useCallback((row: Extract<TreeRow, { kind: 'db' }>): MenuItem[] => [
     {
@@ -982,9 +999,12 @@ export function DbCollectionNavigator({
         kind: 'item',
         label: 'Copy connection string',
         icon: I.copy,
-        onClick: () => {},
-        disabled: true,
-        disabledTitle: 'Coming soon',
+        // Main builds the URI without the saved password, so none reaches the clipboard.
+        onClick: () =>
+          void api.conn
+            .getUri(id)
+            .then(({ uri }) => copyToClipboard(uri, 'Connection string copied — password not included.'))
+            .catch((e: unknown) => notify.error(getErrorMessage(e, 'Could not build the connection string'))),
       },
       { kind: 'sep' },
     ];
@@ -1262,6 +1282,17 @@ export function DbCollectionNavigator({
           returnFocusTo={menuTrigger}
           onCancel={cancelRename}
           onRenamed={handleCollectionRenamed}
+        />
+      )}
+
+      {modifyViewTarget && (
+        <ModifyViewModal
+          connectionId={modifyViewTarget.connectionId}
+          dbName={modifyViewTarget.dbName}
+          collection={modifyViewTarget.collection}
+          returnFocusTo={menuTrigger}
+          onClose={cancelModifyView}
+          onSaved={handleViewModified}
         />
       )}
 

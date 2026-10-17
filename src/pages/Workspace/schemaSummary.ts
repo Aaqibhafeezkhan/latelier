@@ -9,9 +9,13 @@ import { isExactSentinel } from '../../utils/ejson';
  * Frequency = fraction of documents in which the field appears, regardless
  * of how many times the field repeats inside an array. Type histograms also
  * count once per document so percentages add up to the field's frequency.
+ *
+ * `distinct` and `numeric` are derived from the same sample and are numbers
+ * only: the sample values themselves are never kept, because `entries` is
+ * persisted with the tab (W16 §14).
  */
 export function summarizeSchema(docs: unknown[]): SchemaSampleEntry[] {
-  const counts = new Map<string, { types: Map<string, number>; total: number }>();
+  const counts = new Map<string, PathInfo>();
   for (const doc of docs) {
     // Stryker disable next-line ConditionalExpression: `walk` opens with the
     // same `!isObject(value)` guard and returns immediately for a non-object
@@ -26,11 +30,19 @@ export function summarizeSchema(docs: unknown[]): SchemaSampleEntry[] {
   const total = docs.length || 1;
   const out: SchemaSampleEntry[] = [];
   for (const [path, info] of counts.entries()) {
-    out.push({
+    const entry: SchemaSampleEntry = {
       path,
       frequency: info.total / total,
       types: Object.fromEntries(info.types.entries()),
-    });
+    };
+    if (info.values.size > 0) entry.distinct = info.values.size;
+    // A sum that overflows makes the average Infinity, which JSON persists as
+    // null; a null `avg` would crash the row on restore, so there is no range.
+    const avg = info.numSum / info.numCount;
+    if (info.numCount > 0 && Number.isFinite(avg)) {
+      entry.numeric = { min: info.numMin, max: info.numMax, avg };
+    }
+    out.push(entry);
   }
   out.sort((a, b) => {
     if (a.path === '_id') return -1;
@@ -41,10 +53,37 @@ export function summarizeSchema(docs: unknown[]): SchemaSampleEntry[] {
   return out;
 }
 
+interface PathInfo {
+  types: Map<string, number>;
+  total: number;
+  /** `JSON.stringify` of each distinct scalar occurrence, so `1` and `"1"` differ. */
+  values: Set<string>;
+  numCount: number;
+  numMin: number;
+  numMax: number;
+  numSum: number;
+}
+
+/**
+ * The finite number a scalar holds, or undefined. Docs arrive as canonical
+ * EJSON, so a number is a `$number*` sentinel wrapping a string; a raw JS
+ * number is accepted too. `$numberDouble: "NaN"` and the infinities are not
+ * data a range can summarise.
+ */
+function numericValue(v: unknown): number | undefined {
+  let n: number | undefined;
+  if (typeof v === 'number') n = v;
+  else if (isObject(v)) {
+    const raw = v.$numberInt ?? v.$numberDouble ?? v.$numberLong ?? v.$numberDecimal;
+    if (typeof raw === 'string') n = Number.parseFloat(raw);
+  }
+  return n !== undefined && Number.isFinite(n) ? n : undefined;
+}
+
 function walk(
   prefix: string,
   value: unknown,
-  acc: Map<string, { types: Map<string, number>; total: number }>,
+  acc: Map<string, PathInfo>,
   seenPaths: Set<string>,
   seenPathTypes: Set<string>,
 ): void {
@@ -59,7 +98,15 @@ function walk(
     const t = inferType(v);
     let info = acc.get(path);
     if (!info) {
-      info = { types: new Map(), total: 0 };
+      info = {
+        types: new Map(),
+        total: 0,
+        values: new Set(),
+        numCount: 0,
+        numMin: Number.POSITIVE_INFINITY,
+        numMax: Number.NEGATIVE_INFINITY,
+        numSum: 0,
+      };
       acc.set(path, info);
     }
     if (!seenPaths.has(path)) {
@@ -70,6 +117,18 @@ function walk(
     if (!seenPathTypes.has(typeKey)) {
       info.types.set(t, (info.types.get(t) ?? 0) + 1);
       seenPathTypes.add(typeKey);
+    }
+    // A scalar is anything that is not an array or a plain sub-document: an
+    // exact EJSON sentinel (ObjectId, Date, a number...) is one value.
+    if (!Array.isArray(v) && (!isObject(v) || isExactSentinel(v))) {
+      info.values.add(String(JSON.stringify(v)));
+      const n = numericValue(v);
+      if (n !== undefined) {
+        info.numCount += 1;
+        info.numMin = Math.min(info.numMin, n);
+        info.numMax = Math.max(info.numMax, n);
+        info.numSum += n;
+      }
     }
     // Recurse into plain objects — but skip EJSON wrappers (they are not
     // user-meaningful sub-documents).

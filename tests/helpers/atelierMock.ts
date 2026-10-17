@@ -27,6 +27,7 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
     conn: {
       list: async () => [],
       get: unused('conn.get') as IpcApi['conn']['get'],
+      getUri: unused('conn.getUri') as IpcApi['conn']['getUri'],
       create: unused('conn.create') as IpcApi['conn']['create'],
       update: unused('conn.update') as IpcApi['conn']['update'],
       delete: unused('conn.delete') as IpcApi['conn']['delete'],
@@ -67,6 +68,7 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
     meta: {
       listDatabases: async () => [],
       listCollections: async () => [],
+      collectionDetails: unused('meta.collectionDetails') as IpcApi['meta']['collectionDetails'],
       sampleSchema: async () => ({ docs: [] }),
     },
     index: {
@@ -78,6 +80,7 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
       create: unused('collection.create') as IpcApi['collection']['create'],
       drop: unused('collection.drop') as IpcApi['collection']['drop'],
       rename: unused('collection.rename') as IpcApi['collection']['rename'],
+      modify: unused('collection.modify') as IpcApi['collection']['modify'],
     },
     database: {
       drop: unused('database.drop') as IpcApi['database']['drop'],
@@ -349,6 +352,7 @@ function makePermissiveStub(): IpcApi {
     conn: {
       list: async () => [],
       get: noopAsync as IpcApi['conn']['get'],
+      getUri: noopAsync as IpcApi['conn']['getUri'],
       create: noopAsync as IpcApi['conn']['create'],
       update: noopAsync as IpcApi['conn']['update'],
       delete: async (id) => ({ id }),
@@ -387,6 +391,7 @@ function makePermissiveStub(): IpcApi {
     meta: {
       listDatabases: async () => [],
       listCollections: async () => [],
+      collectionDetails: noopAsync as IpcApi['meta']['collectionDetails'],
       sampleSchema: async () => ({ docs: [] }),
     },
     index: {
@@ -398,6 +403,7 @@ function makePermissiveStub(): IpcApi {
       create: noopAsync as IpcApi['collection']['create'],
       drop: async () => ({ dropped: true }),
       rename: noopAsync as IpcApi['collection']['rename'],
+      modify: noopAsync as IpcApi['collection']['modify'],
     },
     database: {
       drop: async () => ({ dropped: true as const }),
