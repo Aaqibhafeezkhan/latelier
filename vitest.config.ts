@@ -9,6 +9,14 @@ export default defineConfig({
     },
   },
   test: {
+    // Off unless asked for (`npm test -- --coverage`); CI sends the lcov
+    // reports to SonarCloud. `include` lists the app's own code so a file no
+    // test loads reports as uncovered rather than not at all.
+    coverage: {
+      provider: 'v8',
+      reporter: ['lcovonly'],
+      include: ['{electron,src,shared}/**/*.{ts,tsx}'],
+    },
     projects: [
       {
         extends: true,

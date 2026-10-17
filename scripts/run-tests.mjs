@@ -40,8 +40,16 @@ const VITEST_BIN = join(dirname(vitestManifest), createRequire(vitestManifest)('
 // not to raise this again.
 const TIMEOUT_MS = 15 * 60 * 1000;
 
+// Extra arguments go to every project (`npm test -- --coverage` in CI). Each
+// project is its own vitest run and would wipe the previous one's report, so a
+// coverage run writes one per project for SonarCloud to merge.
+const extra = process.argv.slice(2);
+const coverage = extra.includes('--coverage');
+
 for (const project of PROJECTS) {
-  const result = spawnSync(process.execPath, [VITEST_BIN, 'run', '--project', project], {
+  const args = [VITEST_BIN, 'run', '--project', project, ...extra];
+  if (coverage) args.push(`--coverage.reportsDirectory=coverage/${project}`);
+  const result = spawnSync(process.execPath, args, {
     stdio: 'inherit',
     timeout: TIMEOUT_MS,
     killSignal: 'SIGKILL',

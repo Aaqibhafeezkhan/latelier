@@ -24,7 +24,7 @@ export default defineConfig([
   // `.stryker-tmp` is Stryker's sandbox — a full repo copy per mutation run,
   // same class of false red as `.claude/worktrees` above: a nested
   // tsconfig.json makes typescript-eslint unable to pick one tsconfigRootDir.
-  globalIgnores(['dist', 'dist-electron', 'node_modules', '.claude/workflows', '.claude/worktrees', '.remember', '.docket', '.stryker-tmp', 'reports']),
+  globalIgnores(['dist', 'dist-electron', 'node_modules', '.claude/workflows', '.claude/worktrees', '.remember', '.docket', '.stryker-tmp', 'reports', 'coverage']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

@@ -56,6 +56,9 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so SonarCloud can tell new code from old by blame.
+          fetch-depth: 0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -115,7 +118,15 @@ jobs:
         run: node node_modules/mongodb-memory-server/postinstall.js
 
       - name: Unit + integration + component tests
-        run: npm test
+        run: npm test -- --coverage
+
+      # Sends the coverage above, with the code analysis, to SonarCloud. A fork's
+      # PR gets no secrets, so it is skipped there rather than failed.
+      - name: SonarCloud scan
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   # Runs on PRs targeting `main`, on pushes to `main`, and on manual dispatch.
   # It was `workflow_dispatch`-only while free runner minutes were the binding
