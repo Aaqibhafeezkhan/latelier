@@ -17,7 +17,7 @@ import { copyToClipboard } from '../../../utils/clipboard';
 import { ownGet } from '../../../utils/ownProperty';
 import { condFromDragged } from '../builder';
 import { useCollectionWorkspace } from '../context';
-import { insertAt, parseFilter, printFilter } from '../filterTree';
+import { andAtRoot, parseFilter, printFilter } from '../filterTree';
 import { useResultSelection } from '../resultSelection';
 import { DocFieldTree, DOC_FIELD_TREE_GRID_TEMPLATE, type FieldMenuOpenPayload } from './DocFieldTree';
 import { getDocId, getFullDocId } from './docId';
@@ -554,7 +554,7 @@ export function TreeView({
         notify.error("Nothing added — the filter bar's text isn't valid JSON.");
         return;
       }
-      const nextRoot = insertAt(parsed.root, [], condFromDragged({ field: fieldPath, value }));
+      const nextRoot = andAtRoot(parsed.root, condFromDragged({ field: fieldPath, value }));
       const printed = printFilter(nextRoot);
       if (!printed.ok) {
         notify.error('Nothing added — the filter could not be updated.');

@@ -103,7 +103,7 @@ describe('Filter drawer — raw clauses (W13 §6, §11)', () => {
     await waitFor(() => {
       expect(screen.queryByPlaceholderText('$op')).toBeNull();
     });
-    const rawInput = (await screen.findByLabelText('Raw clause')) as HTMLTextAreaElement;
+    const rawInput = (await screen.findByLabelText('Raw clause 1')) as HTMLTextAreaElement;
     expect(rawInput.value).toBe('');
     // The (only) cond turned into a blank pending raw node, so the group has
     // no printable children left — printFilter emits `{}` (§3a: "a root with
@@ -132,7 +132,7 @@ describe('Filter drawer — raw clauses (W13 §6, §11)', () => {
       makeState({ queryRaw: '{"items":{"$elemMatch":{"sku":1}}}' }),
     );
 
-    const rawInput = (await screen.findByLabelText('Raw clause')) as HTMLTextAreaElement;
+    const rawInput = (await screen.findByLabelText('Raw clause 1')) as HTMLTextAreaElement;
     expect(rawInput.value).toBe('{"items":{"$elemMatch":{"sku":1}}}');
 
     fireEvent.change(rawInput, { target: { value: '{"items":{"$elemMatch":{"sku":2}}}' } });
@@ -160,10 +160,10 @@ describe('Filter drawer — raw clauses (W13 §6, §11)', () => {
     const bar = (await screen.findByTestId('query-bar-input')) as HTMLTextAreaElement;
 
     // Convert the cond row to raw via its row menu.
-    fireEvent.click(await screen.findByRole('button', { name: 'Condition options' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Condition options 1' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Convert to raw clause' }));
 
-    const rawInput = (await screen.findByLabelText('Raw clause')) as HTMLTextAreaElement;
+    const rawInput = (await screen.findByLabelText('Raw clause 1')) as HTMLTextAreaElement;
     expect(JSON.parse(rawInput.value)).toEqual({ status: { $eq: 'paid' } });
     expect(JSON.parse(bar.value)).toEqual({ status: { $eq: 'paid' } });
 
@@ -172,7 +172,7 @@ describe('Filter drawer — raw clauses (W13 §6, §11)', () => {
     // Back to a cond row: field/op/value inputs render again, raw textarea
     // is gone.
     await waitFor(() => {
-      expect(screen.queryByLabelText('Raw clause')).toBeNull();
+      expect(screen.queryByLabelText(/^Raw clause [\d.]+$/)).toBeNull();
     });
     const fieldInput = (await screen.findByPlaceholderText('field')) as HTMLInputElement;
     expect(fieldInput.value).toBe('status');

@@ -42,28 +42,44 @@ Phase 1 shipped previously.
 /** Node identity IS its position. No generated ids to keep stable. */
 export type NodePath = readonly number[];
 
+// The node types live in shared/types.ts and are re-exported from here.
+export type { CondNode, RawNode, GroupNode, FilterNode } from '@shared/types';
+
+// shared/types.ts
 export interface CondNode {
   kind: 'cond';
   field: string;
   op: string;               // any $-prefixed op; print validates
   valType: ValType;         // see the note below — take it from builder.ts
   value: string;            // raw text, typed at print time
+  disabled?: boolean;
 }
 
 export interface RawNode {
   kind: 'raw';
   /** One clause, verbatim. Printed byte-for-byte after a parse check. */
   json: string;
+  disabled?: boolean;
 }
 
 export interface GroupNode {
   kind: 'group';
   logic: '$and' | '$or' | '$nor';
   children: FilterNode[];
+  disabled?: boolean;       // never set on the root group
 }
 
 export type FilterNode = GroupNode | CondNode | RawNode;
 ```
+
+The node types live in `shared/types.ts`, not in `filterTree.ts`, because a
+tab's persisted draft (§5.7) holds a tree and `shared/` cannot import from the
+renderer. `filterTree.ts` re-exports them, so callers keep one import site.
+
+`disabled` switches a node off without deleting it: it stays in the tree, on
+screen and editable, but the printer treats it as pending (§3). `parseFilter`
+never sets it, so it only ever exists in a drawer's own tree and its draft.
+The root group is never disabled; the drawer offers no control for it.
 
 The root is **always** a `GroupNode`. `ValType`, `FIELD_OPS`, `isApplicableOp`,
 `buildTypedValue`, and `coerceArrayElement` carry over unchanged — W13 replaces
@@ -101,6 +117,7 @@ the most idiomatic filter there is (`{ status: "active", qty: { $gt: 5 } }`).
 | `{ name: { $eq: "x" } }` | one cond |
 | `{ a: 1, b: 2 }` | root `$and`, two conds |
 | `{ $and: [...] }` / `{ $or: [...] }` / `{ $nor: [...] }` | group, recursive |
+| `{ $nor: [x] }` (exactly one item) | root `$and` holding a one-child `$nor` group: a NOT (§4), kept as a group so it reads back as one |
 | `{ a: { $gte: 1, $lte: 5 } }` | two conds — **only** per §2a |
 | `{ a: { $regex: "x", $options: "i" } }` | one **raw** node (§2a) |
 | `{ items: { $elemMatch: {...} } }` | one raw node |
@@ -204,7 +221,11 @@ node the printer can't encode never reaches `queryRaw`, so it can never reach
 
 **Non-blocking:** a cond whose `field` is empty, or a raw node whose `json` is
 blank/whitespace, is **pending** (§5) — skipped by the printer, never a
-problem. A cond whose op is outside `FIELD_OPS[valType]` still prints;
+problem. A **disabled** node of any kind is pending too, together with its
+whole subtree, and is checked first: a switched-off row with an invalid value
+never blocks the rest of the filter. A nested group left with no printable
+children is omitted (§3a), so a `$nor` whose only child is disabled prints
+nothing rather than `{"$nor":[]}`. A cond whose op is outside `FIELD_OPS[valType]` still prints;
 applicability is advisory, as today.
 
 ### 3a. Normalizations the printer performs
@@ -252,15 +273,33 @@ Both go in `filter-tree.spec.ts` (§10).
 ```ts
 export function nodeAt(root: GroupNode, path: NodePath): FilterNode | null;
 export function updateAt(root: GroupNode, path: NodePath, next: FilterNode): GroupNode;
-export function insertAt(root: GroupNode, parent: NodePath, node: FilterNode): GroupNode;
+export function insertAt(root: GroupNode, parent: NodePath, node: FilterNode, index?: number): GroupNode;
 export function removeAt(root: GroupNode, path: NodePath): GroupNode;
 export function wrapInGroup(root: GroupNode, path: NodePath, logic: GroupNode['logic']): GroupNode;
+export function unwrapGroup(root: GroupNode, path: NodePath): GroupNode; // a one-child nested group → its child
+export function andAtRoot(root: GroupNode, node: FilterNode): GroupNode;   // one more requirement on the whole filter
 export function toRawNode(cond: CondNode): RawNode;     // best-effort encode; falls back to a blank pending raw node
 export function tryParseRaw(raw: RawNode): FilterNode;  // raw → cond(s) when §2 can model it (wrapped in $and if >1), else unchanged
 ```
 
 All are pure and return new roots. `removeAt` on the last child of a nested
 group removes the empty group too; the root group is never removed.
+`insertAt` appends when `index` is omitted and clamps an out-of-range one;
+the drawer's *Insert condition above / below* pass the row's own index or the
+one after it.
+
+**Negation** needs no node kind of its own: NOT over any subtree is a
+one-child `$nor`, which prints and parses as plain MongoDB. Negating is
+`wrapInGroup(root, path, '$nor')`; removing it is `unwrapGroup`, which
+replaces a nested group holding exactly one child with that child, and
+returns `root` itself for anything else (the root, a non-group, a group of
+several children, a path that does not resolve). A NOT round-trips through
+the text: `parseFilter` keeps a top-level one-child `$nor` as a group under an
+`$and` root (§2) instead of absorbing it into the root, which never shows NOT.
+A root `$or`, or a `$nor` of several items, still parses to the root itself. A disabled group hands its
+`disabled` to the child it leaves behind, so removing the wrapper never
+switches a condition back on. `toRawNode` and `tryParseRaw` carry `disabled`
+over the same way. Field-level `$not` stays a raw node (§2).
 
 `toRawNode`'s fallback is a blank **pending** raw node (§5), never `{}` — `{}`
 matches everything, so under `$or` a bad fallback would make the group
@@ -305,16 +344,80 @@ text:
    "+ Raw" the latter — without this, a fresh raw row would be a blocking
    problem (§3) the instant it's created, firing the "N not applied" badge
    before the user has typed anything.
-5. **Commit**: every edit calls `printFilter`. On `ok`, patch
-   `{ queryRaw: json }` and set `lastPrinted = json`. On failure, patch
-   nothing — the tree keeps the edit, the offending row renders its message
-   inline, and `queryRaw` stays at the last good value.
+5. **Commit**: every edit calls `printFilter`. On `ok` with new text, patch
+   `{ queryRaw: json }` and set `lastPrinted = json`. On failure, `queryRaw`
+   is not patched — the tree keeps the edit, the offending row renders its
+   message inline, and `queryRaw` stays at the last good value. Every edit,
+   whatever the outcome, also writes the draft (§5.7).
 6. **Tab switch.** Two tabs commonly share identical `queryRaw` (`'{}'` is the
    default), so the reconcile rule's text-equality check alone can't detect a
    tab switch — it would keep tab A's local tree, pending rows included,
    displayed for tab B. The drawer mounts with `key={tabId}`, so a tab switch
-   always remounts and re-seeds from `parseFilter(queryRaw)` regardless of
-   whether the text changed.
+   always remounts, and the remount re-seeds from **that tab's own** draft
+   when it still matches, else from `parseFilter(queryRaw)` (§5.7). Pending
+   and disabled rows therefore survive a tab switch. They are dropped only by
+   an outside text edit (the reconcile rule above), Reset, a Saved/Recent
+   load, or Clear filter.
+
+### 5.7 Persisted draft and history
+
+The text cannot carry a pending or a disabled row, so a tree rebuilt from the
+text alone loses them; a user who switched a condition off to try the query
+without it would lose the condition on the next tab switch. The drawer's own
+tree is therefore persisted with the tab, as
+`CollectionTabState.filterDraft: { root: GroupNode; queryRaw: string }` —
+the tree and the `queryRaw` it was last consistent with.
+
+- **Seed.** On mount, the draft is considered only when
+  `draft.queryRaw === queryRaw` and `draft.root` is a group. It then has to
+  print: `ok` with exactly `queryRaw` uses the draft; blocked uses the draft
+  with its problems, so the "N not applied" banner is back on first render;
+  `ok` with any other text ignores the draft and seeds from `parseFilter`,
+  so the drawer never shows a tree other than the one that runs. Without a
+  usable draft, `parseFilter(queryRaw)` as before.
+- **Seed over invalid text.** When `queryRaw` doesn't parse, a draft that is
+  a group and either is blocked or prints to its own `draft.queryRaw` seeds
+  the drawer frozen, read-only, with the note of §6a for a draft. The draft
+  is the drawer's own last state, not necessarily the last valid text: the
+  bar may have moved through other valid text while the drawer wasn't
+  mounted. Returning the bar to `draft.queryRaw` restores that tree, its
+  switched-off and pending rows included; any other valid text re-parses as
+  an outside edit. Without such a draft the drawer freezes on an empty tree
+  that stands for no text, so only valid text unfreezes it.
+- **Reconcile** (rule 3) still always parses and never reads the draft: an
+  outside text edit wins. One made while the drawer is mounted clears the
+  draft (`filterDraft: undefined`), so a later return to the same text can't
+  bring the replaced rows back on the next remount. One made while the drawer
+  is not mounted clears nothing: the draft is unused while the text is other
+  valid text, seeds the drawer frozen while the text doesn't parse (above),
+  and would seed again if the text came back to it.
+- **Commit.** Every edit patches `filterDraft: { root, queryRaw }`, with the
+  `queryRaw` that is current once the edit lands — the new text on an `ok`
+  print, the unchanged last good text on a no-op or blocked one. That
+  includes edits whose printed text does not change (adding a pending row,
+  switching a row off), which patch the draft and nothing else.
+- **Clear.** Reset, a Saved or Recent load, and *Clear filter* patch
+  `filterDraft: undefined` together with their `queryRaw`, so the rows of the
+  filter just replaced can't come back. Reset and the loads also remount the
+  drawer. *Clear filter* doesn't, and its `'{}'` can equal the text the tree
+  already prints to (only switched-off or pending rows left, or a later page
+  of an unfiltered query), so the drawer can't see it by comparing text.
+  Instead, a draft removed while the drawer is mounted, by anything other
+  than the drawer's own reconcile, re-seeds the drawer from `queryRaw` as a
+  remount would, so the tree on screen never holds rows its draft no longer
+  does.
+- **What runs.** Save, Recent and Copy code all read `queryRaw`, so a disabled
+  condition is never saved, recorded or copied.
+
+**History.** The drawer keeps an undo/redo history of its tree (`filterHistory.ts`:
+`past` / `present` / `future`, capped at 100 steps). Every edit pushes; edits
+carrying the same coalescing key back to back — keystrokes in one text box of
+one row — are one step. An edit that lands back on the tree the step began
+from (typing then deleting back) leaves no step at all. Undo and redo commit the tree they land on through
+the same print-and-commit path as any edit. The history is in memory only: it
+restarts from the new tree on an outside text edit, and a remount (tab
+switch, Reset, a Saved or Recent load) drops it, which is why Reset keeps its
+confirm.
 
 Consequence to accept knowingly: while a node has a blocking problem, Run
 executes the *last good* filter, not what is on screen. The drawer header
@@ -354,10 +457,27 @@ unchanged.
 ```
 
 - **Group header**: logic segmented control + the three add buttons. Nested
-  groups render their own header, indented, with a left rule.
+  groups render their own header, indented, with a left rule, plus an
+  *Include group N* checkbox before the logic control and a *Negate group N*
+  button, where *N* is the group's position counted from 1 (`2.1` is the first
+  child of the second), so no two groups' controls share a name. A nested
+  one-child `$nor` shows as **NOT** in place of the logic control, with a
+  *Remove negation N* button; a second child turns it back into
+  an ordinary NOR group. The root group's header carries *Undo filter edit*
+  and *Redo filter edit* (§5.7), named for what they undo because a write's
+  own Undo toast can be on screen at the same time.
+- **Include checkbox**: every cond and raw row starts with one
+  (*Include condition &lt;field&gt;*, *Include raw clause*). Unchecking sets
+  `disabled` (§1): the row stays, dimmed but editable, and leaves `queryRaw`.
+  The dimming is visual only, so everything inside a switched-off group —
+  each row's checkbox and raw textarea, each nested group's checkbox — is
+  also described by a visually hidden note, "Excluded: its group is switched
+  off".
 - **Cond row**: unchanged from W04 §5 (field / op / valType / value, both
-  autocompletes per X02 and X03). The `⋮` menu adds: *Convert to raw clause*,
-  *Wrap in group*, *Duplicate*, *Remove*.
+  autocompletes per X02 and X03). The `⋮` menu adds: *Insert condition
+  above* / *below* (a blank pending row at that index, with the caret in its
+  field box), *Convert to raw clause*, *Wrap in group*, *Negate (NOT)*,
+  *Duplicate*, *Remove*.
 - **Unmodelled op is no longer a dead end.** Typing `$elemMatch` into the op
   input replaces W04's terminal warning with a one-click **Convert to raw
   clause** button that seeds a raw node from the row. The old message —
@@ -383,6 +503,10 @@ unchanged.
 - Invalid JSON in the bar keeps today's warn underline. The drawer freezes on
   the last successfully parsed tree, renders read-only, and shows
   *"Filter text isn't valid JSON — the tree below is the last valid version."*
+  A drawer that mounted over invalid text and seeded from the tab's draft
+  (§5.7) can't claim that, so it shows *"Filter text isn't valid JSON —
+  showing this filter as you last left it in the drawer. Fix the text in the
+  bar to edit it."* instead.
 - The advanced grid (projection / sort / skip / limit) stays and becomes the
   **sole** editor for those fields — see §7.
 
@@ -442,6 +566,9 @@ payloads are JSON in the saved-queries table.
 
 **Tab state** (`CollectionTabState`):
 - `queryRaw` becomes required, default `'{}'`.
+- `filterDraft` (§5.7) is an additive, optional key: no migration, and no IPC
+  change, since `tabs:update` passes unknown keys through. A tab persisted
+  before it restores exactly as before, seeded from `queryRaw`.
 - `queryDirty` is **removed**. Stale keys in persisted state are ignored.
 - `BuilderState` shrinks to `{ sort: string; limit: string; projection: string[] }`.
   `conditions` and `logic` leave the live type. Open tabs lose their condition
@@ -546,11 +673,20 @@ Retired test ids and controls, so the churn isn't a surprise:
 - "+ Raw" adds a row that persists on screen and does not change `queryRaw`, same as "+ Condition".
 - Filling that row's field writes the printed filter to `queryRaw`.
 - Typing in the query bar re-seeds the tree and discards pending rows.
-- Switching tabs discards pending rows and re-seeds from `queryRaw`, even when both tabs' text is identical.
+- Switching tabs re-seeds each tab from its own state, even when both tabs' text is identical: a tab whose draft still matches its `queryRaw` gets its pending and disabled rows back; a tab with no draft shows only what its text holds.
+- Unchecking a row's or nested group's include checkbox removes it from `queryRaw` and keeps it on screen; re-checking restores the previous `queryRaw`.
+- A draft that prints to text other than `queryRaw`, or was written for other text, is ignored; a blocked draft seeds with its "N not applied" banner.
+- Reset, a Saved or Recent load, and Clear filter drop the draft, and the drawer's rows with it, even when Clear filter writes the text the tree already prints to.
+- *Negate (NOT)* and *Negate group* wrap the node in a one-child `$nor`, shown as NOT; *Remove negation* restores the node.
+- A NOT re-parses as the same NOT group, a top-level one included.
+- *Add to filter* from Tree or Table view requires the new condition of the whole filter: with a root `$or` or `$nor` it is ANDed beside the root group, never added inside it.
+- *Insert condition above / below* adds a blank row at that position, focused, without changing `queryRaw`.
+- Undo and redo step the tree and `queryRaw` back and forth; typing into one box is one step; an outside text edit clears the history.
 - An edit whose print fails leaves `queryRaw` untouched and shows the message on that row.
 - Typing `$elemMatch` into an op input offers "Convert to raw clause"; one click produces an editable raw node.
 - "Try to parse" converts a modellable raw node back into conds.
 - Invalid JSON in the bar leaves the drawer showing the last valid tree, read-only, with the banner.
+- A drawer mounted over invalid text with a usable draft shows the draft's tree read-only, with the note that it is the filter as last left in the drawer, not the last valid version; returning the bar to the draft's text restores it with its switched-off and pending rows, and other valid text re-parses.
 
 **Integration**
 - No sync pill, "Re-sync builder", "Accept builder", or "Builder disabled" control exists anywhere.
@@ -579,20 +715,31 @@ Retired test ids and controls, so the churn isn't a surprise:
 - Fixpoint: iterate the whole corpus, assert `print(parse(print(parse(s)))) === print(parse(s))`.
 - Semantics: hand-checked (input, expected-output) pairs — the corpus that the fixpoint property cannot cover.
 - Problems: each blocking case of §3 returns the correct `path`.
+- Disabled nodes: a disabled cond, raw node or group prints as pending with no problem; a `$nor` whose only child is disabled is omitted; `parseFilter` never sets `disabled`; `toRawNode` / `tryParseRaw` carry it over.
+- `unwrapGroup`: unwraps a one-child nested group; returns `root` for the root, a multi-child group, a cond and a bad path. Negating a top-level cond prints `{"$nor":[…]}` and parses back to the same tree: a NOT group under an `$and` root.
+- `andAtRoot`: appends to an `$and` root; wraps a root `$or` / `$nor` in an `$and` beside the new node.
 - Edit API: `updateAt` / `insertAt` / `removeAt` / `wrapInGroup` purity and path arithmetic; `removeAt` collapsing an emptied nested group; the root group surviving; `toRawNode`'s fallback is a blank pending raw node, never `{}`; `tryParseRaw` on a clause modeling to more than one cond returns an `$and`-wrapped group, and a single-cond clause returns bare.
+
+### Property — `tests/unit/filterTree.property.spec.ts`, `tests/unit/filterHistory.property.spec.ts`
+- Printing a tree with disabled nodes equals printing it with those nodes removed.
+- `unwrapGroup(wrapInGroup(t, p, '$nor'), p)` is `t` for any node of any tree.
+- `k` undos then `k` redos return the same present; `past` never exceeds the cap.
+
+### Unit — `tests/unit/filterHistory.spec.ts`
+- Push, coalescing by key, undo/redo identity on empty, the cap, and undo/redo forgetting the last key.
 
 ### Unit — `tests/unit/legacy-builder.spec.ts`
 - `legacyCompileFilter` still produces the pre-W13 filter for a populated legacy `BuilderState` (pinned so the shim can't drift).
 
 ### Component
-- **filter-tree-drawer.spec.tsx**: add / edit / remove / nest, each asserted through `queryRaw`.
-- **filter-tree-pending.spec.tsx**: the pending-row lifecycle of §5, including a bar edit landing underneath a pending row, and switching tabs discarding pending rows even when both tabs' text is identical (the drawer remounts on `key={tabId}`).
+- **filter-tree-drawer.spec.tsx**: add / edit / remove / nest, each asserted through `queryRaw`; disable a row and a group; seeding from a matching, stale, differently-printing and blocked draft; Reset clearing the draft; negate and remove negation; insert above / below; undo / redo, coalescing and the history reset on an outside edit.
+- **filter-tree-pending.spec.tsx**: the pending-row lifecycle of §5, including a bar edit landing underneath a pending row, and switching tabs re-seeding each tab from its own state even when both tabs' text is identical (the drawer remounts on `key={tabId}`; tab A's pending row comes back from its draft).
 - **filter-tree-raw.spec.tsx**: convert-to-raw, edit raw, try-to-parse.
 - **filter-tree-print-failure.spec.tsx**: a bad value leaves `queryRaw` untouched and surfaces the row message.
 - **saved-legacy-payload.spec.tsx**: the §8 shim — legacy payload hydrates to its original filter.
 
 ### E2E
-- **workspace-filter-tree.e2e.ts**: open a seeded collection → build `(a AND (b OR c))` in the drawer → Run → results → hand-edit the bar to an `$elemMatch` → the drawer shows a raw clause rather than disabling → Run still works.
+- **workspace-filter-tree.e2e.ts**: open a seeded collection → build `(a AND (b OR c))` in the drawer → Run → results → hand-edit the bar to an `$elemMatch` → the drawer shows a raw clause rather than disabling → Run still works. A second test switches a condition off and runs without it, keeps it across a switch to another tab and back, then negates it and runs NOT.
 
 ## 12. Spec migration
 

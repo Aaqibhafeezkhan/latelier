@@ -5,6 +5,8 @@
 // custom glyph used, so layouts don't shift. Icons inherit color via
 // `currentColor` (Tabler's default), preserving existing theme styling.
 import {
+  IconArrowBackUp,
+  IconArrowForwardUp,
   IconArrowRight,
   IconArrowsMaximize,
   IconChartLine,
@@ -101,4 +103,6 @@ export const I = {
   // is accurate. Parentheses are how a nested boolean group is written.
   group: <IconParentheses size={13} stroke={s} />,
   link: <IconLink size={13} stroke={s} />,
+  undo: <IconArrowBackUp size={13} stroke={s} />,
+  redo: <IconArrowForwardUp size={13} stroke={s} />,
 };

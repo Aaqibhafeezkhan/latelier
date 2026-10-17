@@ -116,7 +116,7 @@ describe('W15 §13.1 — one Remove affordance per row', () => {
     await screen.findByRole('button', { name: 'Remove condition status' });
 
     // The row menu no longer duplicates it.
-    fireEvent.click(screen.getByRole('button', { name: 'Condition options' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Condition options 1' }));
     await screen.findByRole('menuitem', { name: 'Duplicate' });
     expect(screen.queryByRole('menuitem', { name: 'Remove' })).toBeNull();
   });
@@ -124,9 +124,9 @@ describe('W15 §13.1 — one Remove affordance per row', () => {
   it('a raw clause row removes from the ✕ only', async () => {
     mountWith(makeState({ queryRaw: '{"items":{"$elemMatch":{"sku":1}}}' }));
 
-    await screen.findByRole('button', { name: 'Remove raw clause' });
+    await screen.findByRole('button', { name: 'Remove raw clause 1' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Raw clause options' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Raw clause options 1' }));
     await screen.findByRole('menuitem', { name: 'Duplicate' });
     expect(screen.queryByRole('menuitem', { name: 'Remove' })).toBeNull();
   });
@@ -169,7 +169,7 @@ describe('W15 §13.1 — rows reorder within their group', () => {
   }
 
   async function openRowMenu(index: number) {
-    const buttons = await screen.findAllByRole('button', { name: 'Condition options' });
+    const buttons = await screen.findAllByRole('button', { name: /^Condition options [\d.]+$/ });
     fireEvent.click(buttons[index]);
   }
 
@@ -221,14 +221,45 @@ describe('W15 §13.1 — rows reorder within their group', () => {
     await screen.findAllByPlaceholderText('field');
     expect(fieldOrder()).toEqual(['x', 'a', 'b', 'c']);
     // The nested group is real, not flattened.
-    expect(screen.getByRole('button', { name: 'Remove group' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove group 2' })).toBeTruthy();
 
     // The last child of the nested group, moved up inside it.
     await openRowMenu(3);
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Move up' }));
 
     await waitFor(() => expect(fieldOrder()).toEqual(['x', 'a', 'c', 'b']));
-    expect(screen.getByRole('button', { name: 'Remove group' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove group 2' })).toBeTruthy();
+  });
+});
+
+describe('Group and raw-row controls are named by position', () => {
+  it('each nested group\'s add and remove buttons, and each raw row\'s checkbox, say which one they act on', async () => {
+    mountWith(
+      makeState({
+        queryRaw:
+          '{"x":{"$eq":"0"},"$or":[{"a":{"$eq":"1"}},{"b":{"$eq":"2"}}],"$nor":[{"c":{"$eq":"3"}},{"d":{"$eq":"4"}}],"$where":"1"}',
+      }),
+    );
+    await screen.findAllByPlaceholderText('field');
+
+    for (const g of ['2', '3']) {
+      expect(screen.getByRole('button', { name: `Add condition to group ${g}` })).toBeTruthy();
+      expect(screen.getByRole('button', { name: `Add group to group ${g}` })).toBeTruthy();
+      expect(screen.getByRole('button', { name: `Add raw clause to group ${g}` })).toBeTruthy();
+      expect(screen.getByRole('button', { name: `Remove group ${g}` })).toBeTruthy();
+    }
+    expect(screen.getByRole('checkbox', { name: 'Include raw clause 4' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Raw clause 4' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Raw clause options 4' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove raw clause 4' })).toBeTruthy();
+    // Each row's menu, nested rows included.
+    for (const row of ['1', '2.1', '2.2', '3.1', '3.2']) {
+      expect(screen.getByRole('button', { name: `Condition options ${row}` })).toBeTruthy();
+    }
+    // The root is the only group without a position, so its names stay short.
+    expect(screen.getAllByRole('button', { name: 'Add condition' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Add group' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Add raw clause' })).toHaveLength(1);
   });
 });
 
@@ -250,7 +281,7 @@ describe('W15 §13.7 — the "N not applied" banner names the offending rows', (
   it('labels a blocked raw clause as such', async () => {
     mountWith(makeState({ queryRaw: '{"items":{"$elemMatch":{"sku":1}}}' }));
 
-    const rawInput = await screen.findByLabelText('Raw clause');
+    const rawInput = await screen.findByLabelText('Raw clause 1');
     fireEvent.change(rawInput, { target: { value: '{ broken' } });
 
     await waitFor(() => {

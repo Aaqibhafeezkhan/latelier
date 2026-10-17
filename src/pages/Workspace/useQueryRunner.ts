@@ -17,7 +17,7 @@ import { parseFilter, parseJsonArrayLenient, type CondNode, type FilterNode } fr
 
 /**
  * The only ops both suggested and recorded — mirrors
- * `VALUE_SUGGESTION_OPS` in `BuilderPane.tsx` and `RECORDABLE_OPS` in
+ * `VALUE_SUGGESTION_OPS` in `CondValueEditor.tsx` and `RECORDABLE_OPS` in
  * `RecentFieldValueService`. Kept as its own copy rather than a shared
  * import: it's a two-line set literal, and the three call sites (popover
  * gating, this write path, and main's authoritative filter) each want to

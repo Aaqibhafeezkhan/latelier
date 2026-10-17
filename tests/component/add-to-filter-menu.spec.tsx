@@ -381,6 +381,27 @@ describe(' "Add to filter" on the field-tree context menu', () => {
       });
     });
 
+    // A root $or / $nor is an alternative or an exclusion, not a list of
+    // requirements: appending the new condition inside it would OR (or NOR)
+    // it in and change what the filter matches. It has to be ANDed with the
+    // whole existing filter instead (#527).
+    it.each([
+      ['$or', '{"$or":[{"a":{"$eq":1}},{"b":{"$eq":2}}]}'],
+      ['$nor', '{"$nor":[{"a":{"$eq":1}},{"b":{"$eq":2}}]}'],
+    ])('ANDs the new condition with a root %s filter rather than adding it inside', async (_logic, queryRaw) => {
+      const { actions } = mount({ state: { queryRaw } });
+
+      fireEvent.contextMenu(screen.getByTitle(/Drag to add "name/));
+      fireEvent.click(screen.getByText('Add to filter'));
+      await confirmAdd();
+
+      await waitFor(() => expect(actions.patch).toHaveBeenCalledTimes(1));
+      const patched = (actions.patch as ReturnType<typeof vi.fn>).mock.calls[0][0] as Partial<CollectionTabState>;
+      expect(JSON.parse(patched.queryRaw!)).toEqual({
+        $and: [JSON.parse(queryRaw), { name: { $eq: 'alpha' } }],
+      });
+    });
+
     it('cancelling the confirm leaves the filter untouched', async () => {
       // Patching `state.queryRaw` directly can silently discard newer,
       // local-only input the Filter drawer holds (a pending or
@@ -487,6 +508,23 @@ describe(' "Add to filter" on the field-tree context menu', () => {
       if (!panel) throw new Error('no expanded field-tree panel rendered');
       return within(panel as HTMLElement).getByTitle(new RegExp(`Drag to add "${field}`));
     }
+
+    it.each([
+      ['$or', '{"$or":[{"a":{"$eq":1}},{"b":{"$eq":2}}]}'],
+      ['$nor', '{"$nor":[{"a":{"$eq":1}},{"b":{"$eq":2}}]}'],
+    ])('ANDs the new condition with a root %s filter rather than adding it inside', async (_logic, queryRaw) => {
+      const { actions, container } = mount({ state: { queryRaw } });
+
+      fireEvent.contextMenu(fieldTreeRow(container));
+      fireEvent.click(screen.getByText('Add to filter'));
+      await confirmAdd();
+
+      await waitFor(() => expect(actions.patch).toHaveBeenCalledTimes(1));
+      const patched = (actions.patch as ReturnType<typeof vi.fn>).mock.calls[0][0] as Partial<CollectionTabState>;
+      expect(JSON.parse(patched.queryRaw!)).toEqual({
+        $and: [JSON.parse(queryRaw), { name: { $eq: 'alpha' } }],
+      });
+    });
 
     it('is present on a field-tree row (inside an expanded row panel) and adds a root-level condition', async () => {
       const { actions, container } = mount();

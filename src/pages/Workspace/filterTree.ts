@@ -5,35 +5,62 @@
 //
 // See specs/W13-filter-tree-editor.md for the full spec this module
 // implements (§1 model, §2 parseFilter, §3 printFilter, §4 edit API).
-import type { ValType } from '@shared/types';
+import type { ValType, CondNode, RawNode, GroupNode, FilterNode } from '@shared/types';
 import { isCompilableOp } from './builder';
 
 // ─── §1 Model ────────────────────────────────────────────────────────────────
 
+// The node types live in `shared/types.ts`, because a tab's persisted
+// `filterDraft` holds a tree; they are re-exported here so callers keep one
+// import site.
+export type { CondNode, RawNode, GroupNode, FilterNode } from '@shared/types';
+
 /** Node identity IS its position. No generated ids to keep stable. */
 export type NodePath = readonly number[];
 
-export interface CondNode {
-  kind: 'cond';
-  field: string;
-  op: string; // any $-prefixed op; print validates
-  valType: ValType;
-  value: string; // raw text, typed at print time
+const VAL_TYPES: ReadonlySet<string> = new Set<ValType>([
+  'string', 'number', 'long', 'decimal', 'boolean', 'date', 'null', 'regex', 'objectid', 'array',
+]);
+
+function isOptionalFlag(v: unknown): boolean {
+  return v === undefined || typeof v === 'boolean';
 }
 
-export interface RawNode {
-  kind: 'raw';
-  /** One clause, verbatim. Printed byte-for-byte after a parse check. */
-  json: string;
+function isFilterNode(v: unknown): v is FilterNode {
+  if (!isPlainObject(v) || !isOptionalFlag(v.disabled)) return false;
+  switch (v.kind) {
+    case 'cond':
+      return (
+        typeof v.field === 'string' &&
+        typeof v.op === 'string' &&
+        VAL_TYPES.has(v.valType as string) &&
+        typeof v.value === 'string'
+      );
+    case 'raw':
+      return typeof v.json === 'string';
+    case 'group':
+      return isGroupNode(v);
+    default:
+      return false;
+  }
 }
 
-export interface GroupNode {
-  kind: 'group';
-  logic: '$and' | '$or' | '$nor';
-  children: FilterNode[];
+/**
+ * Structural check for a tree read back from storage (a tab's persisted
+ * draft, §5.7), which the type system can't vouch for: a hand-edited or
+ * older row could lack `children` and crash the printer. Every node is
+ * checked, all the way down.
+ */
+export function isGroupNode(v: unknown): v is GroupNode {
+  return (
+    isPlainObject(v) &&
+    v.kind === 'group' &&
+    LOGIC_KEYS.has(v.logic as string) &&
+    isOptionalFlag(v.disabled) &&
+    Array.isArray(v.children) &&
+    v.children.every(isFilterNode)
+  );
 }
-
-export type FilterNode = GroupNode | CondNode | RawNode;
 
 // ─── §2 parseFilter ──────────────────────────────────────────────────────────
 
@@ -193,19 +220,30 @@ function rawPair(field: string, value: unknown): RawNode {
 }
 
 /**
+ * `guessValue` for the value of operator `op`. An empty `$in`/`$nin`/`$all`
+ * list is valid text MongoDB accepts, but a row the printer blocks: as a row
+ * it would freeze the drawer on the first edit elsewhere. It stays raw, so it
+ * prints back verbatim.
+ */
+function guessOpValue(op: string, v: unknown): ValueGuess | null {
+  if (ARRAY_VALUE_OPS.has(op) && Array.isArray(v) && v.length === 0) return null;
+  return guessValue(v);
+}
+
+/**
  * `{ field: { $op1: v1, $op2: v2, ... } }` → one or more cond nodes, or a
  * single raw node when it can't be split/modeled (§2a, §2b).
  */
 function parseOperatorMap(field: string, obj: Record<string, unknown>, keys: string[]): FilterNode[] {
   if (keys.length === 1) {
     const op = keys[0];
-    const guess = guessValue(obj[op]);
+    const guess = guessOpValue(op, obj[op]);
     if (guess) return [condNode(field, op, guess)];
     return [rawPair(field, obj)];
   }
   const allSplittable = keys.every((k) => SPLITTABLE_OPS.has(k));
   if (allSplittable) {
-    const guesses = keys.map((k) => guessValue(obj[k]));
+    const guesses = keys.map((k) => guessOpValue(k, obj[k]));
     if (guesses.every((g): g is ValueGuess => g !== null)) {
       return keys.map((k, i) => condNode(field, k, guesses[i]));
     }
@@ -301,7 +339,12 @@ function groupFromLogicArray(logic: GroupNode['logic'], arr: unknown[]): GroupNo
 
 function parseRoot(obj: Record<string, unknown>): GroupNode {
   const collapsed = collapseToNode(parseClauseToNodes(obj));
-  if (collapsed.kind === 'group') return collapsed;
+  // A one-child `$nor` is a NOT (§4). Taken as the root itself it would lose
+  // that reading — the root never shows NOT — so it stays a group under an
+  // `$and` root, the same tree the drawer printed it from.
+  if (collapsed.kind === 'group' && !(collapsed.logic === '$nor' && collapsed.children.length === 1)) {
+    return collapsed;
+  }
   return { kind: 'group', logic: '$and', children: [collapsed] };
 }
 
@@ -347,8 +390,8 @@ export interface NodeProblem {
 
 export type PrintOutcome = { ok: true; json: string } | { ok: false; problems: NodeProblem[] };
 
-const SIMPLE_OPS = new Set(['$eq', '$ne', '$gt', '$gte', '$lt', '$lte']);
-const ARRAY_VALUE_OPS = new Set(['$in', '$nin', '$all']);
+export const SIMPLE_OPS: ReadonlySet<string> = new Set(['$eq', '$ne', '$gt', '$gte', '$lt', '$lte']);
+export const ARRAY_VALUE_OPS: ReadonlySet<string> = new Set(['$in', '$nin', '$all']);
 const BITS_OPS = new Set(['$bitsAllClear', '$bitsAnyClear', '$bitsAllSet', '$bitsAnySet']);
 
 const NUMBER_PRECISION_MESSAGE =
@@ -459,6 +502,49 @@ export function buildScalarWire(valType: ValType, value: string): unknown {
   }
 }
 
+/** Why `text` is not a value of a number, long or decimal row, or null when it is (or the type is another). */
+function numericTextProblem(valType: ValType, text: string): string | null {
+  if (valType === 'number') {
+    const n = Number(text);
+    if (text.trim() === '' || !Number.isFinite(n)) return 'Value must be a valid number';
+    // §3a's big-integer guard, cond path: `number` is representable per §2b
+    // (unlike `long`/`decimal`, which carry exact text), so a plain-number
+    // cond skips the raw-node guard entirely. A value beyond 2^53 would
+    // otherwise round silently on print.
+    if (isUnsafeNumber(n)) return NUMBER_PRECISION_MESSAGE;
+  }
+  if (valType === 'long' && !/^[+-]?\d+$/.test(text.trim())) return 'Long value must be an integer';
+  if (
+    valType === 'decimal' &&
+    // `\d+(\.\d*)?` accepts exactly what `\d+\.?\d*` did, but the two digit
+    // runs can no longer be re-split against each other on a long numeric
+    // string — that ambiguity is the super-linear backtracking in S8786.
+    !/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(text.trim())
+  ) {
+    return 'Decimal value must be a number';
+  }
+  return null;
+}
+
+/** The list items a boolean row reads as themselves. */
+const BOOLEAN_ITEMS: ReadonlySet<unknown> = new Set<unknown>([true, false, 'true', 'false']);
+
+/**
+ * The text a list item stands for, checked by `numericTextProblem` (which
+ * ignores every type but number, long and decimal): '' for anything that is
+ * not a number, a string or the row's own wrapped form (null, true, a nested
+ * list), so it fails the row's rule instead of printing as 0, 1 or "null".
+ */
+function listItemText(valType: ValType, el: unknown): string {
+  if (typeof el === 'number' || typeof el === 'string') return String(el);
+  // A number row has no wrapped form: `Number()` turns any object into NaN.
+  const key = valType === 'long' ? '$numberLong' : '$numberDecimal';
+  const inner = isPlainObject(el) && valType !== 'number' ? el[key] : undefined;
+  // Stryker disable next-line StringLiteral: any non-numeric text fails every
+  // row's rule, so the exact text standing for "no value" is unobservable.
+  return typeof inner === 'string' ? inner : '';
+}
+
 /**
  * Blocking-validity checks for a cond (§3). Deliberately mirrors
  * `describeCondProblem` in builder.ts (same number/long/decimal/$mod
@@ -471,15 +557,9 @@ function condValueProblem(node: CondNode): string | null {
   if (!isCompilableOp(node.op)) return `${node.op} is not encodable — convert to a raw clause`;
   const isScalarNumeric =
     !ARRAY_VALUE_OPS.has(node.op) && node.op !== '$mod' && node.value.trim() !== '';
-  if (node.valType === 'number' && isScalarNumeric && !Number.isFinite(Number(node.value))) {
-    return 'Value must be a valid number';
-  }
-  if (node.valType === 'number' && isScalarNumeric) {
-    // §3a's big-integer guard, cond path: `number` is representable per §2b
-    // (unlike `long`/`decimal`, which carry exact text), so a plain-number
-    // cond skips the raw-node guard entirely. A scalar $gt/$eq/etc. beyond
-    // 2^53 would otherwise round silently on print.
-    if (isUnsafeNumber(Number(node.value))) return NUMBER_PRECISION_MESSAGE;
+  if (isScalarNumeric) {
+    const problem = numericTextProblem(node.valType, node.value);
+    if (problem) return problem;
   }
   if (
     // Not gated on node.valType: parseFilter always assigns array-value-op
@@ -494,18 +574,27 @@ function condValueProblem(node: CondNode): string | null {
   ) {
     return NUMBER_PRECISION_MESSAGE;
   }
-  if (node.valType === 'long' && isScalarNumeric && !/^[+-]?\d+$/.test(node.value.trim())) {
-    return 'Long value must be an integer';
+  if (ARRAY_VALUE_OPS.has(node.op) && parseJsonArrayLenient(node.value).length === 0) {
+    // An empty `$in` or `$all` matches nothing and an empty `$nin`
+    // everything; none is what a person building a list means, so the row
+    // waits for a value. Text that already holds one parses to a raw clause.
+    return `${node.op} needs at least one value`;
   }
-  if (
-    node.valType === 'decimal' &&
-    isScalarNumeric &&
-    // `\d+(\.\d*)?` accepts exactly what `\d+\.?\d*` did, but the two digit
-    // runs can no longer be re-split against each other on a long numeric
-    // string — that ambiguity is the super-linear backtracking in S8786.
-    !/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(node.value.trim())
-  ) {
-    return 'Decimal value must be a number';
+  if (ARRAY_VALUE_OPS.has(node.op)) {
+    // A list a number, long or decimal row sends is held to the rule its
+    // single value is: otherwise "abc" prints as null, "" and null as 0, and
+    // a long or decimal the server cannot read goes out as written.
+    for (const el of parseJsonArrayLenient(node.value)) {
+      const problem = numericTextProblem(node.valType, listItemText(node.valType, el));
+      if (problem) return problem;
+      // A boolean row's wire form turns anything but true / "true" into
+      // false, so `yes`, 1 or null would go out as false unannounced.
+      if (node.valType === 'boolean' && !BOOLEAN_ITEMS.has(el)) return 'Boolean value must be true or false';
+    }
+  }
+  for (const wire of sentWireValues(node)) {
+    const problem = sentinelProblem(wire);
+    if (problem) return problem;
   }
   if (node.op === '$mod') {
     const arr = parseJsonArrayLenient(node.value);
@@ -524,6 +613,34 @@ function condValueProblem(node: CondNode): string | null {
     if (typeof remainder !== 'number' || !Number.isFinite(remainder)) {
       return '$mod remainder must be a finite number';
     }
+  }
+  return null;
+}
+
+/** The values a scalar or list cond puts on the wire; other ops send none worth checking here. */
+function sentWireValues(node: CondNode): unknown[] {
+  if (SIMPLE_OPS.has(node.op)) return [buildScalarWire(node.valType, node.value)];
+  if (ARRAY_VALUE_OPS.has(node.op)) {
+    return parseJsonArrayLenient(node.value).map((el) => coerceArrayElementWire(el, node.valType));
+  }
+  // Stryker disable next-line ArrayDeclaration: any string placed here fails
+  // `sentinelProblem`'s plain-object check, the same as no value at all.
+  return [];
+}
+
+/**
+ * An `{$oid}` or `{$date}` the main process could not turn into a value: bson
+ * throws on a malformed ObjectId and turns unreadable date text into an
+ * Invalid Date. Blocking it here keeps it out of `queryRaw`, so neither Run
+ * nor the live count ever sends it.
+ */
+function sentinelProblem(wire: unknown): string | null {
+  if (!isPlainObject(wire) || Object.keys(wire).length !== 1) return null;
+  if (typeof wire.$oid === 'string' && !/^[0-9a-f]{24}$/i.test(wire.$oid)) {
+    return 'ObjectId must be 24 hex characters';
+  }
+  if (typeof wire.$date === 'string' && Number.isNaN(Date.parse(wire.$date))) {
+    return 'Date must be a date, e.g. 2026-01-31T00:00:00Z';
   }
   return null;
 }
@@ -630,6 +747,12 @@ function parseRawWithPrecisionCheck(
 type PrintNodeResult = { kind: 'value'; value: unknown } | { kind: 'pending' } | { kind: 'blocked' };
 
 function printNode(node: FilterNode, path: number[], problems: NodeProblem[]): PrintNodeResult {
+  // A disabled node, and its whole subtree, is pending: no clause, no
+  // problem. Checked before anything else so an invalid row the user has
+  // switched off never blocks the rest of the filter.
+  // Stryker disable next-line ObjectLiteral,StringLiteral: same inert
+  // 'pending' literal as the two below (see the PrintNodeResult note).
+  if (node.disabled) return { kind: 'pending' };
   if (node.kind === 'cond') {
     // Stryker disable next-line ObjectLiteral,StringLiteral
     if (node.field.trim() === '') return { kind: 'pending' }; // §5 pending rule
@@ -744,6 +867,17 @@ function insertNodeAt(target: FilterNode, path: NodePath, node: FilterNode, inde
   return { ...target, children };
 }
 
+/**
+ * Adds `node` as one more requirement on the whole filter. An `$and` root
+ * takes it as another child; an `$or` or `$nor` root is wrapped in a new
+ * `$and` beside it, because joining the root group would make the node an
+ * alternative (or an exclusion) instead of a requirement.
+ */
+export function andAtRoot(root: GroupNode, node: FilterNode): GroupNode {
+  if (root.logic === '$and') return insertAt(root, [], node);
+  return { kind: 'group', logic: '$and', children: [root, node] };
+}
+
 /** `index` omitted appends — every existing caller relies on that. */
 export function insertAt(root: GroupNode, parent: NodePath, node: FilterNode, index?: number): GroupNode {
   return insertNodeAt(root, parent, node, index) as GroupNode;
@@ -807,14 +941,39 @@ export function wrapInGroup(root: GroupNode, path: NodePath, logic: GroupNode['l
 }
 
 /**
+ * Replaces a nested group that holds exactly one child with that child — the
+ * inverse of `wrapInGroup`, and how a negation (a one-child `$nor`) is
+ * removed. Anything else is left alone, returning `root` itself: the root, a
+ * non-group, a group of several children, or a path that doesn't resolve.
+ * A switched-off group hands that to its child, so removing the wrapper
+ * never switches a condition back on.
+ */
+export function unwrapGroup(root: GroupNode, path: NodePath): GroupNode {
+  if (path.length === 0) return root;
+  const target = nodeAt(root, path);
+  if (!target || target.kind !== 'group' || target.children.length !== 1) return root;
+  return updateAt(root, path, carryDisabled(target, target.children[0]));
+}
+
+/**
  * Best-effort encode of a cond as a raw node. Falls back to a blank pending
  * raw node — never `{}`, which matches everything and would make a bad
  * fallback silently widen the group it sits in (§4).
  */
 export function toRawNode(cond: CondNode): RawNode {
-  if (cond.field.trim() === '') return { kind: 'raw', json: '' };
-  if (condValueProblem(cond)) return { kind: 'raw', json: '' };
-  return { kind: 'raw', json: JSON.stringify({ [cond.field]: { [cond.op]: encodeCondValue(cond) } }) };
+  const json =
+    cond.field.trim() === '' || condValueProblem(cond)
+      ? ''
+      : JSON.stringify({ [cond.field]: { [cond.op]: encodeCondValue(cond) } });
+  return carryDisabled(cond, { kind: 'raw', json });
+}
+
+/**
+ * A replacement keeps the node switched off if it was: converting a row, or
+ * dropping a field onto it, is not re-enabling it.
+ */
+export function carryDisabled<T extends FilterNode>(from: FilterNode, to: T): T {
+  return from.disabled ? { ...to, disabled: true } : to;
 }
 
 /**
@@ -837,5 +996,5 @@ export function tryParseRaw(raw: RawNode): FilterNode {
     return raw;
   }
   if (!isPlainObject(parsed)) return raw;
-  return collapseToNode(parseClauseToNodes(parsed));
+  return carryDisabled(raw, collapseToNode(parseClauseToNodes(parsed)));
 }

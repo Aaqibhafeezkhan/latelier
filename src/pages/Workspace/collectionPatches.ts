@@ -32,4 +32,6 @@ export function schemaPatch(
   return { schema: { ...(prev.schema ?? DEFAULT_SCHEMA_TAB_STATE), ...patch } };
 }
 
-export const CLEAR_FILTER_PATCH: Partial<CollectionTabState> = { queryRaw: '{}' };
+// `filterDraft: undefined` deletes the drawer's persisted tree on merge, so the
+// rows of the filter just cleared can't come back on the next tab switch.
+export const CLEAR_FILTER_PATCH: Partial<CollectionTabState> = { queryRaw: '{}', filterDraft: undefined };

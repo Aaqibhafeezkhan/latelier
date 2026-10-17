@@ -97,4 +97,11 @@ describe('CLEAR_FILTER_PATCH', () => {
   it('is the empty-filter constant', () => {
     expect(CLEAR_FILTER_PATCH).toEqual({ queryRaw: '{}' });
   });
+
+  it('clears the persisted filter draft too, by carrying the key as undefined', () => {
+    // A patch value of `undefined` is what deletes the key on merge; a draft
+    // left behind could bring back rows of the filter just cleared.
+    expect('filterDraft' in CLEAR_FILTER_PATCH).toBe(true);
+    expect(CLEAR_FILTER_PATCH.filterDraft).toBeUndefined();
+  });
 });

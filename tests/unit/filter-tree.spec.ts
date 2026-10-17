@@ -9,11 +9,16 @@ import {
   removeAt,
   moveAt,
   wrapInGroup,
+  unwrapGroup,
+  andAtRoot,
+  isGroupNode,
   toRawNode,
   tryParseRaw,
   coerceArrayElementWire,
   buildScalarWire,
   parseJsonArrayLenient,
+  SIMPLE_OPS,
+  ARRAY_VALUE_OPS,
   type GroupNode,
   type CondNode,
   type RawNode,
@@ -91,10 +96,24 @@ describe('parseFilter — parse table (§2)', () => {
     expect(root.children).toHaveLength(2);
   });
 
-  it('{ $nor: [...] } -> root becomes a $nor group', () => {
-    const root = mustParse('{"$nor":[{"a":1}]}');
+  it('{ $nor: [x, y] } -> root becomes a $nor group', () => {
+    const root = mustParse('{"$nor":[{"a":1},{"b":2}]}');
     expect(root.logic).toBe('$nor');
-    expect(root.children).toHaveLength(1);
+    expect(root.children).toHaveLength(2);
+  });
+
+  it('{ $nor: [x] } -> a NOT group under an $and root, not a $nor root', () => {
+    // A one-child $nor is how the drawer writes NOT; read back as the root
+    // itself it would lose its NOT and show as a NOR picker instead.
+    expect(mustParse('{"$nor":[{"a":1}]}')).toEqual(
+      group('$and', [group('$nor', [cond({ field: 'a', valType: 'number', value: '1' })])]),
+    );
+  });
+
+  it('{ $or: [x] } -> still the root itself', () => {
+    expect(mustParse('{"$or":[{"a":1}]}')).toEqual(
+      group('$or', [cond({ field: 'a', valType: 'number', value: '1' })]),
+    );
   });
 
   it('{ a: { $gte: 1, $lte: 5 } } -> two conds (§2a splittable pair)', () => {
@@ -1571,5 +1590,316 @@ describe('moveAt — an out-of-range path is a no-op even when the arithmetic wo
     // path [5] doesn't resolve (only indices 0-2 exist); delta -3 would put
     // a *real* index-5 node at slot 2 — but there is no such node.
     expect(moveAt(root, [5], -3)).toEqual(root);
+  });
+});
+
+describe('printFilter — a disabled node prints as pending (§3)', () => {
+  it('leaves a disabled cond out of the printed filter', () => {
+    const root = group('$and', [
+      cond({ field: 'a', valType: 'number', value: '1' }),
+      { ...cond({ field: 'b', valType: 'number', value: '2' }), disabled: true },
+    ]);
+    expect(printFilter(root)).toEqual({ ok: true, json: '{"a":{"$eq":1}}' });
+  });
+
+  it('a disabled cond with an invalid value raises no problem', () => {
+    const root = group('$and', [{ ...cond({ field: 'n', valType: 'number', value: 'abc' }), disabled: true }]);
+    expect(printFilter(root)).toEqual({ ok: true, json: '{}' });
+  });
+
+  it('a disabled raw node with invalid JSON raises no problem', () => {
+    const root = group('$and', [cond({ field: 'a' }), { ...raw('{nope'), disabled: true }]);
+    expect(printFilter(root)).toEqual({ ok: true, json: '{"a":{"$eq":"x"}}' });
+  });
+
+  it('omits a disabled nested group whole, even when a child would block', () => {
+    const root = group('$and', [
+      cond({ field: 'a' }),
+      { ...group('$or', [cond({ field: 'n', valType: 'number', value: 'abc' }), cond({ field: 'b' })]), disabled: true },
+    ]);
+    expect(printFilter(root)).toEqual({ ok: true, json: '{"a":{"$eq":"x"}}' });
+  });
+
+  it('omits a $nor group whose only child is disabled, never printing {"$nor":[]}', () => {
+    const root = group('$and', [
+      cond({ field: 'a' }),
+      group('$nor', [{ ...cond({ field: 'b' }), disabled: true }]),
+    ]);
+    expect(printFilter(root)).toEqual({ ok: true, json: '{"a":{"$eq":"x"}}' });
+  });
+
+  it('prints {} when every node is disabled', () => {
+    const root = group('$or', [
+      { ...cond({ field: 'a' }), disabled: true },
+      { ...raw('{"b":1}'), disabled: true },
+      { ...group('$and', [cond({ field: 'c' })]), disabled: true },
+    ]);
+    expect(printFilter(root)).toEqual({ ok: true, json: '{}' });
+  });
+
+  it('parseFilter never sets disabled on any node', () => {
+    const parsed = mustParse(
+      '{"$and":[{"a":{"$eq":1}},{"$or":[{"b":2},{"c":{"$elemMatch":{"d":1}}}]},{"$nor":[{"e":{"$gt":3}}]}]}',
+    );
+    const visit = (n: FilterNode): void => {
+      expect(n).not.toHaveProperty('disabled');
+      if (n.kind === 'group') n.children.forEach(visit);
+    };
+    visit(parsed);
+  });
+
+  it('toRawNode carries disabled over from the cond', () => {
+    expect(toRawNode({ ...cond({ field: 'a' }), disabled: true })).toEqual({
+      kind: 'raw',
+      json: '{"a":{"$eq":"x"}}',
+      disabled: true,
+    });
+    expect(toRawNode({ ...cond({ field: '' }), disabled: true })).toEqual({ kind: 'raw', json: '', disabled: true });
+    expect(toRawNode(cond({ field: 'a' }))).not.toHaveProperty('disabled');
+  });
+
+  it('tryParseRaw carries disabled over to what it models', () => {
+    expect(tryParseRaw({ ...raw('{"a":1}'), disabled: true })).toEqual({ ...cond({ field: 'a', valType: 'number', value: '1' }), disabled: true });
+    expect(tryParseRaw({ ...raw('{"a":1,"b":2}'), disabled: true })).toMatchObject({ kind: 'group', disabled: true });
+    expect(tryParseRaw(raw('{"a":1}'))).not.toHaveProperty('disabled');
+  });
+});
+
+describe('unwrapGroup — the inverse of a one-child wrap (§4)', () => {
+  it('replaces a single-child nested group with that child, in place', () => {
+    const root = group('$and', [cond({ field: 'a' }), group('$nor', [cond({ field: 'b' })]), cond({ field: 'c' })]);
+    expect(unwrapGroup(root, [1])).toEqual(
+      group('$and', [cond({ field: 'a' }), cond({ field: 'b' }), cond({ field: 'c' })]),
+    );
+  });
+
+  it('leaves a multi-child group alone', () => {
+    const root = group('$and', [group('$nor', [cond({ field: 'a' }), cond({ field: 'b' })])]);
+    expect(unwrapGroup(root, [0])).toBe(root);
+  });
+
+  it('never unwraps the root, even one whose only child is a group', () => {
+    const root = group('$nor', [group('$or', [cond({ field: 'a' }), cond({ field: 'b' })])]);
+    expect(unwrapGroup(root, [])).toBe(root);
+  });
+
+  it('leaves a cond path alone', () => {
+    const root = group('$and', [cond({ field: 'a' })]);
+    expect(unwrapGroup(root, [0])).toBe(root);
+  });
+
+  it('leaves a path that does not resolve alone', () => {
+    const root = group('$and', [group('$nor', [cond({ field: 'a' })])]);
+    expect(unwrapGroup(root, [3])).toBe(root);
+    expect(unwrapGroup(root, [0, 0, 0])).toBe(root);
+  });
+
+  it('a switched-off group hands its state to the child it leaves behind', () => {
+    const root = group('$and', [{ ...group('$nor', [cond({ field: 'a' })]), disabled: true }]);
+    expect(unwrapGroup(root, [0])).toEqual(group('$and', [{ ...cond({ field: 'a' }), disabled: true }]));
+  });
+});
+
+describe('negation — a single-child $nor wrap (§4)', () => {
+  it('wrapping a cond in $nor prints NOT that cond, and reads back as the same $nor', () => {
+    const root = group('$and', [cond({ field: 'a', valType: 'number', value: '1' })]);
+    const json = mustPrint(wrapInGroup(root, [0], '$nor'));
+    expect(json).toBe('{"$nor":[{"a":{"$eq":1}}]}');
+    // Reads back as the same tree: the NOT group under an $and root.
+    expect(mustParse(json)).toEqual(wrapInGroup(root, [0], '$nor'));
+  });
+
+  it('a field-level $not still reads as a raw clause', () => {
+    expect(mustParse('{"f":{"$not":{"$gt":1}}}')).toEqual(group('$and', [raw('{"f":{"$not":{"$gt":1}}}')]));
+  });
+});
+
+describe('andAtRoot — require one more condition of the whole filter (§4)', () => {
+  it('appends to an $and root', () => {
+    const root = group('$and', [cond({ field: 'a' })]);
+    expect(andAtRoot(root, cond({ field: 'b' }))).toEqual(group('$and', [cond({ field: 'a' }), cond({ field: 'b' })]));
+  });
+
+  it.each(['$or', '$nor'] as const)('ANDs with a root %s instead of joining it', (logic) => {
+    const root = group(logic, [cond({ field: 'a' }), cond({ field: 'b' })]);
+    const next = andAtRoot(root, cond({ field: 'c' }));
+    expect(next).toEqual(group('$and', [root, cond({ field: 'c' })]));
+    expect(mustPrint(next)).toBe(
+      `{"$and":[{"${logic}":[{"a":{"$eq":"x"}},{"b":{"$eq":"x"}}]},{"c":{"$eq":"x"}}]}`,
+    );
+  });
+});
+
+describe('isGroupNode — a persisted tree is checked before it is trusted (§5.7)', () => {
+  const good = group('$and', [
+    { ...cond({ field: 'a' }), disabled: true },
+    raw('{"b":1}'),
+    group('$nor', [cond({ field: 'c', valType: 'number', value: '2' })]),
+  ]);
+
+  it('accepts a well-formed tree', () => {
+    expect(isGroupNode(good)).toBe(true);
+    expect(isGroupNode(group('$or', []))).toBe(true);
+  });
+
+  it('round-trips through JSON, as a persisted draft does', () => {
+    expect(isGroupNode(JSON.parse(JSON.stringify(good)))).toBe(true);
+  });
+
+  it.each([
+    'string', 'number', 'long', 'decimal', 'boolean', 'date', 'null', 'regex', 'objectid', 'array',
+  ] as const)('accepts a cond typed %s', (valType) => {
+    expect(isGroupNode(group('$and', [cond({ valType })]))).toBe(true);
+  });
+
+  it.each([
+    ['null', null],
+    ['an array', []],
+    ['a string', 'group'],
+    ['a cond at the root', cond()],
+    ['a non-group kind carrying group fields', { kind: 'raw', json: '{}', logic: '$and', children: [] }],
+    ['a group without children', { kind: 'group', logic: '$and' }],
+    ['children that are not an array', { kind: 'group', logic: '$and', children: {} }],
+    ['an unknown logic', { kind: 'group', logic: '$xor', children: [] }],
+    ['a non-boolean disabled', { kind: 'group', logic: '$and', children: [], disabled: 'yes' }],
+    ['a nested group without children', group('$and', [{ kind: 'group', logic: '$or' } as unknown as FilterNode])],
+    ['a nested unknown kind', group('$and', [{ kind: 'text', json: '{}' } as unknown as FilterNode])],
+    ['a nested non-object', group('$and', [null as unknown as FilterNode])],
+    ['a cond without value', group('$and', [{ kind: 'cond', field: 'a', op: '$eq', valType: 'string' } as unknown as FilterNode])],
+    ['a cond with a numeric field', group('$and', [{ ...cond(), field: 1 } as unknown as FilterNode])],
+    ['a cond with a numeric op', group('$and', [{ ...cond(), op: 1 } as unknown as FilterNode])],
+    ['a cond with an unknown valType', group('$and', [{ ...cond(), valType: 'blob' } as unknown as FilterNode])],
+    ['a cond with a non-boolean disabled', group('$and', [{ ...cond(), disabled: 1 } as unknown as FilterNode])],
+    ['a raw node whose json is not text', group('$and', [{ kind: 'raw', json: { b: 1 } } as unknown as FilterNode])],
+    ['a raw node with a non-boolean disabled', group('$and', [{ ...raw('{}'), disabled: null } as unknown as FilterNode])],
+  ])('rejects %s', (_what, value) => {
+    expect(isGroupNode(value)).toBe(false);
+  });
+});
+
+// ─── Value shapes the server would refuse, or that can never match ──────────
+
+describe('printFilter blocks a value the server cannot use', () => {
+  const OID = '507f1f77bcf86cd799439011';
+
+  function problemOf(c: CondNode): string | undefined {
+    const p = printFilter(group('$and', [c]));
+    return p.ok ? undefined : p.problems[0]?.message;
+  }
+
+  it('exports the scalar and list operator sets', () => {
+    expect([...SIMPLE_OPS]).toEqual(['$eq', '$ne', '$gt', '$gte', '$lt', '$lte']);
+    expect([...ARRAY_VALUE_OPS]).toEqual(['$in', '$nin', '$all']);
+  });
+
+  it('an empty $in / $nin / $all list never means what was meant, so it does not print', () => {
+    for (const op of ['$in', '$nin', '$all']) {
+      expect(problemOf(cond({ op, valType: 'string', value: '[]' }))).toBe(`${op} needs at least one value`);
+      expect(problemOf(cond({ op, valType: 'array', value: ' [ ] ' }))).toBe(`${op} needs at least one value`);
+      expect(problemOf(cond({ op, valType: 'string', value: '' }))).toBe(`${op} needs at least one value`);
+      expect(problemOf(cond({ op, valType: 'string', value: 'not a list' }))).toBe(`${op} needs at least one value`);
+      expect(problemOf(cond({ op, valType: 'string', value: '["a"]' }))).toBeUndefined();
+    }
+  });
+
+  it('an empty list the text already holds stays as written, and the rest of the filter still prints', () => {
+    for (const op of ['$in', '$nin', '$all']) {
+      const text = `{"a":{"${op}":[]},"b":{"$eq":1}}`;
+      const root = mustParse(text);
+      expect(root.children[0]).toEqual({ kind: 'raw', json: `{"a":{"${op}":[]}}` });
+      // An edit to another row must not freeze the drawer on the untouched one.
+      const edited = updateAt(root, [1], cond({ field: 'b', op: '$eq', valType: 'number', value: '2' }));
+      expect(mustPrint(edited)).toBe(`{"$and":[{"a":{"${op}":[]}},{"b":{"$eq":2}}]}`);
+      // The same rule holds when the list shares its field with another operator.
+      const shared = mustParse(`{"a":{"${op}":[],"$exists":true}}`);
+      expect(shared.children).toEqual([{ kind: 'raw', json: `{"a":{"${op}":[],"$exists":true}}` }]);
+      // "Try to parse" on that raw clause keeps it raw rather than a blocked row.
+      expect(tryParseRaw({ kind: 'raw', json: `{"a":{"${op}":[]}}` })).toEqual({ kind: 'raw', json: `{"a":{"${op}":[]}}` });
+    }
+    // A non-empty list is still a row, and an implicit-$eq empty array is a value, not a list op.
+    expect(mustParse('{"a":{"$in":[1]}}').children[0]).toMatchObject({ kind: 'cond', op: '$in' });
+    expect(mustParse('{"a":[]}').children[0]).toMatchObject({ kind: 'cond', op: '$eq', value: '[]' });
+  });
+
+  it('a boolean list item is true or false, nothing else', () => {
+    const msg = 'Boolean value must be true or false';
+    for (const value of ['["yes"]', '[1]', '[null]', '[true,"maybe"]', '[[true]]', '[0]']) {
+      expect(problemOf(cond({ op: '$in', valType: 'boolean', value }))).toBe(msg);
+    }
+    const printed = printFilter(group('$and', [cond({ field: 'b', op: '$in', valType: 'boolean', value: '[true,false,"true","false"]' })]));
+    expect(printed).toEqual({ ok: true, json: '{"b":{"$in":[true,false,true,false]}}' });
+  });
+
+  it('an ObjectId that is not 24 hex characters does not print', () => {
+    const msg = 'ObjectId must be 24 hex characters';
+    expect(problemOf(cond({ valType: 'objectid', value: 'abc' }))).toBe(msg);
+    expect(problemOf(cond({ valType: 'objectid', value: '' }))).toBe(msg);
+    expect(problemOf(cond({ op: '$ne', valType: 'objectid', value: `${OID}0` }))).toBe(msg);
+    expect(problemOf(cond({ valType: 'objectid', value: OID }))).toBeUndefined();
+    expect(problemOf(cond({ valType: 'objectid', value: OID.toUpperCase() }))).toBeUndefined();
+    // Each element of a list, whether the row's type wraps it or it came wrapped.
+    expect(problemOf(cond({ op: '$in', valType: 'objectid', value: `["${OID}","abc"]` }))).toBe(msg);
+    expect(problemOf(cond({ op: '$nin', valType: 'array', value: `[{"$oid":"abc"}]` }))).toBe(msg);
+    expect(problemOf(cond({ op: '$in', valType: 'objectid', value: `["${OID}"]` }))).toBeUndefined();
+    expect(problemOf(cond({ op: '$in', valType: 'array', value: `[1,{"$oid":"${OID}"}]` }))).toBeUndefined();
+  });
+
+  it('a number, long or decimal list item is held to the rule its single value is', () => {
+    const notNumber = 'Value must be a valid number';
+    // Each of these used to print: "abc" and "" as null and 0, null as 0, true as 1.
+    for (const value of ['["abc"]', '[1,"abc"]', '[""]', '[null]', '[true]', '[[1]]', '[" "]', '[{"$numberDecimal":"5"}]']) {
+      expect(problemOf(cond({ op: '$in', valType: 'number', value }))).toBe(notNumber);
+    }
+    expect(problemOf(cond({ op: '$nin', valType: 'number', value: '["9007199254740993"]' }))).toBe(
+      'Contains a number too large to represent exactly — use {"$numberLong": "..."} or {"$numberDecimal": "..."} instead',
+    );
+    // `$mod` keeps its own rule, whatever the row's type.
+    expect(problemOf(cond({ op: '$mod', valType: 'number', value: '[2,"x"]' }))).toBe(
+      '$mod remainder must be a finite number',
+    );
+    for (const value of ['["1.5"]', '["abc"]', '[null]', '[{"$numberLong":5}]', '[{"$numberLong":"x"}]']) {
+      expect(problemOf(cond({ op: '$in', valType: 'long', value }))).toBe('Long value must be an integer');
+    }
+    for (const value of ['["abc"]', '[""]', '[{"$numberDecimal":"1.2.3"}]']) {
+      expect(problemOf(cond({ op: '$all', valType: 'decimal', value }))).toBe('Decimal value must be a number');
+    }
+  });
+
+  it('a valid number, long or decimal list prints as it did', () => {
+    const printed = (c: Partial<CondNode>) => {
+      const p = printFilter(group('$and', [cond({ field: 'n', ...c })]));
+      return p.ok ? p.json : p.problems[0]?.message;
+    };
+    expect(printed({ op: '$in', valType: 'number', value: '[1,"2"," 3 ",-4.5,"1e3"]' })).toBe(
+      '{"n":{"$in":[1,2,3,-4.5,1000]}}',
+    );
+    expect(printed({ op: '$nin', valType: 'long', value: '["9007199254740993",-2,{"$numberLong":"7"}]' })).toBe(
+      '{"n":{"$nin":[{"$numberLong":"9007199254740993"},{"$numberLong":"-2"},{"$numberLong":"7"}]}}',
+    );
+    expect(printed({ op: '$in', valType: 'decimal', value: '["1.50",2,{"$numberDecimal":".5e-3"}]' })).toBe(
+      '{"n":{"$in":[{"$numberDecimal":"1.50"},{"$numberDecimal":"2"},{"$numberDecimal":".5e-3"}]}}',
+    );
+  });
+
+  it('a date the server cannot read does not print', () => {
+    const msg = 'Date must be a date, e.g. 2026-01-31T00:00:00Z';
+    expect(problemOf(cond({ op: '$gte', valType: 'date', value: 'garbage' }))).toBe(msg);
+    expect(problemOf(cond({ op: '$gte', valType: 'date', value: '' }))).toBe(msg);
+    expect(problemOf(cond({ op: '$in', valType: 'date', value: '["2026-01-01","nope"]' }))).toBe(msg);
+    expect(problemOf(cond({ op: '$gte', valType: 'date', value: '2026-01-01T00:00:00.000Z' }))).toBeUndefined();
+    expect(problemOf(cond({ op: '$in', valType: 'array', value: '[{"$date":"2026-01-01"}]' }))).toBeUndefined();
+    // A `$date` that is not text (EJSON's canonical `{$numberLong}` form) is left to the server.
+    expect(problemOf(cond({ op: '$in', valType: 'array', value: '[{"$date":{"$numberLong":"0"}}]' }))).toBeUndefined();
+  });
+
+  it('leaves values of other types alone', () => {
+    expect(problemOf(cond({ valType: 'string', value: 'abc' }))).toBeUndefined();
+    expect(problemOf(cond({ op: '$in', valType: 'string', value: '["abc"]' }))).toBeUndefined();
+    expect(problemOf(cond({ op: '$exists', valType: 'objectid', value: 'true' }))).toBeUndefined();
+    expect(problemOf(cond({ op: '$type', valType: 'date', value: 'date' }))).toBeUndefined();
+    // `$type` takes a list of type names, which an ObjectId row must not wrap.
+    expect(problemOf(cond({ op: '$type', valType: 'objectid', value: '["string","null"]' }))).toBeUndefined();
+    // `$oid` beside another key is a sub-document, not an ObjectId.
+    expect(problemOf(cond({ op: '$in', valType: 'array', value: '[{"$oid":"abc","extra":1}]' }))).toBeUndefined();
   });
 });

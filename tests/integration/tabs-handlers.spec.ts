@@ -1,10 +1,17 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
 import { createRouter } from '../../electron/ipc/router';
 import { registerTabsChannels } from '../../electron/ipc/handlers/tabs';
 import { IPC_CHANNELS } from '../../shared/ipc';
 import type { WorkspaceStateService } from '../../electron/services/WorkspaceStateService';
 import type { Envelope } from '../../shared/ipc';
+import type { CollectionTab } from '../../shared/types';
+import { WorkspaceStateService as RealWorkspaceStateService } from '../../electron/services/WorkspaceStateService';
+import { WorkspaceTabRepo } from '../../electron/db/repositories/WorkspaceTabRepo';
+import { SavedQueryRepo } from '../../electron/db/repositories/SavedQueryRepo';
+import { SavedQueryService } from '../../electron/services/SavedQueryService';
+import { createTempDb, insertConnectionRow, type TempDb } from '../helpers/db';
+import { createIpcShim } from '../helpers/ipcShim';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
 
 type Handler = (evt: IpcMainInvokeEvent, payload: unknown) => unknown;
@@ -204,5 +211,77 @@ describe('tabs:* handlers — tightened state schema (P1-14)', () => {
     });
     expect(env.ok).toBe(false);
     if (!env.ok) expect(env.error.code).toBe('VALIDATION');
+  });
+});
+
+/**
+ * The drawer's persisted tree (`filterDraft`) through the real router, zod
+ * schema, service and a temp SQLite file: written, refused when malformed, and
+ * gone from `state_json` once the renderer clears it.
+ */
+describe('tabs:update — the filter draft, via router and SQLite', () => {
+  const CONN = 'draft-conn';
+  const DRAFT = {
+    queryRaw: '{"a":{"$eq":1}}',
+    root: {
+      kind: 'group',
+      logic: '$and',
+      children: [
+        { kind: 'cond', field: 'a', op: '$eq', valType: 'number', value: '1' },
+        { kind: 'cond', field: 'b', op: '$eq', valType: 'number', value: '2', disabled: true },
+      ],
+    },
+  };
+  let tmp: TempDb;
+  let shim: ReturnType<typeof createIpcShim>;
+  let tabId: string;
+
+  const storedState = () =>
+    JSON.parse(
+      (tmp.db.prepare('SELECT state_json FROM workspace_tabs WHERE id = ?').get(tabId) as { state_json: string })
+        .state_json,
+    ) as Record<string, unknown>;
+  const update = (state: Record<string, unknown>) => shim.invoke(IPC_CHANNELS.tabsUpdate, { id: tabId, patch: { state } });
+
+  beforeEach(async () => {
+    tmp = createTempDb();
+    insertConnectionRow(tmp.db, CONN);
+    shim = createIpcShim();
+    const router = createRouter(shim.ipcMain, testSenderCheck);
+    registerTabsChannels(
+      router,
+      new RealWorkspaceStateService(new WorkspaceTabRepo(tmp.db), new SavedQueryService(new SavedQueryRepo(tmp.db))),
+    );
+    const env = await shim.invoke<CollectionTab>(IPC_CHANNELS.tabsOpenCollection, {
+      connectionId: CONN,
+      dbName: 'shop',
+      collection: 'orders',
+    });
+    if (!env.ok) throw new Error(`tabs:openCollection failed: ${env.error.code} ${env.error.message}`);
+    tabId = env.data.id;
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  it('persists a draft, and clearing it removes it from the stored state', async () => {
+    expect((await update({ queryRaw: DRAFT.queryRaw, filterDraft: DRAFT })).ok).toBe(true);
+    expect(storedState().filterDraft).toEqual(DRAFT);
+
+    expect((await update({ filterDraft: undefined })).ok).toBe(true);
+    const state = storedState();
+    expect('filterDraft' in state).toBe(false);
+    expect(state.queryRaw).toBe(DRAFT.queryRaw);
+  });
+
+  it('refuses a draft of the wrong shape and leaves the stored one alone', async () => {
+    await update({ filterDraft: DRAFT });
+    for (const filterDraft of [{ queryRaw: 1, root: DRAFT.root }, { queryRaw: '{}' }, { queryRaw: '{}', root: 'x' }, 'x']) {
+      const env = await update({ filterDraft });
+      expect(env.ok).toBe(false);
+      if (!env.ok) expect(env.error.code).toBe('VALIDATION');
+    }
+    expect(storedState().filterDraft).toEqual(DRAFT);
   });
 });

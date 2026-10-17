@@ -25,6 +25,10 @@ const TabStateShape = z
     view: z.enum(['Tree', 'JSON', 'Table']).optional(),
     builder: z.record(z.string(), z.unknown()).optional(),
     queryRaw: z.string().optional(),
+    // The drawer's tree and the text it was recorded against. The tree is
+    // checked node by node only where it is read back (`seedTree`), which
+    // falls back to the text for a malformed one.
+    filterDraft: z.object({ root: z.record(z.string(), z.unknown()), queryRaw: z.string() }).optional(),
     page: z.number().int().nonnegative().optional(),
     pageSize: z.number().int().positive().optional(),
     totalCount: z.number().int().nonnegative().optional(),

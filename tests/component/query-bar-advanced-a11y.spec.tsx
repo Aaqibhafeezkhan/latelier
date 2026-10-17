@@ -23,10 +23,10 @@ const now = '2026-08-06T12:00:00.000Z';
 
 // A sort is seeded so the advanced row auto-opens (`hasAdvanced`) — the row
 // is not in the DOM at all while collapsed.
-function makeState(): CollectionTabState {
+function makeState(limit = '25'): CollectionTabState {
   return {
     view: 'Tree',
-    builder: { projection: [], sort: '{"name":1}', limit: '25' },
+    builder: { projection: [], sort: '{"name":1}', limit },
     queryRaw: '{}',
     page: 2,
     pageSize: 50,
@@ -61,8 +61,8 @@ const CONNECTION = {
   status: 'connected' as const,
 };
 
-function mount() {
-  const state = makeState();
+function mount(limit?: string) {
+  const state = makeState(limit);
   installAtelierMock({
     tabs: {
       list: async () => [makeTab(state)],
@@ -141,6 +141,42 @@ describe('W15 §4.4 — skip explains itself without a mouse', () => {
     mount();
     // page 2 × pageSize 50.
     expect(await screen.findByDisplayValue('100')).toBeTruthy();
+  });
+});
+
+/** The text an assistive technology would read for an element's `aria-describedby`. */
+function describedText(el: HTMLElement): string {
+  const ids = (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+  return ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
+}
+
+describe('W15 §4.2 — limit says it caps the total across all pages', () => {
+  it('describes itself to a screen reader', async () => {
+    mount();
+    const limit = await screen.findByTestId('query-bar-limit');
+
+    expect(describedText(limit)).toMatch(/across all pages/i);
+  });
+
+  it('keeps the explanation next to the error when the limit is junk', async () => {
+    mount('-3');
+    const limit = await screen.findByTestId('query-bar-limit');
+
+    const ids = limit.getAttribute('aria-describedby')?.split(/\s+/);
+    expect(ids).toContain('query-bar-limit-help');
+    expect(ids).toContain('query-bar-limit-error');
+    expect(describedText(limit)).toMatch(/not a positive number/);
+    expect(describedText(limit)).toMatch(/across all pages/i);
+  });
+
+  it('shows the explanation as a tooltip when keyboard focus lands on it', async () => {
+    mount();
+    const limit = await screen.findByTestId('query-bar-limit');
+
+    fireEvent.focus(limit);
+
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toMatch(/across all pages/i);
   });
 });
 

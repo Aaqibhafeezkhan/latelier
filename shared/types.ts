@@ -336,6 +336,42 @@ export type MqlOp =
 export type ValType =
   | 'string' | 'number' | 'long' | 'decimal' | 'boolean' | 'date' | 'null' | 'regex' | 'objectid' | 'array';
 
+// ─── Filter tree nodes (W13 §1) ─────────────────────────────────────────────
+//
+// Here rather than in `filterTree.ts` because `CollectionTabState.filterDraft`
+// persists a tree, and `shared/` cannot import from the renderer.
+// `filterTree.ts` re-exports them.
+//
+// `disabled` switches a node off without deleting it: the printer treats a
+// disabled node, and its whole subtree, as pending (W13 §3). `parseFilter`
+// never sets it, so it exists only in a drawer's own tree and its draft.
+
+export interface CondNode {
+  kind: 'cond';
+  field: string;
+  op: string; // any $-prefixed op; print validates
+  valType: ValType;
+  value: string; // raw text, typed at print time
+  disabled?: boolean;
+}
+
+export interface RawNode {
+  kind: 'raw';
+  /** One clause, verbatim. Printed byte-for-byte after a parse check. */
+  json: string;
+  disabled?: boolean;
+}
+
+export interface GroupNode {
+  kind: 'group';
+  logic: '$and' | '$or' | '$nor';
+  children: FilterNode[];
+  /** Never set on the root group: the drawer offers no control for it. */
+  disabled?: boolean;
+}
+
+export type FilterNode = GroupNode | CondNode | RawNode;
+
 /**
  * Sort/limit/projection knobs, each editable in exactly one place: sort and
  * limit in the query bar's advanced grid (W13 §7), projection in the Fields
@@ -781,6 +817,17 @@ export interface CollectionTabState {
   builder: BuilderState;
   /** Canonical filter text (W13 §8) — required, defaults to `'{}'`. */
   queryRaw: string;
+  /**
+   * The filter drawer's own tree, kept with the `queryRaw` it was last
+   * consistent with (W13 §5.7). It carries what the text cannot: switched-off
+   * and still-blank rows, so they survive a tab switch. Used to seed the
+   * drawer only while `queryRaw` still equals the recorded text and the tree
+   * prints back to it. An outside edit to the text made while the drawer is
+   * open clears it; one made with the drawer closed only leaves it unused
+   * while the text differs. Optional, so
+   * tabs persisted before it restore as if there were no draft.
+   */
+  filterDraft?: { root: GroupNode; queryRaw: string };
   page: number;
   pageSize: number;
   totalCount?: number;

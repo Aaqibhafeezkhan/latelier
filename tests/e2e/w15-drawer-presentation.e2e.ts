@@ -102,3 +102,47 @@ test('drawer presentation: Reset confirms, and the tab strip roves with the arro
     });
   });
 });
+
+/**
+ * W15 §14.5 / §1.2 — feedback while composing, in the real app: the drawer
+ * shows how many documents the filter matches before Run is pressed, and
+ * points at where sort / limit / skip / projection are edited.
+ */
+test('drawer feedback: the match count appears without pressing Run, and the pointer line shows', async () => {
+  const { host, port } = await startMemoryServer();
+
+  await withApp(async (app) => {
+    const win = await app.firstWindow();
+    await win.waitForLoadState('domcontentloaded');
+
+    await expectConsoleClean(win, async () => {
+      await seedActiveConnectionWithDocs(
+        win,
+        { ...baseConnInput(host, port), name: 'Count Target' },
+        {
+          dbName: 'shop',
+          collection: 'orders',
+          docs: [
+            { sku: 'apple-001', a: 'x' },
+            { sku: 'banana-002', a: 'x' },
+            { sku: 'cherry-003', a: 'y' },
+          ],
+        },
+      );
+      await expectStatusDot(win, 'Count Target', 'connected');
+
+      const ws = new WorkspacePage(win);
+      await ws.openCollectionFromNavigator('shop', 'orders');
+      await expect(win.getByText('cherry-003')).toBeVisible({ timeout: 8000 });
+
+      await expect(win.getByText(/sort, limit and skip are set in the query bar/i)).toBeVisible();
+
+      await win.getByRole('button', { name: 'Add condition' }).click();
+      await win.getByPlaceholder('field').first().fill('a');
+      await win.getByPlaceholder('value').first().fill('x');
+
+      // No Run: the count comes from the committed filter alone.
+      await expect(win.getByText('≈2 match')).toBeVisible({ timeout: 5000 });
+    });
+  });
+});

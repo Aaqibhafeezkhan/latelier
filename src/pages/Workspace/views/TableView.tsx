@@ -26,7 +26,7 @@ import { ReferenceChip } from '../../../features/references/ReferenceChip';
 import { confirmDestructive } from '../../../utils/confirm';
 import { copyToClipboard } from '../../../utils/clipboard';
 import { useCollectionWorkspace } from '../context';
-import { insertAt, parseFilter, printFilter } from '../filterTree';
+import { andAtRoot, parseFilter, printFilter } from '../filterTree';
 import { useResultSelection } from '../resultSelection';
 import { DocFieldTree, type FieldMenuOpenPayload } from './DocFieldTree';
 import { getDocId, getFullDocId, isInlineEditableKind, reviveTableValue } from './docId';
@@ -1218,7 +1218,7 @@ export function TableView({
         notify.error("Nothing added — the filter bar's text isn't valid JSON.");
         return;
       }
-      const nextRoot = insertAt(parsed.root, [], condFromDragged({ field: fieldPath, value }));
+      const nextRoot = andAtRoot(parsed.root, condFromDragged({ field: fieldPath, value }));
       const printed = printFilter(nextRoot);
       if (!printed.ok) {
         notify.error('Nothing added — the filter could not be updated.');
