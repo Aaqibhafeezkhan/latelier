@@ -47,6 +47,7 @@ function renderPanel(rows: unknown[], view: ResultViewMode = 'JSON') {
       onHeightCommit={vi.fn()}
       onViewChange={vi.fn()}
       onSaveAsCollection={vi.fn()}
+      onSaveAsView={vi.fn()}
     />,
   );
 }

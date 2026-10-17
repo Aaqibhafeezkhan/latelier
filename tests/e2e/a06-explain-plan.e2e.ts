@@ -89,6 +89,15 @@ test('explain plan: drawer opens with the dialog and renders plan content', asyn
       });
       expect(bodyFillPct).toBeGreaterThan(50);
 
+      // The stage tree: at executionStats verbosity each row carries the
+      // stage's own figures. A `$match: {}` over an unindexed collection
+      // plans as a collection scan.
+      await drawer.getByLabel('Verbosity').selectOption('executionStats');
+      const stageTree = drawer.getByRole('list', { name: 'Plan stages' });
+      await expect(stageTree).toBeVisible({ timeout: 8000 });
+      await expect(stageTree).toContainText('COLLSCAN');
+      await expect(stageTree).toContainText('docsExamined: 2');
+
       // Close via the explicit close button. X15 T6 moved the drawer onto
       // Mantine, so the bespoke `aria-label="Close explain"` ✕ is gone and the
       // close control is Mantine's, labelled "Close" like every other dialog.

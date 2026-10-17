@@ -2,15 +2,17 @@ import type {
   CollectionCreateInput,
   CollectionCreateOptions,
   CollectionDropInput,
+  CollectionModifyInput,
   CollectionRenameInput,
   DatabaseDropInput,
 } from '@shared/types';
-import { ejsonParse } from './ejson.ts';
+import { ejsonParse, isPlainDocument, parseEjsonDocument, parseEjsonField } from './ejson.ts';
 import { classifyMongoOpError } from './errors.ts';
 import { ConflictError, ValidationError } from '../errors.ts';
 import type { MongoPool } from './MongoPool.ts';
 import { ADMIN_LONG_TIMEOUT_MS, STATS_TIMEOUT_MS } from './timeouts.ts';
 import { attachUndo } from './undo.ts';
+import { isWriteStage } from './writeStages.ts';
 
 /**
  * Structural admin operations on collections and databases (T1.1) —
@@ -99,6 +101,26 @@ export class CollectionAdminService {
     }
   }
 
+  /** `collMod`: replaces a collection's validation rules or a view's definition. */
+  async modify(input: CollectionModifyInput): Promise<{ ok: true }> {
+    const w = this.pool.write(input.connectionId);
+    const { validator, validationLevel, validationAction, viewOn, pipeline } = input.options;
+    const cmd: Record<string, unknown> = { collMod: input.collection };
+    if (validator !== undefined) cmd.validator = parseEjsonDocument(validator, 'validator');
+    if (validationLevel !== undefined) cmd.validationLevel = validationLevel;
+    if (validationAction !== undefined) cmd.validationAction = validationAction;
+    if (viewOn !== undefined) cmd.viewOn = viewOn;
+    if (pipeline !== undefined) cmd.pipeline = parsePipeline(pipeline);
+    const db = await w.db(input.dbName);
+    try {
+      // Catalog-only metadata op, on the same budget as rename.
+      await db.command({ ...cmd, maxTimeMS: STATS_TIMEOUT_MS });
+      return { ok: true };
+    } catch (err) {
+      throw classifyMongoOpError(err);
+    }
+  }
+
   async dropDatabase(input: DatabaseDropInput): Promise<{ dropped: true }> {
     const w = this.pool.write(input.connectionId);
     const db = await w.db(input.dbName);
@@ -115,7 +137,7 @@ export class CollectionAdminService {
 
 const VALID_GRANULARITIES = new Set(['seconds', 'minutes', 'hours']);
 const VALID_VALIDATION_LEVELS = new Set(['off', 'strict', 'moderate']);
-const VALID_VALIDATION_ACTIONS = new Set(['error', 'warn']);
+const VALID_VALIDATION_ACTIONS = new Set(['error', 'warn', 'errorAndLog']);
 
 export function validateCollectionName(name: string): void {
   if (!name || name.trim().length === 0) {
@@ -131,6 +153,30 @@ export function validateCollectionName(name: string): void {
       name,
     });
   }
+}
+
+/**
+ * A view's pipeline: an EJSON array of single-operator stages. A write stage
+ * is refused, because a view only reads, and the server's own refusal of
+ * `$out` in a view comes back as an opaque command error.
+ */
+export function parsePipeline(json: string): Record<string, unknown>[] {
+  const parsed = parseEjsonField<unknown>(json, 'pipeline');
+  if (!Array.isArray(parsed)) {
+    throw new ValidationError('invalid pipeline: expected an array of stages', { field: 'pipeline' });
+  }
+  for (const [i, stage] of parsed.entries()) {
+    const keys = isPlainDocument(stage) ? Object.keys(stage as object) : [];
+    if (keys.length !== 1 || !keys[0]!.startsWith('$')) {
+      throw new ValidationError(`invalid pipeline: stage ${i + 1} must be one { $operator: … } document`, {
+        field: 'pipeline',
+      });
+    }
+    if (isWriteStage(keys[0]!)) {
+      throw new ValidationError(`invalid pipeline: a view cannot use ${keys[0]}`, { field: 'pipeline' });
+    }
+  }
+  return parsed as Record<string, unknown>[];
 }
 
 /**
@@ -214,6 +260,13 @@ export function buildCreateCollectionOptions(
       });
     }
     opts.validationAction = options.validationAction;
+  }
+
+  if (options.viewOn) {
+    opts.viewOn = options.viewOn;
+    opts.pipeline = parsePipeline(options.pipeline ?? '[]');
+  } else if (options.pipeline !== undefined) {
+    throw new ValidationError('a pipeline needs viewOn, the collection the view reads', { field: 'pipeline' });
   }
 
   return opts;

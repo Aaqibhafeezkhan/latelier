@@ -134,3 +134,68 @@ describe('parseConnectionUri property: parseIntParam fallback semantics (maxPool
     );
   });
 });
+
+describe('parseConnectionUri property: credential file paths never reach the input', () => {
+  it('whatever path tlsCAFile or tlsCertificateKeyFile carries, only the re-pick marker survives', () => {
+    // A marker prefix keeps the path from colliding with anything else in the input.
+    const pathArb = fc.string({ minLength: 1, maxLength: 40 }).map((s) => `/zz-marker-${encodeURIComponent(s)}`);
+    fc.assert(
+      fc.property(
+        pathArb,
+        pathArb,
+        caseVariant('tlscafile'),
+        caseVariant('tlscertificatekeyfile'),
+        (ca, cert, caKey, certKey) => {
+          const { input, repick, warnings } = parseConnectionUri(
+            `mongodb://h/?tls=true&${caKey}=${ca}&${certKey}=${cert}`,
+          );
+          const out = JSON.stringify({ input, warnings });
+          expect(out).not.toContain('zz-marker-');
+          expect(repick).toEqual(['tlsCa', 'tlsClientCert']);
+        },
+      ),
+      { numRuns: 40 },
+    );
+  });
+});
+
+describe('parseConnectionUri property: refusals never echo the password', () => {
+  it('a bad port or host error message omits the password', () => {
+    const pwArb = fc.stringMatching(/^[A-Za-z0-9]{8,16}$/);
+    fc.assert(
+      fc.property(pwArb, fc.constantFrom(':abc', ':0', ':65536', '&tls=true'), (pw, bad) => {
+        try {
+          parseConnectionUri(`mongodb://u:${pw}@h${bad}/db`);
+        } catch (err) {
+          expect(err).toBeInstanceOf(ValidationError);
+          expect((err as Error).message).not.toContain(pw);
+          return;
+        }
+        expect.unreachable('bad host/port should be refused');
+      }),
+      { numRuns: 40 },
+    );
+  });
+});
+
+describe('parseConnectionUri property: unparseable userinfo is never echoed', () => {
+  // Passwords mixing '/', ':' and a digits-only start are what made the SRV
+  // port strip read the userinfo as a host, and the library quote it back.
+  const pwArb = fc
+    .tuple(fc.stringMatching(/^[0-9]{0,5}$/), fc.array(fc.constantFrom(...'/:Ab9'.split('')), { minLength: 1, maxLength: 10 }))
+    .map(([digits, rest]) => `${digits}${rest.join('')}ZQX9`);
+  it('neither an error nor a warning repeats the password', () => {
+    fc.assert(
+      fc.property(fc.constantFrom('mongodb://', 'mongodb+srv://'), pwArb, fc.constantFrom('', ':27017'), (scheme, pw, port) => {
+        try {
+          const { warnings } = parseConnectionUri(`${scheme}alice:${pw}@cluster.example.net${port}/db`);
+          expect(JSON.stringify(warnings)).not.toContain('ZQX9');
+        } catch (err) {
+          expect(err).toBeInstanceOf(ValidationError);
+          expect((err as Error).message).not.toContain('ZQX9');
+        }
+      }),
+      { numRuns: 200 },
+    );
+  });
+});

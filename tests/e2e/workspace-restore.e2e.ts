@@ -112,3 +112,73 @@ test('workspace tabs survive a quit + relaunch', async () => {
     fs.rmSync(userDataDir, { recursive: true, force: true });
   }
 });
+
+test('with "Reopen tabs on launch" off, a relaunch starts with no tabs', async () => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mongolab-e2e-'));
+  const launch = () =>
+    electron.launch({
+      args: [path.resolve(here, '../..', 'dist-electron/main.js')],
+      env: { ...process.env, ATELIER_USER_DATA_DIR: userDataDir, NODE_ENV: 'test' },
+    });
+
+  const first = await launch();
+  try {
+    const win = await first.firstWindow();
+    await win.waitForLoadState('domcontentloaded');
+    const opened = await win.evaluate(async () => {
+      const api = (window as unknown as {
+        atelier: {
+          conn: { create: (input: unknown) => Promise<{ id: string }> };
+          tabs: {
+            openCollection: (input: {
+              connectionId: string;
+              dbName: string;
+              collection: string;
+            }) => Promise<{ id: string }>;
+            list: () => Promise<unknown[]>;
+          };
+          prefs: { set: (key: string, value: unknown) => Promise<unknown> };
+        };
+      }).atelier;
+      const c = await api.conn.create({
+        name: 'Seed',
+        color: '#1A6835',
+        connectionType: 'standard',
+        host: '127.0.0.1',
+        port: 27017,
+        authMech: 'none',
+        tls: { enabled: false, verify: true },
+        advanced: {
+          connectTimeoutMs: 3000,
+          socketTimeoutMs: 3000,
+          serverSelectionTimeoutMs: 3000,
+          readPreference: 'primary',
+          maxPoolSize: 1,
+          directConnection: true,
+        },
+      });
+      await api.tabs.openCollection({ connectionId: c.id, dbName: 'db', collection: 'alpha' });
+      await api.prefs.set('ui.workspace.restoreTabs', false);
+      return (await api.tabs.list()).length;
+    });
+    expect(opened).toBe(1);
+  } finally {
+    await first.close();
+  }
+
+  const second = await launch();
+  try {
+    const win = await second.firstWindow();
+    await win.waitForLoadState('domcontentloaded');
+    const remaining = await win.evaluate(async () => {
+      const api = (window as unknown as {
+        atelier: { tabs: { list: () => Promise<unknown[]> } };
+      }).atelier;
+      return await api.tabs.list();
+    });
+    expect(remaining).toEqual([]);
+  } finally {
+    await second.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  }
+});

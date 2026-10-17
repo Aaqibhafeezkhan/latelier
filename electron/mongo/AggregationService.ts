@@ -39,6 +39,8 @@ export class AggregationService {
   private pool: MongoPool;
   private recent: RecentQueryService;
   private active = new Map<string, CancelEntry>();
+  // Runs between pipeline start and finish, token or not; `active` only holds tokened ones.
+  private running = 0;
   private log: Logger | undefined;
 
   constructor(pool: MongoPool, recent: RecentQueryService, log?: Logger) {
@@ -91,15 +93,23 @@ export class AggregationService {
 
     const pipeline = enabled.map((s) => parseStage(s));
     const controller = this.registerCancel(input.cancelToken);
-    const coll = await this.getCollection(
-      input.connectionId,
-      input.dbName,
-      input.collection,
-      grant,
-    );
+    let coll: Collection<Document>;
+    try {
+      coll = await this.getCollection(
+        input.connectionId,
+        input.dbName,
+        input.collection,
+        grant,
+      );
+    } catch (err) {
+      // The run never started, so the try/finally below will not clear the token.
+      this.clearCancel(input.cancelToken);
+      throw err;
+    }
     const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
     let t0 = Date.now();
 
+    this.running++;
     try {
       if (beforeExecute) {
         await beforeExecute();
@@ -194,8 +204,14 @@ export class AggregationService {
         .catch((e: unknown) => logRecentWriteFailure(this.log, e));
       throw classified;
     } finally {
+      this.running--;
       this.clearCancel(input.cancelToken);
     }
+  }
+
+  /** Runs in flight, for the quit confirmation. */
+  runningCount(): number {
+    return this.running;
   }
 
   async previewUpToStage(input: PreviewInput): Promise<AggStagePreview> {

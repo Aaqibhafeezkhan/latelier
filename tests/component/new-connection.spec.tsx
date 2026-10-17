@@ -1,25 +1,26 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent, within } from '../helpers/render';
+import { render, screen, waitFor, fireEvent, within, act } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { RouterProvider, createMemoryRouter, useLocation } from 'react-router-dom';
 import NewConnection from '../../src/pages/NewConnection';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import type { Connection } from '@shared/types';
 
+// `NewConnection` blocks navigation while dirty, which needs a data router.
 function renderNew(initial = '/connections/new', id?: string) {
-  return render(
-    <MemoryRouter initialEntries={[initial]}>
-      <Routes>
-        <Route path="/workspace" element={<div>workspace-route</div>} />
-        <Route path="/connections/:id" element={<div>detail-route</div>} />
-        <Route path="/connections/new" element={<NewConnection />} />
-        <Route
-          path={id ? '/connections/:id/edit' : '/connections/xxx/edit'}
-          element={<NewConnection />}
-        />
-      </Routes>
-    </MemoryRouter>,
+  const router = createMemoryRouter(
+    [
+      { path: '/workspace', element: <div>workspace-route</div> },
+      { path: '/connections/:id', element: <div>detail-route</div> },
+      { path: '/connections/new', element: <NewConnection /> },
+      {
+        path: id ? '/connections/:id/edit' : '/connections/xxx/edit',
+        element: <NewConnection />,
+      },
+    ],
+    { initialEntries: [initial] },
   );
+  return { router, ...render(<RouterProvider router={router} />) };
 }
 
 /**
@@ -28,22 +29,22 @@ function renderNew(initial = '/connections/new', id?: string) {
  * `openConnectionId`, the nav-state intent Workspace.tsx uses to connect a
  * Connection (see `NewConnection.tsx`'s `onSaved`).
  */
-function renderNewCapturingWorkspaceState(initial: Parameters<typeof MemoryRouter>[0]['initialEntries']) {
+function renderNewCapturingWorkspaceState(initial: Array<string | { pathname: string; state?: unknown }>) {
   const captured: { state: unknown } = { state: 'not-navigated' };
   function WorkspaceProbe() {
     captured.state = useLocation().state;
     return <div>workspace-route</div>;
   }
-  render(
-    <MemoryRouter initialEntries={initial}>
-      <Routes>
-        <Route path="/workspace" element={<WorkspaceProbe />} />
-        <Route path="/connections/:id" element={<div>detail-route</div>} />
-        <Route path="/connections/new" element={<NewConnection />} />
-        <Route path="/connections/:id/edit" element={<NewConnection />} />
-      </Routes>
-    </MemoryRouter>,
+  const router = createMemoryRouter(
+    [
+      { path: '/workspace', element: <WorkspaceProbe /> },
+      { path: '/connections/:id', element: <div>detail-route</div> },
+      { path: '/connections/new', element: <NewConnection /> },
+      { path: '/connections/:id/edit', element: <NewConnection /> },
+    ],
+    { initialEntries: initial },
   );
+  render(<RouterProvider router={router} />);
   return captured;
 }
 
@@ -126,9 +127,13 @@ describe('NewConnection (create mode)', () => {
     });
   });
 
-  async function pasteWith(input: Record<string, unknown>, warnings: Array<{ code: string; detail?: string }>) {
+  async function pasteWith(
+    input: Record<string, unknown>,
+    warnings: Array<{ code: string; detail?: string }>,
+    repick?: string[],
+  ) {
     installAtelierMock({
-      conn: { parseUri: (async () => ({ input, warnings })) as never },
+      conn: { parseUri: (async () => ({ input, warnings, repick })) as never },
     });
     renderNew();
     await userEvent.click(await screen.findByText(/Paste URI/i));
@@ -152,6 +157,31 @@ describe('NewConnection (create mode)', () => {
       [{ code: 'OPTION_DROPPED', detail: 'tlsinsecure' }],
     );
     expect((await screen.findByRole('status')).textContent).toMatch(/1 warning: tlsinsecure/);
+  });
+
+  it('pasting a URI that names credential files tells the user to pick them again and leaves the fields empty', async () => {
+    await pasteWith(
+      { host: 'db.example.com', tls: { enabled: true, verify: true } },
+      [],
+      ['tlsCa', 'tlsClientCert'],
+    );
+    const text = (await screen.findByRole('status')).textContent;
+    expect(text).toMatch(/URI applied\./);
+    expect(text).toMatch(/re-pick CA file, re-pick client certificate/);
+    await userEvent.click(screen.getByRole('tab', { name: 'TLS' }));
+    for (const box of screen.getAllByRole('textbox')) expect((box as HTMLInputElement).value).not.toMatch(/\.pem/);
+  });
+
+  it('adds the re-pick note after the warnings, and nothing when no file is named', async () => {
+    await pasteWith({ host: 'h' }, [{ code: 'PROXY_DROPPED', detail: 'Proxy options in the string were not imported.' }], ['tlsCa']);
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'URI applied. 1 warning: Proxy options in the string were not imported. Still to do: re-pick CA file.',
+    );
+  });
+
+  it('a plain paste keeps the plain toast', async () => {
+    await pasteWith({ host: 'h' }, [], []);
+    expect((await screen.findByRole('status')).textContent).toBe('URI applied.');
   });
 
   it('Test button calls api.conn.test and shows ok state', async () => {
@@ -433,13 +463,7 @@ describe('NewConnection (edit mode)', () => {
         get: async () => CANNED_CONNECTION,
       },
     });
-    render(
-      <MemoryRouter initialEntries={['/connections/c1/edit']}>
-        <Routes>
-          <Route path="/connections/:id/edit" element={<NewConnection />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderNew('/connections/c1/edit', 'c1');
     await waitFor(() => {
       expect((screen.getByPlaceholderText(/My MongoDB Server/i) as HTMLInputElement).value).toBe('Stored');
     });
@@ -459,14 +483,7 @@ describe('NewConnection (edit mode)', () => {
         update: updateSpy,
       },
     });
-    render(
-      <MemoryRouter initialEntries={['/connections/c1/edit']}>
-        <Routes>
-          <Route path="/connections/:id/edit" element={<NewConnection />} />
-          <Route path="/connections/:id" element={<div>detail-route</div>} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderNew('/connections/c1/edit', 'c1');
     await waitFor(() => {
       expect((screen.getByPlaceholderText(/My MongoDB Server/i) as HTMLInputElement).value).toBe('Stored');
     });
@@ -500,5 +517,111 @@ describe('NewConnection (edit mode)', () => {
     await waitFor(() => expect(screen.getByText('workspace-route')).toBeTruthy());
     // react-router normalizes a `state: undefined` navigate() to `null`.
     expect(captured.state).toBeFalsy();
+  });
+});
+
+describe('NewConnection (unsaved-changes guard)', () => {
+  const discardPrompt = () => screen.queryByRole('dialog', { name: 'Discard changes?' });
+
+  async function dirtyForm() {
+    installAtelierMock({});
+    const mounted = renderNew();
+    const name = (await screen.findByPlaceholderText(/My MongoDB Server/i)) as HTMLInputElement;
+    await userEvent.type(name, 'Half typed');
+    return { ...mounted, name };
+  }
+
+  it('the back link asks before leaving a dirty form, and stays put', async () => {
+    const { router } = await dirtyForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Data View' }));
+    expect(await screen.findByRole('dialog', { name: 'Discard changes?' })).toBeTruthy();
+    expect(router.state.location.pathname).toBe('/connections/new');
+  });
+
+  it('Keep editing stays on the form with what was typed', async () => {
+    const { router, name } = await dirtyForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Data View' }));
+    const prompt = await screen.findByRole('dialog', { name: 'Discard changes?' });
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(discardPrompt()).toBeNull());
+    expect(router.state.location.pathname).toBe('/connections/new');
+    expect(name.value).toBe('Half typed');
+    // The block was released, so the next attempt to leave is caught again.
+    fireEvent.click(screen.getByRole('button', { name: 'Data View' }));
+    expect(await screen.findByRole('dialog', { name: 'Discard changes?' })).toBeTruthy();
+    expect(router.state.location.pathname).toBe('/connections/new');
+  });
+
+  it('Discard leaves the form', async () => {
+    const { router } = await dirtyForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Data View' }));
+    const prompt = await screen.findByRole('dialog', { name: 'Discard changes?' });
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/workspace'));
+    expect(screen.getByText('workspace-route')).toBeTruthy();
+  });
+
+  it('the Cancel button asks too', async () => {
+    const { router } = await dirtyForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByRole('dialog', { name: 'Discard changes?' })).toBeTruthy();
+    expect(router.state.location.pathname).toBe('/connections/new');
+  });
+
+  it('a clean form navigates away without a prompt', async () => {
+    installAtelierMock({});
+    const { router } = renderNew();
+    await screen.findByPlaceholderText(/My MongoDB Server/i);
+    fireEvent.click(screen.getByRole('button', { name: 'Data View' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/workspace'));
+    expect(discardPrompt()).toBeNull();
+  });
+
+  it('a successful save navigates without a prompt', async () => {
+    installAtelierMock({ conn: { create: (async () => ({ id: 'c1' })) as never } });
+    const { router } = renderNew();
+    await userEvent.type(await screen.findByPlaceholderText(/My MongoDB Server/i), 'X');
+    await userEvent.type(screen.getByPlaceholderText(/cluster\.mongodb\.net/i), 'localhost');
+    await userEvent.click(screen.getByText('Auth'));
+    await userEvent.selectOptions(screen.getAllByRole('combobox')[0]!, 'none');
+    fireEvent.click(screen.getByText(/^Save$/));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/workspace'));
+    expect(discardPrompt()).toBeNull();
+  });
+
+  it('leaving after the plaintext-fallback retry save shows no prompt', async () => {
+    let calls = 0;
+    const createSpy = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw { code: 'SECRETS_UNAVAILABLE', message: 'OS keychain not accessible' };
+      return { id: 'c1' } as never;
+    });
+    installAtelierMock({
+      conn: { create: createSpy as never },
+      secrets: { setPlaintextFallback: async (enabled: boolean) => ({ enabled }) },
+    });
+    const { router } = renderNew();
+    await userEvent.type(await screen.findByPlaceholderText(/My MongoDB Server/i), 'X');
+    await userEvent.type(screen.getByPlaceholderText(/cluster\.mongodb\.net/i), 'localhost');
+    await userEvent.click(screen.getByText('Auth'));
+    await userEvent.selectOptions(screen.getAllByRole('combobox')[0]!, 'scram256');
+    await userEvent.type(screen.getAllByPlaceholderText('admin')[0]!, 'alice');
+    await userEvent.type(await screen.findByPlaceholderText(/^••••••••$/), 'pw');
+    fireEvent.click(screen.getByText(/^Save$/));
+
+    fireEvent.click(await screen.findByText(/Store as plaintext/i));
+
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/workspace'));
+    expect(discardPrompt()).toBeNull();
+  });
+
+  it('a navigation from elsewhere (the palette) is blocked while dirty', async () => {
+    const { router } = await dirtyForm();
+    act(() => {
+      void router.navigate('/workspace');
+    });
+    expect(await screen.findByRole('dialog', { name: 'Discard changes?' })).toBeTruthy();
+    expect(router.state.location.pathname).toBe('/connections/new');
   });
 });

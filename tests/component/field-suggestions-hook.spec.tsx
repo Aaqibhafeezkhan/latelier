@@ -177,3 +177,100 @@ describe('useSuggestions — value mode', () => {
     expect(fieldSrc).not.toHaveBeenCalled();
   });
 });
+
+describe('useSuggestions — a rejecting async source still settles', () => {
+  const rejecting: FieldSource = async () => {
+    await new Promise((r) => setTimeout(r, 5));
+    throw new Error('source down');
+  };
+
+  it('returns loading to false and keeps the sync items when an async source rejects', async () => {
+    const sync = syncFieldSource([{ kind: 'field', path: 'name', source: 'a' }]);
+    const { result } = renderHook(() =>
+      useSuggestions(ctx(), '', { fieldSources: [sync, rejecting], valueSources: [] }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.items.map((i) => (i as FieldSuggestion).path)).toEqual(['name']);
+  });
+
+  it('still merges the healthy async source when a sibling rejects', async () => {
+    const healthy = asyncFieldSource([{ kind: 'field', path: 'age', source: 'b' }]);
+    const { result } = renderHook(() =>
+      useSuggestions(ctx(), '', { fieldSources: [rejecting, healthy], valueSources: [] }),
+    );
+    await waitFor(() =>
+      expect(result.current.items.map((i) => (i as FieldSuggestion).path)).toEqual(['age']),
+    );
+    expect(result.current.loading).toBe(false);
+  });
+
+  it('does not let a stale rejection clear the newer request loading flag', async () => {
+    // The hook also calls each source once in its sync pass, so key the
+    // pending promises by collection instead of counting calls.
+    const rejectors = new Map<string, (e: Error) => void>();
+    const resolvers = new Map<string, (items: FieldSuggestion[]) => void>();
+    const src: FieldSource = (c) =>
+      new Promise<FieldSuggestion[]>((res, rej) => {
+        resolvers.set(c.collection, res);
+        rejectors.set(c.collection, rej);
+      });
+    const { result, rerender } = renderHook(
+      ({ coll }: { coll: string }) =>
+        useSuggestions(ctx({ collection: coll }), '', { fieldSources: [src], valueSources: [] }),
+      { initialProps: { coll: 'a' } },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    rerender({ coll: 'b' });
+    await waitFor(() => expect(resolvers.has('b')).toBe(true));
+    rejectors.get('a')!(new Error('stale'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(result.current.loading).toBe(true);
+    resolvers.get('b')!([{ kind: 'field', path: 'z', source: 's' }]);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.items.map((i) => (i as FieldSuggestion).path)).toEqual(['z']);
+  });
+
+  it('clears loading when the context goes away while an async source is pending', async () => {
+    const never: FieldSource = () => new Promise<FieldSuggestion[]>(() => undefined);
+    const { result, rerender } = renderHook(
+      ({ c }: { c: SuggestionContext | null }) =>
+        useSuggestions(c, '', { fieldSources: [never], valueSources: [] }),
+      { initialProps: { c: ctx() as SuggestionContext | null } },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(true));
+
+    rerender({ c: null });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
+  it('clears loading when the new context has only sync sources', async () => {
+    const never: FieldSource = (c) =>
+      c.collection === 'a' ? new Promise<FieldSuggestion[]>(() => undefined) : [];
+    const { result, rerender } = renderHook(
+      ({ coll }: { coll: string }) =>
+        useSuggestions(ctx({ collection: coll }), '', { fieldSources: [never], valueSources: [] }),
+      { initialProps: { coll: 'a' } },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(true));
+
+    rerender({ coll: 'b' });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+  });
+
+  it('reports each rejected source instead of dropping it silently', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const boom = new Error('source down');
+    const failing: FieldSource = async () => {
+      throw boom;
+    };
+    const { result } = renderHook(() =>
+      useSuggestions(ctx(), '', { fieldSources: [failing], valueSources: [] }),
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(warn).toHaveBeenCalledWith('[suggestions] source failed', boom);
+    warn.mockRestore();
+  });
+});

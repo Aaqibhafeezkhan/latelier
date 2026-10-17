@@ -1,0 +1,66 @@
+{
+  "type": "Compass Connections",
+  "version": {
+    "$numberInt": "1"
+  },
+  "connections": [
+    {
+      "id": "6f1d1a62-1f0e-4c0b-9d43-0a1e2f3b4c01",
+      "favorite": {
+        "name": "Fixture favourite",
+        "color": "color3"
+      },
+      "connectionOptions": {
+        "connectionString": "mongodb://alice:fixture-pw-1@db1.example.test:27017/?authSource=admin"
+      },
+      "savedConnectionType": "favorite"
+    },
+    {
+      "id": "6f1d1a62-1f0e-4c0b-9d43-0a1e2f3b4c02",
+      "favorite": {
+        "name": "Fixture SSH password"
+      },
+      "connectionOptions": {
+        "connectionString": "mongodb://bob:fixture-pw-2@10.0.0.5:27017/",
+        "sshTunnel": {
+          "username": "tunnel",
+          "host": "bastion.example.test",
+          "port": {
+            "$numberInt": "22"
+          },
+          "password": "fixture-ssh-pw"
+        }
+      },
+      "savedConnectionType": "favorite"
+    },
+    {
+      "id": "6f1d1a62-1f0e-4c0b-9d43-0a1e2f3b4c03",
+      "favorite": {
+        "name": "Fixture SSH key"
+      },
+      "connectionOptions": {
+        "connectionString": "mongodb://carol:fixture-pw-3@10.0.0.6:27017/",
+        "sshTunnel": {
+          "username": "tunnel",
+          "host": "bastion.example.test",
+          "port": {
+            "$numberInt": "2222"
+          },
+          "identityKeyFile": "/nonexistent/fixture_id_ed25519",
+          "identityKeyPassphrase": "fixture-key-pass"
+        }
+      },
+      "savedConnectionType": "favorite"
+    },
+    {
+      "id": "6f1d1a62-1f0e-4c0b-9d43-0a1e2f3b4c04",
+      "favorite": {
+        "name": "Fixture OIDC"
+      },
+      "connectionOptions": {
+        "connectionString": "mongodb+srv://cluster0.example.test/?authMechanism=MONGODB-OIDC"
+      },
+      "savedConnectionType": "favorite"
+    }
+  ]
+}

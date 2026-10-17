@@ -3,6 +3,8 @@ import { AppShell } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { isKnownNotConnected } from '../../state/connections';
 import { confirmDestructive } from '../../utils/confirm';
+import { getErrorMessage } from '../../api/atelier';
+import { notify } from '../../theme/notifications';
 import type { WorkspaceTab, ConnectionSummary } from '@shared/types';
 import type { WorkspaceTabsState } from '../../state/workspaceTabs';
 import { ConnectionSwitcher, type ConnectionSwitcherProps } from '../../features/connections/ConnectionSwitcher';
@@ -16,6 +18,7 @@ import { usePaletteApi } from '../../commands/CommandPalette';
 import { useHints } from '../../hints/HintsContext';
 import { useWorkspacePanelPrefs } from './useWorkspacePanelPrefs';
 import { useConnectionDialogs } from './useConnectionDialogs';
+import type { NavigatorData } from './useNavigatorData';
 
 // Returns a fragment: AppShell places .Header/.Navbar/.Main by CSS grid on direct children, so a wrapper here would break layout.
 export interface ShellSectionProps {
@@ -37,6 +40,8 @@ export interface ShellSectionProps {
   setNewTabOpen: (open: boolean) => void;
   panelPrefs: ReturnType<typeof useWorkspacePanelPrefs>;
   connectionDialogs: ReturnType<typeof useConnectionDialogs>;
+  /** The navigator's tree, owned by Workspace so it survives the sidebar collapsing. */
+  navigatorData: NavigatorData;
   /** Opens the reference-rules drawer for the Focused Tab's collection. */
   onOpenReferences: () => void;
 }
@@ -60,11 +65,87 @@ export function ShellSection({
   setNewTabOpen,
   panelPrefs,
   connectionDialogs,
+  navigatorData,
   onOpenReferences,
 }: ShellSectionProps) {
   const T = themeVars;
   const { sidebarCollapsed, toggleSidebar, leftWidth, setLeftWidth, commitLeftWidth } = panelPrefs;
   const { openEditConnectionModal, requestDisconnect } = connectionDialogs;
+  const [revealRequest, setRevealRequest] = React.useState<NavigatorOpenInput | null>(null);
+
+  const activate = (id: string) => {
+    if (id !== tabs.activeId) hints.recordSessionEvent('tabSwitch', '*');
+    // Clicking a dormant tab is the wake gesture: connect its Connection, same as clicking the navigator root.
+    const target = tabs.tabs.find((t) => t.id === id);
+    if (target) {
+      const conn = connections.find((c) => c.id === target.connectionId);
+      if (isKnownNotConnected(conn)) openConnection(target.connectionId);
+    }
+    void tabs.setActive(id);
+  };
+
+  // One prompt for the lot, naming how many pipelines would be lost. If the
+  // active tab is among them, the tab the menu was opened on takes over first,
+  // so focus never passes through a tab that is about to close.
+  const closeMany = async (ids: string[], keepId: string) => {
+    const dirty = ids.filter((id) => {
+      const t = tabs.tabs.find((x) => x.id === id);
+      return t?.kind === 'collection' && !!t.state.aggregation?.dirty;
+    }).length;
+    if (dirty > 0) {
+      const proceed = await confirmDestructive({
+        title: 'Discard unsaved pipeline changes?',
+        body:
+          dirty === 1
+            ? '1 tab being closed has pipeline edits that have not been saved. Closing it discards them.'
+            : `${dirty} tabs being closed have pipeline edits that have not been saved. Closing them discards them.`,
+        confirmLabel: 'Discard and close',
+      });
+      if (!proceed) return;
+    }
+    // One tab failing to close (or to take focus) never stops the rest; the
+    // failures are reported once at the end.
+    if (tabs.activeId && ids.includes(tabs.activeId)) {
+      try {
+        await tabs.setActive(keepId);
+      } catch (err) {
+        notify.error(getErrorMessage(err, 'Could not switch to the tab'));
+      }
+    }
+    let failed = 0;
+    let lastError: unknown;
+    for (const id of ids) {
+      try {
+        await tabs.close(id);
+      } catch (err) {
+        failed++;
+        lastError = err;
+      }
+    }
+    if (failed > 0) {
+      notify.error(
+        `${failed === 1 ? '1 tab' : `${failed} tabs`} could not be closed: ${getErrorMessage(lastError, 'close failed')}`,
+      );
+    }
+  };
+
+  // Activating the tab makes the navigator expand its database and load its
+  // collections (the active-tab follow); opening the root and the database
+  // here also covers a sidebar that is collapsed and so not following anything.
+  const reveal = (id: string) => {
+    const t = tabs.tabs.find((x) => x.id === id);
+    if (t?.kind !== 'collection') return;
+    activate(id);
+    if (sidebarCollapsed) toggleSidebar();
+    navigatorData.dispatch({ type: 'expandedConnSet', id: t.connectionId });
+    navigatorData.dispatch({
+      type: 'dbExpandedSet',
+      connectionId: t.connectionId,
+      dbName: t.dbName,
+      value: true,
+    });
+    setRevealRequest({ connectionId: t.connectionId, dbName: t.dbName, collection: t.collection });
+  };
 
   return (
     <>
@@ -91,16 +172,7 @@ export function ShellSection({
             if (!scratchConnectionId) return;
             void tabs.openScript({ connectionId: scratchConnectionId });
           }}
-          onActivate={(id) => {
-            if (id !== tabs.activeId) hints.recordSessionEvent('tabSwitch', '*');
-            // Clicking a dormant tab is the wake gesture: connect its Connection, same as clicking the navigator root.
-            const target = tabs.tabs.find((t) => t.id === id);
-            if (target) {
-              const conn = connections.find((c) => c.id === target.connectionId);
-              if (isKnownNotConnected(conn)) openConnection(target.connectionId);
-            }
-            void tabs.setActive(id);
-          }}
+          onActivate={activate}
           onClose={(id) => {
             const t = tabs.tabs.find((x) => x.id === id);
             if (t?.kind === 'collection' && t.state.aggregation?.dirty) {
@@ -121,6 +193,8 @@ export function ShellSection({
             const t = tabs.tabs.find((x) => x.id === id);
             if (t) void tabs.setPinned(id, !t.pinned);
           }}
+          onCloseMany={(ids, keepId) => void closeMany(ids, keepId)}
+          onReveal={reveal}
         />
       </AppShell.Header>
 
@@ -169,6 +243,9 @@ export function ShellSection({
                   });
                 }}
                 onOpenReferences={onOpenReferences}
+                data={navigatorData}
+                revealRequest={revealRequest}
+                onRevealHandled={() => setRevealRequest(null)}
               />
               <div
                 style={{

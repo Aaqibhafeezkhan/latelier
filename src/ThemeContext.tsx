@@ -1,5 +1,6 @@
 import React from 'react';
 import { api } from './api/atelier';
+import { notify } from './theme/notifications';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -85,14 +86,23 @@ export function useTheme(): [boolean, () => void] {
 
   const dark = mode === 'dark' || (mode === 'system' && systemDark);
 
+  // The latest mode, readable by `toggle` without re-creating it. Kept out of
+  // a `setMode` updater on purpose: StrictMode runs updaters twice, and a
+  // write inside one went out twice per click.
+  const modeRef = React.useRef(mode);
+  React.useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
   const toggle = React.useCallback(() => {
-    setMode((prev) => {
-      const effectiveDark = resolveDark(prev);
-      const next: ThemeMode = effectiveDark ? 'light' : 'dark';
-      void api.prefs.setTheme(next).catch(() => {
-        /* ignore */
-      });
-      return next;
+    const next: ThemeMode = resolveDark(modeRef.current) ? 'light' : 'dark';
+    // Two toggles in one tick must flip twice, before a re-render catches up.
+    modeRef.current = next;
+    setMode(next);
+    void api.prefs.setTheme(next).catch(() => {
+      // The switch already took effect for this session; say it will not
+      // survive a relaunch instead of letting it silently revert.
+      notify.error('Could not save the theme', { id: 'theme-save-failed' });
     });
   }, []);
 

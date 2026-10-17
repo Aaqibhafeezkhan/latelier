@@ -5,6 +5,7 @@ import { itReturnsFocusToPopoverTrigger } from '../helpers/popoverFocusReturn';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
+import { ConnectionTransferProvider } from '../../src/features/connections/ConnectionTransferProvider';
 import { collectionTabFixture, installAtelierMock, multiConnectionMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import type { Connection, ConnectionRuntime, ConnectionSummary, WorkspaceTab, CollectionTab } from '@shared/types';
 
@@ -219,14 +220,18 @@ function mount(
   });
   return render(
     <MemoryRouter initialEntries={['/workspace']}>
-      <Workspace />
-      <LocationProbe />
-      {opts.extra}
+      {/* The App-level owner of the Import Wizard, which the table's Paste URIs opens. */}
+      <ConnectionTransferProvider>
+        <Workspace />
+        <LocationProbe />
+        {opts.extra}
+      </ConnectionTransferProvider>
     </MemoryRouter>,
   );
 }
 
 afterEach(() => {
+  delete (window as unknown as { __atelierEnv__?: unknown }).__atelierEnv__;
   uninstallAtelierMock();
   vi.restoreAllMocks();
 });
@@ -1546,11 +1551,11 @@ describe('ConnectionSwitcher — expanded table', () => {
     fireEvent.keyDown(document.body, { key: 'E', ctrlKey: true });
     const table = await screen.findByRole('dialog', { name: 'Connections' });
     await userEvent.click(within(table).getByRole('button', { name: 'Paste URIs' }));
-    const add = await screen.findByRole('dialog', { name: 'Paste URIs' });
-    fireEvent.keyDown(within(add).getByRole('textbox', { name: 'Connection strings' }), { key: 'e', metaKey: true });
-    // Still exactly one table, and the paste dialog is still on top of it.
+    const add = await screen.findByRole('dialog', { name: 'Import Connections' });
+    fireEvent.keyDown(within(add).getByRole('textbox', { name: /paste connection strings/i }), { key: 'e', metaKey: true });
+    // Still exactly one table, and the Import Wizard is still on top of it.
     expect(screen.getAllByRole('dialog', { name: 'Connections' })).toHaveLength(1);
-    expect(screen.getByRole('dialog', { name: 'Paste URIs' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Import Connections' })).toBeTruthy();
   });
 
   it('leaves Ctrl+E to a text field as end-of-line, while ⌘E there still opens the table', async () => {
@@ -2119,6 +2124,7 @@ describe('ConnectionSwitcher keyboard contract', () => {
   });
 
   it('lists three shortcuts in a footer, the rest taught by row-action tooltips', async () => {
+    (window as unknown as { __atelierEnv__?: unknown }).__atelierEnv__ = { platform: 'darwin' };
     mount();
 
     await openSwitcher();
@@ -2138,6 +2144,18 @@ describe('ConnectionSwitcher keyboard contract', () => {
     expect(text).not.toContain('⌘↵');
     expect(text).not.toContain('disconnect');
     expect(text).not.toContain('esc close');
+  });
+
+  it('writes the footer shortcuts for Windows and Linux off a Mac', async () => {
+    (window as unknown as { __atelierEnv__?: unknown }).__atelierEnv__ = { platform: 'win32' };
+    mount();
+
+    await openSwitcher();
+
+    const text = screen.getByRole('note', { name: 'Keyboard shortcuts' }).textContent ?? '';
+    expect(text).toContain('Ctrl+E');
+    expect(text).toContain('Enter');
+    expect(text).not.toContain('⌘');
   });
 
   it('does not let a key it handles reach the Data View’s window shortcuts', async () => {

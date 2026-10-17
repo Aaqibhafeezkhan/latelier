@@ -8,7 +8,7 @@ Three closely-related title-bar actions that extend the aggregation tab beyond "
 
 ## Scope
 
-- **In**: Save / Save as (thin wrapper around W09), Save as collection modal + server action, Explain drawer + runner.
+- **In**: Save / Save as (thin wrapper around W09), Save as collection modal + server action, Save as view, Explain drawer + runner.
 - **Out**: Saved-queries storage (W09), runner internals (A04).
 
 ## Dependencies
@@ -64,6 +64,18 @@ Implementation:
 - `Unauthorized` → UNAUTHORIZED banner explaining the user lacks `insert` / `update` privileges.
 - Namespace conflict (target equals source with `$out`) → CONFLICT.
 
+## 2b. Save as view
+
+Saves the pipeline itself, not its output, as a read-only view on the open collection.
+
+- **Trigger**: the output panel's "Save as view…" button, next to "Save as…". It is enabled whenever the pipeline is not running; it needs no output rows, because nothing is run.
+- **Modal**: one "View name" field. The view is created in the **same database** as the source collection, because MongoDB requires a view and its `viewOn` to share a database, so there is no target-database field.
+- **Pipeline**: the enabled stages, after the same Shell-Syntax repair a run applies, serialized as one canonical EJSON array. A stage whose body does not parse is named inline by its position in the builder and operator, with the parser's reason (`stage 2 ($group): invalid EJSON — …`), and nothing is sent.
+- **Write stages**: an enabled `$out` or `$merge` is refused inline before any call, since a view only reads. A disabled one is ignored. Main refuses them too, as VALIDATION on `pipeline`.
+- **Server action**: `collection:create` with `options: { viewOn: <source>, pipeline }`. A duplicate name comes back as CONFLICT and shows inline; the dialog stays open.
+- **Dismiss**: Escape with a typed name asks before discarding it; a click outside does nothing.
+- **After**: a toast names the view. The navigator is not refreshed by the save, the same as Save as collection.
+
 ## 3. Explain
 
 Triggered by the title-bar Explain button or `⌘E`.
@@ -85,7 +97,10 @@ Server implementation:
 
 - Slide-in from the right, 520 px wide, full height.
 - Header: title, verbosity selector, close.
-- Body: syntax-highlighted EJSON of the explain plan, with expand/collapse buttons for nested sections.
+- Body: a stage tree above the syntax-highlighted EJSON of the explain plan, which has expand/collapse buttons for nested sections.
+- Stage tree: one row per stage of the winning plan (`buildPlanTree`), as a nested read-only list, with the index name and key pattern on an `IXSCAN`. At `executionStats` and above each row carries the figures its own stage reported (`nReturned`, `docsExamined`, `keysExamined`, `~Nms`); at `queryPlanner` the rows have no figures. A `COLLSCAN` row uses the warning treatment. An aggregation shows a `pipeline` root: the `$cursor` subtree first, then one row per later `$`-operator. A sharded plan has one child per shard, the shard's root row carrying the shard name. Figures read the same whether they arrive bare (`query:explain`) or as canonical EJSON numbers (`agg:explain`). A plan the builder does not recognize shows no tree; the EJSON view is still there.
+- Ceiling: a slot-based (SBE) plan shows its classic stage names from `queryPlan`, with no per-stage figures, because the executed slot tree uses different names. Mapping them by `planNodeId` would lift it.
+- A caller that already holds a plan (the result bar's plan badge) passes it as `initialPlan`: the drawer shows it without fetching, and a verbosity change fetches.
 - Footer: `Copy` (clipboard), `Download` (save JSON file).
 - A small "Stages with write ops were omitted" notice if applicable.
 
@@ -101,6 +116,8 @@ Server implementation:
 - Target equals source with `$out` is rejected before running.
 - Explain drawer renders a plan for `queryPlanner` on a seeded collection.
 - Explain with `$out`/`$merge` in the pipeline succeeds and shows the omission notice.
+- Save as view creates a view on the source collection, in its database, whose documents are the enabled stages' output.
+- Save as view refuses an enabled `$out`/`$merge` inline and sends nothing.
 
 ## 5. Test cases
 
@@ -114,8 +131,16 @@ Server implementation:
 
 ### Component
 - **save-as-collection-modal.spec.tsx**: require name typed to enable Confirm; submitting calls `api.agg.runAndSave`.
+- **save-as-view-modal.spec.tsx**: submitting calls `collection.create` with `viewOn` = the source and the enabled stages' pipeline; an enabled write stage or an unparsable body is refused inline with no call; Escape on a typed name asks to discard.
+- **output-panel.spec.tsx**: "Save as view…" is enabled with no output rows and disabled while running.
 - **explain-drawer.spec.tsx**: click Explain → drawer opens; verbosity toggle re-fetches.
 - **explain-copy-download.spec.tsx**: Copy writes to clipboard; Download calls `app:saveFile`.
+- **explain-drawer.spec.tsx**: the stage tree renders a row per stage with its figures, a `COLLSCAN` row says so, an unrecognized plan shows no tree; with `initialPlan` the drawer does not fetch on open (StrictMode included) and fetches once on a verbosity change.
+
+### Unit
+- **explain-summary.spec.ts**: `buildPlanTree` for classic, `inputStages`, queryPlanner-only, aggregation, SBE and sharded plans; non-numeric figures are not copied; unrecognized input gives `null`.
 
 ### E2E
 - **agg-full-flow.e2e.ts**: open agg tab → build pipeline → Run → Save (enters modal) → Save as collection → verify new collection exists → Explain → drawer visible with plan.
+- **a06-explain-plan.e2e.ts**: at `executionStats` the drawer's stage tree shows the stage name and its figures.
+- **w02-views-validation.e2e.ts**: `$match` → Save as view → Refresh collections lists the view; Modify view changes what it returns.

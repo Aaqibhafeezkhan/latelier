@@ -25,6 +25,7 @@ import type {
   IndexInfo,
 } from '@shared/types';
 import type { IndexSuggestion } from '../utils/indexSuggestion';
+import { humanBytes } from '../utils/humanBytes';
 
 /**
  * A one-shot request from `ExplainDrawer`'s "Create an index for this
@@ -37,18 +38,6 @@ import type { IndexSuggestion } from '../utils/indexSuggestion';
 export interface IndexCreateRequest {
   requestId: string;
   suggestion: IndexSuggestion | null;
-}
-
-function humanBytes(n: number): string {
-  if (!Number.isFinite(n) || n === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let i = 0;
-  let v = n;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 function humanCount(n: number): string {
@@ -115,12 +104,20 @@ export function IndexesTab({
   connectionId,
   dbName,
   collection,
+  viewOn,
   initialCreate,
   onInitialCreateConsumed,
+  onChanged,
 }: {
   connectionId: string;
   dbName: string;
   collection: string;
+  /**
+   * Set when the namespace is a view: the collection it reads from. The server
+   * rejects `listIndexes` on a view, so no list is requested and no create or
+   * drop is offered.
+   */
+  viewOn?: string;
   /** See `IndexCreateRequest`. Omitted (or `null`) outside the ExplainDrawer flow. */
   initialCreate?: IndexCreateRequest | null;
   /**
@@ -132,6 +129,8 @@ export function IndexesTab({
    * ago. Omitted for the same reason `initialCreate` can be omitted.
    */
   onInitialCreateConsumed?: () => void;
+  /** An index was created or dropped, so figures derived from them (the statistics header) are stale. */
+  onChanged?: () => void;
 }) {
   const T = themeVars;
   const target = React.useMemo(() => ({ dbName, collection }), [dbName, collection]);
@@ -190,9 +189,10 @@ export function IndexesTab({
 
   /* eslint-disable react-hooks/set-state-in-effect */
   React.useEffect(() => {
+    if (viewOn !== undefined) return;
     void loadIndexes(target);
     setExpandedRow(null);
-  }, [target, loadIndexes]);
+  }, [target, loadIndexes, viewOn]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Opens the create-index drawer prefilled from ExplainDrawer's "Create an
@@ -232,6 +232,14 @@ export function IndexesTab({
   // plain scrolling block instead — one scroller for the whole pane — so
   // this lays out at its natural content height and lets the page provide
   // the only scrollbar.
+  if (viewOn !== undefined) {
+    return (
+      <div style={{ padding: '10px 16px', fontSize: 12, color: T.textMuted, borderBottom: `1px solid ${T.border}` }}>
+        Views have no indexes of their own. This view uses the indexes of {viewOn}, the collection it reads from.
+      </div>
+    );
+  }
+
   return (
     <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', overflow: 'visible', position: 'relative' }}>
       <div
@@ -318,6 +326,7 @@ export function IndexesTab({
               setDrawerOpen(false);
               setCreatePrefill(null);
               void loadIndexes(target);
+              onChanged?.();
             }}
             connectionId={connectionId}
             initialFields={createPrefill?.keys.map((k) => ({ field: k.field, direction: k.direction }))}
@@ -333,6 +342,7 @@ export function IndexesTab({
             onDropped={() => {
               setDropName(null);
               void loadIndexes(target);
+              onChanged?.();
             }}
             returnFocusTo={dropReturnFocus}
             connectionId={connectionId}

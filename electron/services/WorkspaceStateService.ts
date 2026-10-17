@@ -19,6 +19,7 @@ import { NotFoundError, ValidationError } from '../errors.ts';
 import { SavedAggregationPayloadSchema } from '../ipc/schemas/saved.ts';
 import type { SavedQueryService } from './SavedQueryService.ts';
 import { serializeTabState } from './tabStateResults.ts';
+import type { AppStateService } from './AppStateService.ts';
 
 export interface OpenCollectionInput {
   connectionId: string;
@@ -335,6 +336,11 @@ export class WorkspaceStateService {
     this.repo.setActiveExclusive(id);
   }
 
+  /** Closes every tab, pinned and active ones included. */
+  closeAll(): void {
+    this.repo.deleteAll();
+  }
+
   setPinned(id: string, pinned: boolean): WorkspaceTab {
     const row = this.repo.findById(id);
     if (!row) throw new NotFoundError(`workspace tab ${id} not found`);
@@ -457,4 +463,14 @@ function rowToTab(row: WorkspaceTabRow): WorkspaceTab {
     state,
   };
   return tab;
+}
+
+/**
+ * Boot-time enforcement of "Reopen tabs on launch". Only an explicit `false`
+ * clears the workspace; an unset key keeps the restore behaviour. Done once in
+ * main because `/workspace` remounts on route changes, so a renderer-side
+ * clear would wipe tabs mid-session.
+ */
+export function applyRestoreTabsPref(appState: AppStateService, tabs: WorkspaceStateService): void {
+  if (appState.get<boolean>('ui.workspace.restoreTabs') === false) tabs.closeAll();
 }

@@ -19,6 +19,7 @@ import {
   setOp,
   stageSig,
   stageSummary,
+  stagesToPipelineJson,
   toggleEnabled,
   validatePipeline,
   validateStageBody,
@@ -799,6 +800,47 @@ describe('pipeline invariants (fast-check)', () => {
           expect(new Set(moved.stages.map((st) => st.id))).toEqual(new Set(s.stages.map((st) => st.id)));
         },
       ),
+    );
+  });
+});
+
+describe('stagesToPipelineJson', () => {
+  const st = (id: number, op: string, body: string, enabled = true): Stage => ({ id, op, body, enabled });
+
+  it('keeps the enabled stages in order and emits canonical EJSON', () => {
+    const json = stagesToPipelineJson([
+      st(1, '$match', '{"n": 1}'),
+      st(2, '$limit', '5', false),
+      st(3, '$sort', '{"at": {"$date": "2026-01-01T00:00:00Z"}}'),
+      st(4, '$project', '{"n": 1.5}'),
+    ]);
+    expect(json).toBe(
+      '[{"$match":{"n":{"$numberInt":"1"}}},' +
+        '{"$sort":{"at":{"$date":{"$numberLong":"1767225600000"}}}},' +
+        '{"$project":{"n":{"$numberDouble":"1.5"}}}]',
+    );
+  });
+
+  it('gives an empty array when no stage is enabled', () => {
+    expect(stagesToPipelineJson([st(1, '$match', '{}', false)])).toBe('[]');
+  });
+
+  it('throws naming the stage by its position, its operator and the parser reason', () => {
+    const run = () => stagesToPipelineJson([st(4, '$match', '{}', false), st(7, '$group', '{ _id: ')]);
+    expect(run).toThrow(/^stage 2 \(\$group\): invalid EJSON — \S/);
+    let thrown: unknown;
+    try {
+      run();
+    } catch (e) {
+      thrown = e;
+    }
+    expect((thrown as Error).cause).toBeInstanceOf(Error);
+    expect((thrown as Error).message.endsWith((thrown as { cause: Error }).cause.message)).toBe(true);
+  });
+
+  it('skips a disabled stage even when its body would not parse', () => {
+    expect(stagesToPipelineJson([st(1, '$match', '{ broken', false), st(2, '$limit', '3')])).toBe(
+      '[{"$limit":{"$numberInt":"3"}}]',
     );
   });
 });

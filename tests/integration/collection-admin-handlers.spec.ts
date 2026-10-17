@@ -35,6 +35,7 @@ function stubSvc(overrides: Partial<CollectionAdminService> = {}): CollectionAdm
     drop: async () => ({ dropped: true }),
     rename: async (input) => ({ name: input.newName }),
     dropDatabase: async () => ({ dropped: true as const }),
+    modify: async () => ({ ok: true as const }),
   };
   return { ...base, ...overrides } as CollectionAdminService;
 }
@@ -175,5 +176,60 @@ describe('collection:* / database:* handlers via router', () => {
     });
     expect(env).toEqual({ ok: true, data: { dropped: true } });
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  describe('collection:modify', () => {
+    const target = { connectionId: 'c1', dbName: 'app', collection: 'orders' };
+
+    it.each([
+      ['empty options', {}],
+      ['viewOn without pipeline', { viewOn: 'src' }],
+      ['pipeline without viewOn', { pipeline: '[]' }],
+      ['validator mixed with view keys', { validator: '{}', viewOn: 'src', pipeline: '[]' }],
+      ['validationLevel mixed with view keys', { validationLevel: 'strict', viewOn: 'src', pipeline: '[]' }],
+      ['an unknown validationAction', { validationAction: 'ignore' }],
+    ])('rejects %s with VALIDATION and never reaches the service', async (_label, options) => {
+      const spy = vi.fn(async () => ({ ok: true as const }));
+      setupWith({ modify: spy });
+      const env = await shim.invoke(IPC_CHANNELS.collectionModify, { ...target, options });
+      expect(env.ok).toBe(false);
+      if (!env.ok) expect(env.error.code).toBe('VALIDATION');
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['validation keys', { validator: '{}', validationLevel: 'moderate', validationAction: 'warn' }],
+      ['view keys', { viewOn: 'src', pipeline: '[]' }],
+      ['the errorAndLog action', { validationAction: 'errorAndLog' }],
+    ])('forwards a valid payload with %s to the service', async (_label, options) => {
+      const spy = vi.fn(async () => ({ ok: true as const }));
+      setupWith({ modify: spy });
+      const env = await shim.invoke(IPC_CHANNELS.collectionModify, { ...target, options });
+      expect(env).toEqual({ ok: true, data: { ok: true } });
+      expect(spy).toHaveBeenCalledWith({ ...target, options });
+    });
+  });
+
+  it('collection:create rejects a pipeline without viewOn via Zod', async () => {
+    const spy = vi.fn(async () => ({ name: 'v' }));
+    setupWith({ create: spy });
+    const env = await shim.invoke(IPC_CHANNELS.collectionCreate, {
+      connectionId: 'c1',
+      dbName: 'app',
+      collection: 'v',
+      options: { pipeline: '[]' },
+    });
+    expect(env.ok).toBe(false);
+    if (!env.ok) expect(env.error.code).toBe('VALIDATION');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('collection:create forwards viewOn + pipeline to the service', async () => {
+    const spy = vi.fn(async (input: { collection: string }) => ({ name: input.collection }));
+    setupWith({ create: spy as CollectionAdminService['create'] });
+    const payload = { connectionId: 'c1', dbName: 'app', collection: 'v', options: { viewOn: 'src', pipeline: '[]' } };
+    const env = await shim.invoke(IPC_CHANNELS.collectionCreate, payload);
+    expect(env).toEqual({ ok: true, data: { name: 'v' } });
+    expect(spy).toHaveBeenCalledWith(payload);
   });
 });

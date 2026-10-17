@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CollectionTabState, ValType } from '@shared/types';
+import type { CollectionTabState, LastRun, ValType } from '@shared/types';
 import { api, getErrorMessage } from '../../api/atelier';
 import { invalidateRecentValuesCache } from '../../features/fieldSuggestions/sources';
 import { toDisplayValue } from '../../utils/displayValue';
@@ -140,6 +140,18 @@ export function useQueryRunner({
   // The cancelToken currently owning `target.id`'s in-flight find, so
   // `cancel()` and a superseding `run()` know what to hand `query:cancel`.
   const cancelTokensRef = useRef<Map<string, string>>(new Map());
+  // Which write of a `lastRun` is the latest per target, as a number rather
+  // than the `lastRun` itself: the runner outlives closed tabs, and holding
+  // their documents would keep every closed tab's page alive. A late plan lands
+  // only on the run that wrote it: a newer run that wrote nothing (cancelled
+  // before its find settled) leaves the screen on this run, and its plan is
+  // still true.
+  const lastWrittenRef = useRef<Map<string, number>>(new Map());
+  const writeSeqRef = useRef(0);
+  // The plan last received per target, with the query it explained. A page
+  // change runs the same query, so it keeps this plan instead of asking the
+  // server to explain it again.
+  const explainedRef = useRef<Map<string, { key: string; plan: unknown }>>(new Map());
   const loadingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
@@ -203,7 +215,13 @@ export function useQueryRunner({
       runTokenRef.current.set(target.id, runToken);
       const cancelToken = crypto.randomUUID();
       cancelTokensRef.current.set(target.id, cancelToken);
-      const patchState = patchRef.current;
+      /** Returns the write's number when it writes a `lastRun`. */
+      const patchState = (id: string, patch: Partial<CollectionTabState>): number | undefined => {
+        let seq: number | undefined;
+        if (patch.lastRun) lastWrittenRef.current.set(id, (seq = ++writeSeqRef.current));
+        patchRef.current(id, patch);
+        return seq;
+      };
       const recordEvent = recordRef.current;
       const requested: CollectionTabState = override
         ? { ...target.state, ...override }
@@ -317,14 +335,52 @@ export function useQueryRunner({
         const effectiveHasMore =
           findResult.hasMore &&
           (userLimit === null || skip + limit < userLimit);
-        patchState(target.id, {
-          lastRun: {
-            documents: findResult.documents,
-            durationMs: findResult.durationMs,
-            ranAt: new Date().toISOString(),
-          },
-          lastRunHasMore: effectiveHasMore,
-        });
+        // The explain sees none of skip, limit-per-page or page size, so a run
+        // that only moved the page asks the same question as the last one. Any
+        // other run, an explicit Run included, asks again: an index built since
+        // may have changed the answer.
+        const explainKey = JSON.stringify([
+          target.connectionId,
+          target.dbName,
+          target.collection,
+          filter,
+          compiled.sort,
+          compiled.projection,
+          userLimit,
+        ]);
+        const pageOnly =
+          override !== undefined &&
+          Object.keys(override).length > 0 &&
+          Object.keys(override).every((k) => k === 'page' || k === 'pageSize');
+        const known = explainedRef.current.get(target.id);
+        const keepPlan = pageOnly && known?.key === explainKey;
+        const lastRun: LastRun = {
+          documents: findResult.documents,
+          durationMs: findResult.durationMs,
+          ranAt: new Date().toISOString(),
+          ...(keepPlan ? { plan: known.plan } : {}),
+        };
+        const written = patchState(target.id, { lastRun, lastRunHasMore: effectiveHasMore });
+        // Fire-and-forget, like the count below: the plan badge's data. The
+        // result never waits on it, and a failed explain only means no badge.
+        if (!keepPlan) {
+          api.query
+            .explain({
+              connectionId: target.connectionId,
+              dbName: target.dbName,
+              collection: target.collection,
+              filter,
+              sort: compiled.sort,
+              projection: compiled.projection,
+              verbosity: 'queryPlanner',
+            })
+            .then((res) => {
+              explainedRef.current.set(target.id, { key: explainKey, plan: res.plan });
+              if (lastWrittenRef.current.get(target.id) !== written) return;
+              patchState(target.id, { lastRun: { ...lastRun, plan: res.plan } });
+            })
+            .catch((err: unknown) => console.warn('[query] plan explain failed', err));
+        }
         // Fire-and-forget: persists the values this run's conditions actually
         // carried for the value-suggestion popover. Never
         // blocks or fails the run itself — main re-filters by op and secret

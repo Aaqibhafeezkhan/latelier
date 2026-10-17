@@ -1,6 +1,10 @@
-import type { CollectionInfo, DbInfo } from '@shared/ipc';
-import { ejsonEncodeArray } from './ejson.ts';
+import type { Db, Document } from 'mongodb';
+import type { CollectionDetails, CollectionInfo, DbInfo } from '@shared/ipc';
+import type { ValidationAction, ValidationLevel } from '@shared/types';
+import { NotFoundError } from '../errors.ts';
+import { ejsonEncodeArray, ejsonStringify } from './ejson.ts';
 import { classifyMongoOpError, isMaxTimeMSExpired } from './errors.ts';
+import type { Logger } from '../log.ts';
 import type { MongoPool } from './MongoPool.ts';
 import { QUERY_TIMEOUT_MS, STATS_TIMEOUT_MS } from './timeouts.ts';
 
@@ -28,6 +32,12 @@ export interface ListCollectionsInput {
   dbName: string;
 }
 
+export interface CollectionDetailsInput {
+  connectionId: string;
+  dbName: string;
+  collection: string;
+}
+
 export interface SampleSchemaInput {
   connectionId: string;
   dbName: string;
@@ -37,9 +47,11 @@ export interface SampleSchemaInput {
 
 export class MetaService {
   private pool: MongoPool;
+  private log: Logger | undefined;
 
-  constructor(pool: MongoPool) {
+  constructor(pool: MongoPool, log?: Logger) {
     this.pool = pool;
+    this.log = log;
   }
 
   async listDatabases(input: ListDatabasesInput): Promise<DbInfo[]> {
@@ -113,57 +125,76 @@ export class MetaService {
     } catch (err) {
       throw classifyMongoOpError(err);
     }
-    type Storage = {
-      count?: number;
-      size?: number;
-      nindexes?: number;
-      wiredTiger?: { creationTime?: string };
-    };
     return mapWithConcurrency(specs, LIST_COLLECTIONS_CONCURRENCY, async (s): Promise<CollectionInfo> => {
       const info: CollectionInfo = {
         name: s.name,
-        type:
-          s.type === 'view'
-            ? 'view'
-            : s.type === 'timeseries'
-              ? 'timeseries'
-              : 'collection',
-        documentCount: 0,
-        sizeBytes: 0,
-        indexCount: 0,
+        type: collectionType(s.type),
         capped: Boolean((s.options as { capped?: boolean } | undefined)?.capped),
       };
+      // A view has no storage of its own, and `$collStats` fails on one.
+      if (info.type === 'view') return info;
       try {
-        // Per-collection storage-stats lookup is bounded by the stats budget.
-        // With `LIST_COLLECTIONS_CONCURRENCY` parallel runners, the worst
-        // case is N collections / concurrency × budget, but no single Mongo
-        // round-trip can hang the IPC reply for longer than this.
-        const stats = await db.collection(s.name).aggregate(
-          [{ $collStats: { storageStats: {} } }],
-          { maxTimeMS: STATS_TIMEOUT_MS },
-        ).next();
-        const storage = (stats as { storageStats?: Storage } | null)?.storageStats;
-        if (storage) {
-          info.documentCount = storage.count ?? 0;
-          info.sizeBytes = storage.size ?? 0;
-          info.indexCount = storage.nindexes ?? 0;
-          if (storage.wiredTiger?.creationTime) {
-            info.lastModified = storage.wiredTiger.creationTime;
-          }
-        }
-      } catch {
-        // Atlas free tier / restricted user: fall back to cheap estimates.
-        // Both fallback calls share the same timeout budget so a single
-        // hung collection can't hold up the whole list.
-        const [countResult, indexesResult] = await Promise.allSettled([
-          db.collection(s.name).estimatedDocumentCount({ maxTimeMS: STATS_TIMEOUT_MS }),
-          db.collection(s.name).indexes({ maxTimeMS: STATS_TIMEOUT_MS }),
-        ]);
-        info.documentCount = countResult.status === 'fulfilled' ? countResult.value : 0;
-        info.indexCount = indexesResult.status === 'fulfilled' ? indexesResult.value.length : 0;
+        const stats = await readStorageStats(db, s.name, this.log);
+        if (stats.documentCount !== undefined) info.documentCount = stats.documentCount;
+        if (stats.sizeBytes !== undefined) info.sizeBytes = stats.sizeBytes;
+        if (stats.indexCount !== undefined) info.indexCount = stats.indexCount;
+        if (stats.lastModified) info.lastModified = stats.lastModified;
+      } catch (err) {
+        // One collection's stats must not sink the whole list the navigator
+        // blocks on. Its figures stay absent, which the UI shows as a dash:
+        // a failed read is not a measured zero.
+        this.log?.warn('meta', 'collection stats read failed', {
+          dbName: input.dbName,
+          collection: s.name,
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
       return info;
     });
+  }
+
+  async collectionDetails(input: CollectionDetailsInput): Promise<CollectionDetails> {
+    const client = await this.pool.readClient(input.connectionId);
+    const db = client.db(input.dbName);
+    let specs: CollectionSpec[];
+    try {
+      // No promotion: the pipeline and validator go back to the server through
+      // Modify view and Edit rules, and a promoted whole-number Double would
+      // serialize as an Int32 or a Long (with rounded digits past 2^53).
+      specs = await db
+        .listCollections<CollectionSpec>(
+          { name: input.collection },
+          { nameOnly: false, maxTimeMS: STATS_TIMEOUT_MS, promoteValues: false },
+        )
+        .toArray();
+    } catch (err) {
+      throw classifyMongoOpError(err);
+    }
+    const spec = specs[0];
+    if (!spec) {
+      throw new NotFoundError(`Collection ${input.dbName}.${input.collection} does not exist`);
+    }
+    const type = collectionType(spec.type);
+    const opts = spec.options ?? {};
+    const details: CollectionDetails = {
+      name: spec.name,
+      type,
+      capped: Boolean(opts.capped),
+      options: {
+        ...(opts.viewOn !== undefined ? { viewOn: opts.viewOn } : {}),
+        ...(opts.pipeline !== undefined ? { pipeline: ejsonStringify(opts.pipeline) } : {}),
+        ...(opts.validator !== undefined ? { validator: ejsonStringify(opts.validator) } : {}),
+        ...(opts.validationLevel !== undefined ? { validationLevel: opts.validationLevel } : {}),
+        ...(opts.validationAction !== undefined ? { validationAction: opts.validationAction } : {}),
+      },
+    };
+    // A view has no storage of its own to measure.
+    if (type !== 'view') {
+      const stats = await readStorageStats(db, spec.name, this.log);
+      delete stats.lastModified;
+      details.stats = stats;
+    }
+    return details;
   }
 
   async sampleSchema(input: SampleSchemaInput): Promise<{ docs: unknown[] }> {
@@ -196,6 +227,155 @@ export class MetaService {
       return { docs: [] };
     }
   }
+}
+
+/** The slice of a `listCollections` entry that `collectionDetails` reads. */
+interface CollectionSpec {
+  name: string;
+  type?: string;
+  options?: {
+    capped?: boolean;
+    viewOn?: string;
+    pipeline?: unknown[];
+    validator?: Document;
+    validationLevel?: ValidationLevel;
+    validationAction?: ValidationAction;
+  };
+}
+
+function collectionType(t: string | undefined): CollectionInfo['type'] {
+  return t === 'view' ? 'view' : t === 'timeseries' ? 'timeseries' : 'collection';
+}
+
+interface StorageStats {
+  /** Each figure is absent when the server did not report it, never a stand-in 0. */
+  documentCount?: number;
+  sizeBytes?: number;
+  indexCount?: number;
+  lastModified?: string;
+  /** The three below come from `$collStats` only; absent on the estimate fallback. */
+  storageSizeBytes?: number;
+  avgObjSizeBytes?: number;
+  totalIndexSizeBytes?: number;
+}
+
+type CollStatsStorage = {
+  count?: number;
+  size?: number;
+  nindexes?: number;
+  storageSize?: number;
+  totalIndexSize?: number;
+  wiredTiger?: { creationTime?: string };
+};
+
+const addFigure = (total: number | undefined, v: number | undefined): number | undefined =>
+  v === undefined ? total : (total ?? 0) + v;
+
+/**
+ * Folds the `$collStats` reply into one set of figures. A sharded cluster
+ * answers with one document per shard: counts and sizes are summed across them,
+ * while the index count is the same on every shard, so the largest is taken.
+ * The average object size is recomputed from the totals (per-shard averages
+ * cannot be added), and a time-series collection reports no `count`, which
+ * stays absent here.
+ */
+export function foldStorageStats(replies: unknown[]): StorageStats {
+  const out: StorageStats = {};
+  for (const reply of replies) {
+    const st = (reply as { storageStats?: CollStatsStorage } | null)?.storageStats;
+    if (!st) continue;
+    out.documentCount = addFigure(out.documentCount, st.count);
+    out.sizeBytes = addFigure(out.sizeBytes, st.size);
+    out.storageSizeBytes = addFigure(out.storageSizeBytes, st.storageSize);
+    out.totalIndexSizeBytes = addFigure(out.totalIndexSizeBytes, st.totalIndexSize);
+    if (st.nindexes !== undefined) out.indexCount = Math.max(out.indexCount ?? 0, st.nindexes);
+    if (out.lastModified === undefined && st.wiredTiger?.creationTime) {
+      out.lastModified = st.wiredTiger.creationTime;
+    }
+  }
+  if (out.documentCount && out.sizeBytes !== undefined) {
+    out.avgObjSizeBytes = out.sizeBytes / out.documentCount;
+  }
+  // Keys the loop never set stay off the object: `undefined` is not "absent" to toEqual/JSON.
+  for (const k of Object.keys(out) as Array<keyof StorageStats>) {
+    if (out[k] === undefined) delete out[k];
+  }
+  return out;
+}
+
+/**
+ * `$collStats` refused for lack of privilege, or by a deployment tier that
+ * does not offer it (Atlas shared tiers answer `AtlasError` 8000 or
+ * `CommandNotSupported`). These, and only these, fall back to estimates; a
+ * timeout or a dropped connection is a real failure and surfaces as one.
+ */
+function isStatsRefused(err: unknown): boolean {
+  const e = err as { code?: number; codeName?: string } | null;
+  return (
+    e?.code === 13 || e?.codeName === 'Unauthorized' ||
+    e?.code === 115 || e?.codeName === 'CommandNotSupported' ||
+    e?.code === 8000 || e?.codeName === 'AtlasError'
+  );
+}
+
+/**
+ * One collection's storage figures. Bounded by the stats budget: with
+ * `LIST_COLLECTIONS_CONCURRENCY` parallel runners, the worst case is N
+ * collections / concurrency x budget, but no single Mongo round-trip can hang
+ * the IPC reply for longer than this.
+ *
+ * Throws (classified) when `$collStats` fails for any reason other than being
+ * refused, and when it was refused and neither estimate could be read either.
+ */
+async function readStorageStats(db: Db, name: string, log: Logger | undefined): Promise<StorageStats> {
+  const coll = db.collection(name);
+  let replies: unknown[];
+  try {
+    replies = await coll
+      .aggregate([{ $collStats: { storageStats: {} } }], { maxTimeMS: STATS_TIMEOUT_MS })
+      .toArray();
+  } catch (err) {
+    if (!isStatsRefused(err)) throw classifyMongoOpError(err);
+    log?.warn('meta', '$collStats refused; using estimates', {
+      dbName: db.databaseName,
+      collection: name,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return estimateStats(db, name, log);
+  }
+  const out = foldStorageStats(replies);
+  if (out.documentCount === undefined) {
+    // A time-series collection's storageStats has no count.
+    const [count] = await Promise.allSettled([coll.estimatedDocumentCount({ maxTimeMS: STATS_TIMEOUT_MS })]);
+    if (count.status === 'fulfilled') out.documentCount = count.value;
+    else logEstimateFailure(log, db, name, 'count', count.reason);
+  }
+  return out;
+}
+
+/** Cheap figures for a caller who may not run `$collStats`; both calls share one timeout budget. */
+async function estimateStats(db: Db, name: string, log: Logger | undefined): Promise<StorageStats> {
+  const [count, indexes] = await Promise.allSettled([
+    db.collection(name).estimatedDocumentCount({ maxTimeMS: STATS_TIMEOUT_MS }),
+    db.collection(name).indexes({ maxTimeMS: STATS_TIMEOUT_MS }),
+  ]);
+  if (count.status === 'rejected' && indexes.status === 'rejected') {
+    throw classifyMongoOpError(count.reason);
+  }
+  const out: StorageStats = {};
+  if (count.status === 'fulfilled') out.documentCount = count.value;
+  else logEstimateFailure(log, db, name, 'count', count.reason);
+  if (indexes.status === 'fulfilled') out.indexCount = indexes.value.length;
+  else logEstimateFailure(log, db, name, 'indexes', indexes.reason);
+  return out;
+}
+
+function logEstimateFailure(log: Logger | undefined, db: Db, name: string, what: string, reason: unknown): void {
+  log?.warn('meta', `estimated ${what} unavailable`, {
+    dbName: db.databaseName,
+    collection: name,
+    message: reason instanceof Error ? reason.message : String(reason),
+  });
 }
 
 /**

@@ -1,12 +1,17 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
 import { createRouter } from '../../electron/ipc/router';
 import { registerConnChannels } from '../../electron/ipc/handlers/conn';
 import { IPC_CHANNELS } from '../../shared/ipc';
 import { ConflictError, NotFoundError, ValidationError } from '../../electron/errors';
-import type { ConnectionService } from '../../electron/mongo/ConnectionService';
+import { ConnectionService, connectionReader } from '../../electron/mongo/ConnectionService';
+import { ConnectionRepo } from '../../electron/db/repositories/ConnectionRepo';
+import { MongoPool } from '../../electron/mongo/MongoPool';
+import { SecretsVault } from '../../electron/secrets/SecretsVault';
+import { createTempDb, type TempDb } from '../helpers/db';
+import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import type { Envelope } from '../../shared/ipc';
-import type { Connection, ConnectionSummary, ProbeResult } from '@shared/types';
+import type { Connection, ConnectionInput, ConnectionSummary, ProbeResult } from '@shared/types';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
 import { createPickedCredentialPaths } from '../../electron/security/credentialPaths';
 
@@ -221,5 +226,63 @@ describe('conn:* handlers via router', () => {
     const env = await shim.invoke<{ id: string }>(IPC_CHANNELS.connDelete, { id: 'c1' });
     expect(env.ok).toBe(false);
     if (!env.ok) expect(env.error.code).toBe('VALIDATION');
+  });
+});
+
+/**
+ * `conn:getUri` builds the navigator's "Copy connection string" from the
+ * saved connection. A real `ConnectionService` over a real vault, because the
+ * property under test is that the stored password never reaches the URI, and a
+ * stubbed `Connection` never holds a password to leak.
+ */
+describe('conn:getUri', () => {
+  const PASSWORD = 'p@ss:w/rd%42';
+  let tmp: TempDb;
+  let shim: ReturnType<typeof createShim>;
+  let svc: ConnectionService;
+
+  beforeEach(() => {
+    tmp = createTempDb();
+    shim = createShim();
+    const repo = new ConnectionRepo(tmp.db);
+    const vault = new SecretsVault(tmp.db, createSafeStorageMock());
+    const pool = new MongoPool({ repo: connectionReader(repo, vault), vault });
+    svc = new ConnectionService({ repo, vault, pool });
+    registerConnChannels(createRouter(shim.ipcMain, testSenderCheck), svc, createPickedCredentialPaths());
+  });
+
+  afterEach(() => tmp.cleanup());
+
+  it('returns the URI with the username and without the stored password', async () => {
+    const { advanced, tls } = fakeConnection();
+    const conn = await svc.create({
+      name: 'Secured',
+      color: '#1A6835',
+      connectionType: 'standard',
+      readOnly: false,
+      host: 'localhost',
+      port: 27017,
+      tls,
+      advanced,
+      authMech: 'scram256',
+      authUsername: 'alice',
+      authDatabase: 'admin',
+      password: PASSWORD,
+    } satisfies ConnectionInput);
+    expect(svc.get(conn.id).hasPasswordStored).toBe(true);
+
+    const env = await shim.invoke<{ uri: string }>(IPC_CHANNELS.connGetUri, { id: conn.id });
+
+    expect(env.ok).toBe(true);
+    if (!env.ok) return;
+    expect(env.data.uri).toBe('mongodb://alice@localhost:27017/?authSource=admin&authMechanism=SCRAM-SHA-256&readPreference=primary&tls=false');
+    expect(env.data.uri).not.toContain(PASSWORD);
+    expect(env.data.uri).not.toContain(encodeURIComponent(PASSWORD));
+  });
+
+  it('maps an unknown id to NOT_FOUND', async () => {
+    const env = await shim.invoke(IPC_CHANNELS.connGetUri, { id: 'nope' });
+    expect(env.ok).toBe(false);
+    if (!env.ok) expect(env.error.code).toBe('NOT_FOUND');
   });
 });

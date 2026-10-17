@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Mock } from 'vitest';
 import type { IpcApi } from '@shared/ipc';
+import { notifications } from '@mantine/notifications';
 import { render, screen, fireEvent } from '../helpers/render';
 import { OperatorDocPanel } from '../../src/features/fieldSuggestions/OperatorDocPanel';
 import type { OperatorDef } from '../../src/features/fieldSuggestions/operators';
@@ -77,5 +78,27 @@ describe('OperatorDocPanel', () => {
   it('renders aria-label describing the operator', () => {
     render(<OperatorDocPanel op={FULL} />);
     expect(screen.getByLabelText('Documentation for $match')).toBeTruthy();
+  });
+});
+
+describe('OperatorDocPanel — a docs link that cannot open says so', () => {
+  afterEach(() => {
+    uninstallAtelierMock();
+    notifications.clean();
+  });
+
+  it('toasts when the link cannot be opened', async () => {
+    installAtelierMock({
+      shell: {
+        openExternal: async () => {
+          throw { code: 'VALIDATION', message: 'blocked' };
+        },
+      },
+    });
+    render(<OperatorDocPanel op={FULL} />);
+
+    fireEvent.click(screen.getByText(/Learn more/));
+
+    expect(await screen.findByText('Could not open the link')).toBeTruthy();
   });
 });

@@ -1,11 +1,13 @@
 import React from 'react';
 import type { ContextMenuState } from '../../components/ContextMenu';
+import { notifyCollectionChanged } from '../../state/collectionChanges';
+import type { LoadOptions } from './useNavigatorData';
 
 type MenuState = ContextMenuState;
 
 export function useNavigatorDialogs(deps: {
-  refreshDb: (connectionId: string, dbName: string) => void;
-  refreshAll: (connectionId: string) => Promise<void>;
+  refreshDb: (connectionId: string, dbName: string, opts?: LoadOptions) => void;
+  refreshAll: (connectionId: string, opts?: LoadOptions) => Promise<void>;
   onCollectionRenamed?: (
     connectionId: string,
     dbName: string,
@@ -18,6 +20,7 @@ export function useNavigatorDialogs(deps: {
   menu: MenuState | null;
   createCollDb: { connectionId: string; dbName: string } | null;
   renameTarget: { connectionId: string; dbName: string; collection: string } | null;
+  modifyViewTarget: { connectionId: string; dbName: string; collection: string } | null;
   dropCollTarget: { connectionId: string; dbName: string; collection: string } | null;
   importTarget: { connectionId: string; dbName: string; collection: string } | null;
   dropDbTarget: { connectionId: string; dbName: string } | null;
@@ -27,6 +30,9 @@ export function useNavigatorDialogs(deps: {
     React.SetStateAction<{ connectionId: string; dbName: string } | null>
   >;
   setRenameTarget: React.Dispatch<
+    React.SetStateAction<{ connectionId: string; dbName: string; collection: string } | null>
+  >;
+  setModifyViewTarget: React.Dispatch<
     React.SetStateAction<{ connectionId: string; dbName: string; collection: string } | null>
   >;
   setDropCollTarget: React.Dispatch<
@@ -44,6 +50,8 @@ export function useNavigatorDialogs(deps: {
   handleCollectionCreated: () => void;
   cancelRename: () => void;
   handleCollectionRenamed: (newName: string) => void;
+  cancelModifyView: () => void;
+  handleViewModified: () => void;
   cancelDropColl: () => void;
   handleCollectionDropped: () => void;
   cancelDropDb: () => void;
@@ -58,6 +66,7 @@ export function useNavigatorDialogs(deps: {
   // Each dialog carries the Connection it was opened on, not the expanded one (N roots means those differ).
   const [createCollDb, setCreateCollDb] = React.useState<{ connectionId: string; dbName: string } | null>(null);
   const [renameTarget, setRenameTarget] = React.useState<{ connectionId: string; dbName: string; collection: string } | null>(null);
+  const [modifyViewTarget, setModifyViewTarget] = React.useState<{ connectionId: string; dbName: string; collection: string } | null>(null);
   const [dropCollTarget, setDropCollTarget] = React.useState<{ connectionId: string; dbName: string; collection: string } | null>(null);
   const [dropDbTarget, setDropDbTarget] = React.useState<{ connectionId: string; dbName: string } | null>(null);
   const [importTarget, setImportTarget] = React.useState<{ connectionId: string; dbName: string; collection: string } | null>(null);
@@ -70,7 +79,7 @@ export function useNavigatorDialogs(deps: {
     if (!createCollDb) return;
     const { connectionId: cid, dbName: db } = createCollDb;
     setCreateCollDb(null);
-    refreshDb(cid, db);
+    refreshDb(cid, db, { force: true });
   }, [createCollDb, refreshDb]);
 
   const cancelRename = React.useCallback(() => setRenameTarget(null), []);
@@ -79,18 +88,27 @@ export function useNavigatorDialogs(deps: {
       if (!renameTarget) return;
       const { connectionId: cid, dbName: db, collection: oldName } = renameTarget;
       setRenameTarget(null);
-      refreshDb(cid, db);
+      refreshDb(cid, db, { force: true });
       onCollectionRenamed?.(cid, db, oldName, newName);
     },
     [renameTarget, refreshDb, onCollectionRenamed],
   );
+
+  const cancelModifyView = React.useCallback(() => setModifyViewTarget(null), []);
+  const handleViewModified = React.useCallback(() => {
+    if (!modifyViewTarget) return;
+    const { connectionId: cid, dbName: db, collection } = modifyViewTarget;
+    setModifyViewTarget(null);
+    // The navigator listens for this and refreshes the DB; an open Structure tab on the view reloads too.
+    notifyCollectionChanged({ connectionId: cid, dbName: db, collection });
+  }, [modifyViewTarget]);
 
   const cancelDropColl = React.useCallback(() => setDropCollTarget(null), []);
   const handleCollectionDropped = React.useCallback(() => {
     if (!dropCollTarget) return;
     const { connectionId: cid, dbName: db, collection: coll } = dropCollTarget;
     setDropCollTarget(null);
-    refreshDb(cid, db);
+    refreshDb(cid, db, { force: true });
     onCollectionDropped?.(cid, db, coll);
   }, [dropCollTarget, refreshDb, onCollectionDropped]);
 
@@ -99,20 +117,21 @@ export function useNavigatorDialogs(deps: {
     if (!dropDbTarget) return;
     const { connectionId: cid, dbName: db } = dropDbTarget;
     setDropDbTarget(null);
-    void refreshAll(cid);
+    void refreshAll(cid, { force: true });
     onDatabaseDropped?.(cid, db);
   }, [dropDbTarget, refreshAll, onDatabaseDropped]);
 
   const closeImport = React.useCallback(() => setImportTarget(null), []);
   // The dialog stays open on its report, so this refreshes without closing it.
   const handleImported = React.useCallback(() => {
-    if (importTarget) refreshDb(importTarget.connectionId, importTarget.dbName);
+    if (importTarget) refreshDb(importTarget.connectionId, importTarget.dbName, { force: true });
   }, [importTarget, refreshDb]);
 
   return {
     menu,
     createCollDb,
     renameTarget,
+    modifyViewTarget,
     dropCollTarget,
     dropDbTarget,
     importTarget,
@@ -120,6 +139,7 @@ export function useNavigatorDialogs(deps: {
     setMenu,
     setCreateCollDb,
     setRenameTarget,
+    setModifyViewTarget,
     setDropCollTarget,
     setDropDbTarget,
     setImportTarget,
@@ -129,6 +149,8 @@ export function useNavigatorDialogs(deps: {
     handleCollectionCreated,
     cancelRename,
     handleCollectionRenamed,
+    cancelModifyView,
+    handleViewModified,
     cancelDropColl,
     handleCollectionDropped,
     cancelDropDb,

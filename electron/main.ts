@@ -6,6 +6,7 @@ import {
   ipcMain,
   Menu,
   nativeTheme,
+  powerMonitor,
   safeStorage,
   screen,
   session,
@@ -27,7 +28,9 @@ import {
 } from './mongo/ConnectionService.ts';
 import { registerConnChannels } from './ipc/handlers/conn.ts';
 import { registerConnExportChannels } from './ipc/handlers/connExport.ts';
-import { ConnectionExportService } from './services/ConnectionExportService.ts';
+import { registerConnImportChannels } from './ipc/handlers/connImport.ts';
+import { ConnectionExportService, type ConnectionExportDialogs } from './services/ConnectionExportService.ts';
+import { ImportWizardService } from './services/ImportWizardService.ts';
 import { createPickedCredentialPaths } from './security/credentialPaths.ts';
 import { registerAppChannels, saveFilters } from './ipc/handlers/app.ts';
 import { registerMongoChannels } from './ipc/handlers/mongo.ts';
@@ -64,7 +67,7 @@ import { IndexService } from './mongo/IndexService.ts';
 import { CollectionAdminService } from './mongo/CollectionAdminService.ts';
 import { UserService } from './mongo/UserService.ts';
 import { WorkspaceTabRepo } from './db/repositories/WorkspaceTabRepo.ts';
-import { WorkspaceStateService } from './services/WorkspaceStateService.ts';
+import { WorkspaceStateService, applyRestoreTabsPref } from './services/WorkspaceStateService.ts';
 import { SavedQueryRepo } from './db/repositories/SavedQueryRepo.ts';
 import { SavedQueryService } from './services/SavedQueryService.ts';
 import { RecentQueryRepo } from './db/repositories/RecentQueryRepo.ts';
@@ -81,6 +84,7 @@ import { ImportService } from './mongo/ImportService.ts';
 import { DEFAULT_EXPORT_CAP, QueryService } from './mongo/QueryService.ts';
 import { DocumentService } from './mongo/DocumentService.ts';
 import { createLogger, type Logger } from './log.ts';
+import { createQuitGate, type RunningWork } from './quitGuard.ts';
 import { PrivateModeError } from './utils/privateFs.ts';
 import { createRouter } from './ipc/router.ts';
 import { senderCheck } from './ipc/senderGuard.ts';
@@ -170,8 +174,11 @@ let pool: MongoPool | null = null;
 let docSvc: DocumentService | null = null;
 let mshellSvc: ShellService | null = null;
 let scriptSvc: ScriptService | null = null;
+let aggSvc: AggregationService | null = null;
+let importSvc: ImportService | null = null;
 let log: Logger | null = null;
 let connExportSvc: ConnectionExportService | null = null;
+let importWizardSvc: ImportWizardService | null = null;
 let renderCrashesInWindow = 0;
 let firstCrashAt = 0;
 
@@ -377,9 +384,28 @@ function createWindow(): void {
   win.on('closed', () => {
     win = null;
     // An import token does not outlive the window that asked for it.
-    connExportSvc?.clearPending();
+    importWizardSvc?.clearPending();
   });
 
+  // Windows: the session is ending and cannot be held back, so asking is moot.
+  win.on('session-end', () => quitGate.markSystemShutdown());
+  // Closing the last window quits the app off macOS (`window-all-closed`), so
+  // that is where the question belongs: asked after the window is gone, a
+  // Cancel would leave an app with no window to come back to. On macOS the app
+  // outlives its window and closing it stops nothing.
+  if (process.platform !== 'darwin') {
+    const closing = win;
+    win.on('close', (e) => {
+      if (quitGate.check() === 'allow') return;
+      e.preventDefault();
+      quitGate.ask().then(
+        (yes) => {
+          if (yes && !closing.isDestroyed()) closing.close();
+        },
+        (err: unknown) => log?.error('shutdown', 'could not ask about quitting', { err: String(err) }),
+      );
+    });
+  }
   win.on('resize', scheduleBoundsWrite);
   win.on('move', scheduleBoundsWrite);
   win.on('maximize', persistBoundsNow);
@@ -429,8 +455,47 @@ app.on('activate', () => {
 // Graceful shutdown ----------------------------------------------------------
 
 let shuttingDown = false;
+function runningWork(): RunningWork {
+  return {
+    scripts: scriptSvc?.runningCount() ?? 0,
+    shellCommands: mshellSvc?.busyCount() ?? 0,
+    imports: importSvc?.runningCount() ?? 0,
+    aggregations: aggSvc?.runningCount() ?? 0,
+  };
+}
+
+async function askToQuit(message: string): Promise<boolean> {
+  const options = {
+    type: 'warning' as const,
+    buttons: ['Cancel', 'Quit'],
+    defaultId: 0,
+    cancelId: 0,
+    title: "Quit L'Atelier?",
+    message,
+    detail: 'Work in progress is cancelled and its results are lost.',
+  };
+  const result = await (win && !win.isDestroyed()
+    ? dialog.showMessageBox(win, options)
+    : dialog.showMessageBox(options));
+  return result.response === 1;
+}
+
+// Asks before quitting over running work, from the window's close and from
+// `before-quit` alike; see `createQuitGate` for what each answer lets through.
+const quitGate = createQuitGate({ counts: runningWork, confirm: askToQuit });
+
 app.on('before-quit', async (e) => {
   if (shuttingDown) return;
+  if (quitGate.check() === 'hold') {
+    e.preventDefault();
+    quitGate.ask().then(
+      (yes) => {
+        if (yes) app.quit();
+      },
+      (err: unknown) => log?.error('shutdown', 'could not ask about quitting', { err: String(err) }),
+    );
+    return;
+  }
   shuttingDown = true;
   e.preventDefault();
   log?.info('shutdown', 'begin');
@@ -523,6 +588,9 @@ app.whenReady().then(() => {
   // as "development" in every shipped build. `isPackaged` cannot be omitted.
   log = createLogger(userDataDir, { level: app.isPackaged ? 'info' : 'debug' });
   log.info('boot', 'starting', { userDataDir, platform: process.platform });
+  // macOS and Linux: the system is shutting down or restarting. Asking would
+  // only hold it up (or be answered by nobody), so quit without the prompt.
+  powerMonitor.on('shutdown', () => quitGate.markSystemShutdown());
 
   // Security posture first: nothing may create a webContents before these are
   // in place. The listener also fires for the main window.
@@ -603,26 +671,32 @@ app.whenReady().then(() => {
     { name: 'JSON', extensions: ['json'] },
     { name: 'All files', extensions: ['*'] },
   ];
+  const transferDialogs: ConnectionExportDialogs = {
+    savePath: async (defaultName) => {
+      const options = { defaultPath: defaultName, filters: jsonFilters };
+      const result = await (win
+        ? dialog.showSaveDialog(win, options)
+        : dialog.showSaveDialog(options));
+      return result.canceled || !result.filePath ? null : result.filePath;
+    },
+    openPath: async () => {
+      const options = { properties: ['openFile' as const], filters: jsonFilters };
+      const result = await (win
+        ? dialog.showOpenDialog(win, options)
+        : dialog.showOpenDialog(options));
+      return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]!;
+    },
+  };
   connExportSvc = new ConnectionExportService({
     conns: connSvc,
     vault,
+    dialogs: transferDialogs,
+  });
+  importWizardSvc = new ImportWizardService({
+    conns: connSvc,
+    vault,
     log: log ?? undefined,
-    dialogs: {
-      savePath: async (defaultName) => {
-        const options = { defaultPath: defaultName, filters: jsonFilters };
-        const result = await (win
-          ? dialog.showSaveDialog(win, options)
-          : dialog.showSaveDialog(options));
-        return result.canceled || !result.filePath ? null : result.filePath;
-      },
-      openPath: async () => {
-        const options = { properties: ['openFile' as const], filters: jsonFilters };
-        const result = await (win
-          ? dialog.showOpenDialog(win, options)
-          : dialog.showOpenDialog(options));
-        return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]!;
-      },
-    },
+    dialogs: transferDialogs,
   });
 
   // 5. IPC router + channels
@@ -643,6 +717,7 @@ app.whenReady().then(() => {
   // Workspace tabs; opening a saved pipeline reads its stored stages.
   const tabsRepo = new WorkspaceTabRepo(db);
   const tabsSvc = new WorkspaceStateService(tabsRepo, savedSvc);
+  applyRestoreTabsPref(appState, tabsSvc);
 
   const recentRepo = new RecentQueryRepo(db);
   const recentSvc = new RecentQueryService(recentRepo, log);
@@ -650,8 +725,8 @@ app.whenReady().then(() => {
   const recentFieldValueSvc = new RecentFieldValueService(recentFieldValueRepo);
   const querySvc = new QueryService(pool, recentSvc, DEFAULT_EXPORT_CAP, log);
   docSvc = new DocumentService(pool, { log });
-  const aggSvc = new AggregationService(pool, recentSvc, log);
-  const metaSvc = new MetaService(pool);
+  aggSvc = new AggregationService(pool, recentSvc, log);
+  const metaSvc = new MetaService(pool, log);
   const indexSvc = new IndexService(pool);
   const collectionAdminSvc = new CollectionAdminService(pool);
   const userSvc = new UserService(pool);
@@ -679,6 +754,7 @@ app.whenReady().then(() => {
   const pickedCredentialPaths = createPickedCredentialPaths();
   registerConnChannels(router, connSvc, pickedCredentialPaths);
   registerConnExportChannels(router, connExportSvc);
+  registerConnImportChannels(router, importWizardSvc);
   // Filled by the open dialog, read by the data channels: the only files an
   // import may read are ones the user picked in main's own dialog.
   const pickedImports = new Set<string>();
@@ -721,9 +797,10 @@ app.whenReady().then(() => {
   registerSavedChannels(router, savedSvc);
   registerRecentChannels(router, recentSvc, recentFieldValueSvc);
   registerAuditChannels(router, auditSvc);
+  importSvc = new ImportService(pool, { emit: makeDataEmitter(() => win?.webContents ?? null) });
   registerDataChannels(
     router,
-    new ImportService(pool, { emit: makeDataEmitter(() => win?.webContents ?? null) }),
+    importSvc,
     pickedImports,
   );
   registerAggChannels(router, aggSvc);
@@ -762,6 +839,7 @@ app.whenReady().then(() => {
       userDataOverride: process.env.ATELIER_USER_DATA_DIR,
       platform: process.platform,
     }),
+    quitGate,
   );
   registerUpdatesChannels(router, updateSvc);
 

@@ -12,6 +12,7 @@ import type {
   UndoResult,
   CollectionCreateInput,
   CollectionDropInput,
+  CollectionModifyInput,
   CollectionRenameInput,
   CollectionTab,
   CollectionTabState,
@@ -21,9 +22,10 @@ import type {
   ConnectionInput,
   ImportCommitInput,
   ImportCommitResult,
-  UriCommitInput,
-  UriPreview,
-  ImportPreview,
+  ImportMapInput,
+  ImportMapResult,
+  ImportOpenResult,
+  ImportUrisResult,
   UpdateState,
   ConnectionRuntime,
   ConnectionSummary,
@@ -68,6 +70,8 @@ import type {
   ScriptTabState,
   ShellOutputEvent,
   ShellSessionInfo,
+  ValidationAction,
+  ValidationLevel,
   WorkspaceTab,
 } from './types.ts';
 
@@ -152,11 +156,40 @@ export interface DbInfo {
 export interface CollectionInfo {
   name: string;
   type: 'collection' | 'view' | 'timeseries';
-  documentCount: number;
-  sizeBytes: number;
-  indexCount: number;
+  /**
+   * The three figures below are absent when the server did not report them
+   * (a time-series `$collStats` has no count) or the read failed: absent is
+   * not zero, and the UI shows a dash for it.
+   */
+  documentCount?: number;
+  sizeBytes?: number;
+  indexCount?: number;
   lastModified?: string;
   capped: boolean;
+}
+
+/** One collection's stats and `listCollections` options (W16 §13). */
+export interface CollectionDetails {
+  name: string;
+  type: 'collection' | 'view' | 'timeseries';
+  capped: boolean;
+  /** Absent for a view. A figure the server did not report is absent, never 0. */
+  stats?: {
+    documentCount?: number;
+    sizeBytes?: number;
+    indexCount?: number;
+    storageSizeBytes?: number;
+    avgObjSizeBytes?: number;
+    totalIndexSizeBytes?: number;
+  };
+  /** From listCollections `options`; the documents are EJSON canonical strings. */
+  options: {
+    viewOn?: string;
+    pipeline?: string;
+    validator?: string;
+    validationLevel?: ValidationLevel;
+    validationAction?: ValidationAction;
+  };
 }
 
 /**
@@ -168,6 +201,8 @@ export interface IpcApi {
   conn: {
     list: () => Promise<ConnectionSummary[]>;
     get: (id: string) => Promise<Connection>;
+    /** The saved connection's URI, built in main without its password. */
+    getUri: (id: string) => Promise<{ uri: string }>;
     create: (input: ConnectionInput) => Promise<Connection>;
     update: (id: string, patch: ConnectionUpdate) => Promise<Connection>;
     delete: (id: string) => Promise<{ id: string }>;
@@ -176,12 +211,11 @@ export interface IpcApi {
     test: (input: ConnectionInput) => Promise<ProbeResult>;
     /** Main shows the save dialog and writes the file; secrets never come back. */
     export: (input: ConnectionExportInput) => Promise<ConnectionExportResult>;
-    /** Main shows the open dialog and parses the file; the result holds a token, not the contents. */
-    importPreview: () => Promise<ImportPreview>;
+    /** C14 wizard: main shows the open dialog, detects the format and returns a token plus a review (or mapping candidates). */
+    importOpen: () => Promise<ImportOpenResult>;
+    importMap: (input: ImportMapInput) => Promise<ImportMapResult>;
+    importUris: (uris: string[]) => Promise<ImportUrisResult>;
     importCommit: (input: ImportCommitInput) => Promise<ImportCommitResult>;
-    /** Parses pasted connection strings and plans their names; passwords never come back. */
-    previewUris: (uris: string[]) => Promise<UriPreview>;
-    createFromUris: (input: UriCommitInput) => Promise<ImportCommitResult>;
   };
 
   app: {
@@ -201,8 +235,12 @@ export interface IpcApi {
   /** Auto-update: one state, one action. See specs/X20-auto-update.md. */
   updates: {
     getState: () => Promise<UpdateState>;
-    /** Quits, installs the downloaded update and relaunches. Rejects unless `ready`. */
-    restart: () => Promise<{ restarting: true }>;
+    /**
+     * Quits, installs the downloaded update and relaunches. Rejects unless
+     * `ready`. Asks first when work is running; `restarting: false` means the
+     * user cancelled, and main re-sends `ready` so Restart is offered again.
+     */
+    restart: () => Promise<{ restarting: boolean }>;
     /** Main pushes the state when a download finishes; returns the unsubscribe. */
     onState: (cb: (state: UpdateState) => void) => () => void;
   };
@@ -232,6 +270,8 @@ export interface IpcApi {
     create: (input: CollectionCreateInput) => Promise<{ name: string }>;
     drop: (input: CollectionDropInput) => Promise<{ dropped: boolean }>;
     rename: (input: CollectionRenameInput) => Promise<{ name: string; auditId?: string }>;
+    /** `collMod`: a collection's validation rules, or a view's source and pipeline. */
+    modify: (input: CollectionModifyInput) => Promise<{ ok: true }>;
   };
 
   database: {
@@ -253,6 +293,11 @@ export interface IpcApi {
   meta: {
     listDatabases: (input: { connectionId: string; includeSystem?: boolean }) => Promise<DbInfo[]>;
     listCollections: (input: { connectionId: string; dbName: string }) => Promise<CollectionInfo[]>;
+    collectionDetails: (input: {
+      connectionId: string;
+      dbName: string;
+      collection: string;
+    }) => Promise<CollectionDetails>;
     /** Blended sample (recent by _id + random $sample) for autocomplete inference; caller treats a miss as empty. */
     sampleSchema: (input: {
       connectionId: string;
@@ -451,6 +496,7 @@ export const IPC_CHANNELS = {
   // Connection CRUD -----------------------------------------
   connList:      'conn:list',
   connGet:       'conn:get',
+  connGetUri:    'conn:getUri',
   connCreate:    'conn:create',    // SECRET_INPUT
   connUpdate:    'conn:update',    // SECRET_INPUT
   connDelete:    'conn:delete',
@@ -458,10 +504,10 @@ export const IPC_CHANNELS = {
   connParseUri:  'conn:parseUri',  // SECRET_INPUT
   connTest:      'conn:test',      // SECRET_INPUT
   connExport:        'conn:export',        // SECRET_INPUT
-  connImportPreview: 'conn:importPreview',
-  connImportCommit:  'conn:importCommit',  // SECRET_INPUT
-  connPreviewUris:    'conn:previewUris',    // SECRET_INPUT
-  connCreateFromUris: 'conn:createFromUris', // SECRET_INPUT
+  connImportOpen:     'conn:importOpen',
+  connImportMap:      'conn:importMap',
+  connImportUris:     'conn:importUris',     // SECRET_INPUT
+  connImportCommit:   'conn:importCommit',   // SECRET_INPUT
 
   // App-level utilities -----------------------------------------
   appMenuCommandEvent: 'app:menu-command-event',
@@ -490,6 +536,7 @@ export const IPC_CHANNELS = {
   metaListDatabases:   'meta:listDatabases',
   metaListCollections: 'meta:listCollections',
   metaSampleSchema:    'meta:sampleSchema',
+  metaCollectionDetails: 'meta:collectionDetails',
 
   // Indexes -----------------------------------------
   indexList:   'index:list',
@@ -500,6 +547,7 @@ export const IPC_CHANNELS = {
   collectionCreate: 'collection:create',
   collectionDrop:   'collection:drop',
   collectionRename: 'collection:rename',
+  collectionModify: 'collection:modify',
   databaseDrop:     'database:drop',
 
   // Users -----------------------------------------

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SCHEMA_SAMPLE_MAX } from '@shared/defaults';
 import { IPC_CHANNELS } from '@shared/ipc';
 import type { Router } from '../router.ts';
 import { CollectionTargetSchema, NonEmpty, zodValidator } from '../validators.ts';
@@ -15,7 +16,7 @@ const ListCollsInput = z.object({
 });
 
 const SampleSchemaInput = CollectionTargetSchema.extend({
-  size: z.number().int().min(1).max(200).optional(),
+  size: z.number().int().min(1).max(SCHEMA_SAMPLE_MAX).optional(),
 });
 
 export function registerMetaChannels(router: Router, svc: MetaService): void {
@@ -35,5 +36,11 @@ export function registerMetaChannels(router: Router, svc: MetaService): void {
     IPC_CHANNELS.metaSampleSchema,
     zodValidator(SampleSchemaInput),
     (input) => svc.sampleSchema(input),
+  );
+
+  router.register(
+    IPC_CHANNELS.metaCollectionDetails,
+    zodValidator(CollectionTargetSchema),
+    (input) => svc.collectionDetails(input),
   );
 }

@@ -1,16 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../ThemeContext';
 import { useSettings } from '../pages/SettingsContext';
 import { useConnectionTransfer } from '../features/connections/ConnectionTransferProvider';
 import { AuditLogModal } from '../pages/AuditLogModal';
+import { ShortcutsModal } from './ShortcutsModal';
 import { useRegisterCommands } from './useRegisterCommands';
 
 /**
  * Registers commands available from every route: theme toggle, settings,
- * the audit log, navigation jumps, and `New connection`. Mount once near the
- * App root, inside the router and theme provider. Renders the audit log modal
- * itself, since nothing but this command opens it.
+ * the audit log, the shortcuts cheat sheet, navigation jumps, and `New
+ * connection`. Mount once near the App root, inside the router and theme
+ * provider. Renders the audit log and shortcuts modals itself, since nothing
+ * but these commands opens them.
  */
 export function GlobalCommands() {
   const navigate = useNavigate();
@@ -18,6 +20,23 @@ export function GlobalCommands() {
   const settings = useSettings();
   const transfer = useConnectionTransfer();
   const [audit, setAudit] = useState<{ connectionId: string | null } | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  // ⌘/ (Ctrl+/ elsewhere). A text field or editor keeps it: CodeMirror binds it
+  // to toggle-comment, and typing a slash must never open a dialog.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== '/' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      const origin = e.target instanceof HTMLElement ? e.target : null;
+      // Like ⌘B and ⌘E: a dialog that is already open keeps the keyboard.
+      if (origin?.closest('[role="dialog"], [role="alertdialog"]')) return;
+      if (origin?.closest('input, textarea, select, [contenteditable]')) return;
+      e.preventDefault();
+      setShortcutsOpen(true);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   useRegisterCommands(
     [
@@ -41,6 +60,14 @@ export function GlobalCommands() {
         group: 'general',
         keywords: ['history', 'operations', 'changes'],
         perform: (ctx) => setAudit({ connectionId: ctx.connectionId }),
+      },
+      {
+        id: 'help.shortcuts',
+        title: 'Keyboard shortcuts…',
+        group: 'general',
+        keywords: ['keys', 'hotkeys', 'cheat sheet', 'help'],
+        shortcut: '⌘/',
+        perform: () => setShortcutsOpen(true),
       },
       {
         id: 'nav.workspace',
@@ -97,7 +124,12 @@ export function GlobalCommands() {
     [navigate, toggleTheme, settings, transfer],
   );
 
-  return audit ? (
-    <AuditLogModal initialConnectionId={audit.connectionId} onClose={() => setAudit(null)} />
-  ) : null;
+  return (
+    <>
+      {audit && (
+        <AuditLogModal initialConnectionId={audit.connectionId} onClose={() => setAudit(null)} />
+      )}
+      {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
+    </>
+  );
 }

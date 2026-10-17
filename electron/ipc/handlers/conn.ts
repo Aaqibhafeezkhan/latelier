@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { IPC_CHANNELS } from '@shared/ipc';
 import type { ConnectionService } from '../../mongo/ConnectionService.ts';
+import { buildUri } from '../../mongo/uri.ts';
 import type { Router } from '../router.ts';
 import { IdInputSchema, NonEmpty, zodValidator } from '../validators.ts';
 import {
@@ -41,6 +42,14 @@ export function registerConnChannels(
     IPC_CHANNELS.connGet,
     zodValidator(IdInputSchema),
     ({ id }) => svc.get(id),
+  );
+
+  // No password argument: the copied string never carries the saved secret,
+  // so nothing secret crosses IPC in either direction.
+  router.register(
+    IPC_CHANNELS.connGetUri,
+    zodValidator(IdInputSchema),
+    ({ id }) => ({ uri: buildUri(svc.get(id)) }),
   );
 
   // SECRET_INPUT: 'conn:create' payload carries plaintext password / ssh credentials.

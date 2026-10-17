@@ -60,6 +60,16 @@ function rankOperator(token: string, s: OperatorSuggestion): number {
 }
 
 /**
+ * The sync pass calls every source to find the sync ones, so an async source
+ * also runs there and its promise is dropped. The effect below runs it again
+ * and owns its outcome, so a rejection of this duplicate must not surface as
+ * an unhandled rejection.
+ */
+function ignoreDuplicateRun(p: Promise<unknown>): void {
+  p.catch(() => undefined);
+}
+
+/**
  * Compose field or value sources into a ranked suggestion list for a given
  * input token. Sync sources resolve immediately; async sources populate
  * later without blocking render.
@@ -97,14 +107,16 @@ export function useSuggestions(
       const out: ValueSuggestion[] = [];
       for (const src of sources.valueSources) {
         const r = src({ ...context, target: tgt });
-        if (!(r instanceof Promise)) out.push(...r);
+        if (r instanceof Promise) ignoreDuplicateRun(r);
+        else out.push(...r);
       }
       return out;
     }
     const out: Array<FieldSuggestion | OperatorSuggestion> = [];
     for (const src of sources.fieldSources) {
       const r = src(context);
-      if (!(r instanceof Promise)) out.push(...r);
+      if (r instanceof Promise) ignoreDuplicateRun(r);
+      else out.push(...r);
     }
     return out;
     // contextKey/recentDocs capture context changes by value; context itself
@@ -116,9 +128,13 @@ export function useSuggestions(
     reqId.current += 1;
     const myReq = reqId.current;
     void (async () => {
+      // A superseded request's `finally` below skips `setLoading`, so the
+      // paths that end this request without starting a new async batch clear
+      // it themselves — else a context that goes away mid-load sticks it on.
       if (!context) {
         if (myReq === reqId.current) {
           setAsyncItems((prev) => (prev.length === 0 ? prev : []));
+          setLoading(false);
         }
         return;
       }
@@ -133,14 +149,26 @@ export function useSuggestions(
       if (asyncRuns.length === 0) {
         if (myReq === reqId.current) {
           setAsyncItems((prev) => (prev.length === 0 ? prev : []));
+          setLoading(false);
         }
         return;
       }
       if (myReq === reqId.current) setLoading(true);
-      const batches = await Promise.all(asyncRuns);
-      if (myReq !== reqId.current) return;
-      setAsyncItems(batches.flat() as Suggestion[]);
-      setLoading(false);
+      try {
+        // A source that rejects only loses its own batch: the sync items and
+        // the healthy async sources still show, and `loading` always settles.
+        const settled = await Promise.allSettled(asyncRuns);
+        if (myReq !== reqId.current) return;
+        const batches = settled.flatMap((r) => {
+          if (r.status === 'fulfilled') return r.value;
+          console.warn('[suggestions] source failed', r.reason);
+          return [];
+        });
+        setAsyncItems(batches as Suggestion[]);
+      } finally {
+        // A newer request owns `loading`; only the latest one may clear it.
+        if (myReq === reqId.current) setLoading(false);
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contextKey, recentDocs, isValueMode, sources]);

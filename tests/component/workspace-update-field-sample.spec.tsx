@@ -130,6 +130,31 @@ describe('Quick Edit drops the field-suggestion sample', () => {
     expect(invalidate).not.toHaveBeenCalled();
   });
 
+  it('resolves ok once the write landed', async () => {
+    await mount(vi.fn(async () => ({ matchedCount: 1, modifiedCount: 1 })));
+
+    expect(await act(quickEdit)).toEqual({ ok: true });
+  });
+
+  it('resolves with the reason when nothing matched, so the editor can keep the draft', async () => {
+    await mount(vi.fn(async () => ({ matchedCount: 0, modifiedCount: 0 })));
+
+    expect(await act(quickEdit)).toEqual({
+      ok: false,
+      message: 'This document changed since it was loaded; the edit was not saved.',
+    });
+  });
+
+  it('resolves with the reason when the write is refused, and never rejects', async () => {
+    await mount(
+      vi.fn(async () => {
+        throw { code: 'READ_ONLY', message: 'Connection is read-only.' };
+      }),
+    );
+
+    expect(await act(quickEdit)).toEqual({ ok: false, message: 'Connection is read-only.' });
+  });
+
   it('again after Undo puts the old value back', async () => {
     const updateOne = vi.fn(async () => ({ matchedCount: 1, modifiedCount: 1, auditId: 'a1' }));
     const undo = vi.fn(async () => ({ restored: 1, skipped: 0 }));
@@ -181,7 +206,7 @@ describe('Quick Edit re-runs the tab it edited', () => {
     );
     await screen.findByText(/widget/);
 
-    let settled!: Promise<void>;
+    let settled!: ReturnType<typeof quickEdit>;
     act(() => {
       settled = quickEdit();
     });

@@ -1,16 +1,8 @@
-import ConnectionString from 'mongodb-connection-string-url';
 import { z } from 'zod';
-import type {
-  ConnectionInput,
-  RepickFile,
-  UriBatchDefaults,
-  UriCredentials,
-  UriPreviewEntry,
-} from '@shared/types';
+import type { ConnectionInput, RepickFile, UriCredentials } from '@shared/types';
 import { AppError } from '../errors.ts';
 import { parseConnectionUri } from '../mongo/uri-parse.ts';
 import { applyCrossFieldRules, BaseInputShape } from '../ipc/schemas/connection.ts';
-import { planNames } from './connectionExportFormat.ts';
 
 /** C13 §7.1 — the paste box's limits, also enforced by the channel schema. */
 export const MAX_URI_LINES = 100;
@@ -25,33 +17,31 @@ export interface ParsedLine {
   input: Partial<ConnectionInput>;
   /** The string set `directConnection` itself, so the batch default must not override it. */
   explicitDirect: boolean;
+  /** The string named several hosts and only the first was kept. */
+  multiHost: boolean;
+  /** Credential files the string referenced; the user picks them again. */
+  repick: RepickFile[];
   warnings: string[];
 }
 export type Line = ParsedLine | { ok: false; reason: string };
 
 export function parseLine(uri: string): Line {
   try {
-    const { input, warnings } = parseConnectionUri(uri);
+    const { input, warnings, repick, directConnectionExplicit } = parseConnectionUri(uri);
     return {
       ok: true,
       input,
-      // SRV lines never get direct connection, so their params are not read
-      // (an SRV string with a port, which the parser tolerates, would not reparse).
-      explicitDirect: input.connectionType !== 'srv' && hasParam(uri, 'directconnection'),
+      explicitDirect: directConnectionExplicit === true,
+      multiHost: warnings.some((w) => w.code === 'MULTI_HOST_TRUNCATED'),
+      // Stryker disable next-line ArrayDeclaration: parseConnectionUri sets `repick` on every return path (optional only in the shared type), so the fallback is never taken and its contents cannot be observed.
+      repick: repick ?? [],
       // Stryker disable next-line LogicalOperator: every warning the parser pushes sets `detail` (verified by reading each `warnings.push` in uri-parse.ts); the code is a fallback for one that someday doesn't.
       warnings: warnings.map((w) => w.detail ?? w.code),
     };
   } catch (err) {
-    // Stryker disable next-line StringLiteral: unreachable in practice — parseConnectionUri wraps every failure in a ValidationError (its own throws, the ConnectionString constructor's, and the path decode), and hasParam re-reads a string that same constructor just accepted. Kept so a library change cannot surface a raw error message.
+    // Stryker disable next-line StringLiteral: unreachable in practice — parseConnectionUri wraps every failure in a ValidationError (its own throws, the ConnectionString constructor's, and the path decode). Kept so a library change cannot surface a raw error message.
     return { ok: false, reason: err instanceof AppError ? err.message : 'Not a connection string' };
   }
-}
-
-function hasParam(uri: string, lowerName: string): boolean {
-  for (const key of new ConnectionString(uri.trim()).searchParams.keys()) {
-    if (key.toLowerCase() === lowerName) return true;
-  }
-  return false;
 }
 
 /**
@@ -74,65 +64,41 @@ export function baseNames(lines: readonly Line[]): string[] {
   });
 }
 
-/** Final names: `baseNames`, then §4.2's clash rule against `existing` and the batch. */
-export function planLineNames(existing: Iterable<string>, lines: readonly Line[]): string[] {
-  const bases = baseNames(lines);
-  const planned = planNames(existing, bases.filter((_, i) => lines[i]!.ok));
-  let k = 0;
-  return lines.map((l) => (l.ok ? planned[k++]! : ''));
-}
-
-/** X.509 authenticates with a certificate and AWS with its own keys: neither is asked for a password here. */
-export function needsCredentials(input: Partial<ConnectionInput>): boolean {
-  if (input.authMech === 'x509') return false;
-  return !input.authUsername || !input.password;
-}
-
-export function repickFor(input: Partial<ConnectionInput>): RepickFile[] {
-  return input.authMech === 'x509' ? ['tlsClientCert'] : [];
-}
-
-export function previewEntry(line: Line, index: number, savedAs: string): UriPreviewEntry {
-  if (!line.ok) return { index, ok: false, reason: line.reason };
-  const { input } = line;
-  return {
-    index,
-    ok: true,
-    savedAs,
-    host: input.host!,
-    port: input.port!,
-    srv: input.connectionType === 'srv',
-    ...(input.authUsername ? { authUsername: input.authUsername } : {}),
-    hasPassword: Boolean(input.password),
-    needsCredentials: needsCredentials(input),
-    repick: repickFor(input),
-    warnings: line.warnings,
-  };
+/** What the user picks again: the auth-derived marker plus any the parser read off the string. */
+export function repickFor(input: Partial<ConnectionInput>, found: readonly RepickFile[] = []): RepickFile[] {
+  const files = new Set(found);
+  if (input.authMech === 'x509') files.add('tlsClientCert');
+  return [...files];
 }
 
 /** The mechanisms that authenticate with a username and password. */
 const PASSWORD_MECHS = new Set(['default', 'scram256', 'scram1', 'none']);
 
 /**
- * The Connection a line creates. Credentials typed in the second step win
- * over the string's, and a username cleared there means no authentication;
- * a username with no mechanism negotiates (`default`).
+ * The Connection a parsed row creates, with the user's final choices for it:
+ * `directConnection` is the value itself, not a default, and is never applied
+ * to SRV. Credentials typed in the second step win over the row's, and a
+ * username cleared there means no authentication; a username with no
+ * mechanism negotiates (`default`). Colour and SSH are the row's own.
  */
 export function lineToInput(
-  line: ParsedLine,
+  line: { input: Partial<ConnectionInput> },
   name: string,
-  defaults: UriBatchDefaults,
+  set: { readOnly: boolean; directConnection: boolean },
   creds: UriCredentials | undefined,
 ): ConnectionInput {
   const parsed = line.input;
   const cleared = creds?.username === '' && PASSWORD_MECHS.has(parsed.authMech!);
   const username = cleared ? undefined : creds?.username || parsed.authUsername;
-  const password = cleared ? undefined : creds?.password || parsed.password;
   const srv = parsed.connectionType === 'srv';
   const authMech = cleared ? 'none' : parsed.authMech === 'none' && username ? 'default' : parsed.authMech!;
+  // A row left without a username saves without authentication, so a password
+  // that came with it from the file has nothing to sign in with and is dropped.
+  // A typed one is kept, so the import rules still refuse it in words.
+  const password = cleared ? undefined : creds?.password || (authMech === 'none' ? undefined : parsed.password);
   return {
     name,
-    color: DEFAULT_COLOR,
+    color: parsed.color ?? DEFAULT_COLOR,
     connectionType: parsed.connectionType!,
     host: parsed.host!,
     port: parsed.port!,
@@ -142,16 +108,13 @@ export function lineToInput(
     ...(parsed.authDatabase ? { authDatabase: parsed.authDatabase } : {}),
     ...(password ? { password } : {}),
     tls: parsed.tls!,
+    ...(parsed.ssh ? { ssh: parsed.ssh } : {}),
     advanced: {
       ...parsed.advanced!,
       // The driver refuses directConnection on an SRV string.
-      directConnection: srv
-        ? false
-        : line.explicitDirect
-          ? parsed.advanced!.directConnection
-          : defaults.directConnection,
+      directConnection: !srv && set.directConnection,
     },
-    readOnly: defaults.readOnly,
+    readOnly: set.readOnly,
   };
 }
 

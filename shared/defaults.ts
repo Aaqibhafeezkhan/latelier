@@ -45,6 +45,14 @@ export const DEFAULT_AGGREGATION_TAB_STATE: AggregationTabState = deepFreeze({
   outputView: 'Tree',
 });
 
+/**
+ * Largest sample `meta:sampleSchema` accepts. Not raisable on its own:
+ * `MetaService.sampleSchema` puts the `recent` and `random` branches (n docs
+ * each) into one `$facet` output document, which carries BSON's 16 MB cap,
+ * and a breach fails open to an empty sample.
+ */
+export const SCHEMA_SAMPLE_MAX = 200;
+
 export const DEFAULT_SCHEMA_TAB_STATE: SchemaTabState = deepFreeze({
   sampleSize: 100,
 });
