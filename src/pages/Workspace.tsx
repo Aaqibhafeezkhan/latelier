@@ -21,10 +21,14 @@ import { groupTabsByConnection } from './Workspace/tabGroups';
 import {
   type CollectionWorkspaceActions,
   type CollectionWorkspaceMeta,
+  type UpdateFieldOutcome,
 } from './Workspace/context';
 import { useQueryRunner } from './Workspace/useQueryRunner';
 import type { RunnerTarget } from './Workspace/useQueryRunner';
 import { useWorkspacePanelPrefs } from './Workspace/useWorkspacePanelPrefs';
+import { useNavigatorData, useNavigatorStatusSync } from './Workspace/useNavigatorData';
+import { ownGet } from '../utils/ownProperty';
+import type { DbInfo } from '@shared/ipc';
 import { useConnectionDialogs } from './Workspace/useConnectionDialogs';
 import { useDocumentDialogs } from './Workspace/useDocumentDialogs';
 import { offerUndo } from './Workspace/offerUndo';
@@ -51,6 +55,10 @@ import {
 import type { SuggestionContext } from '../features/fieldSuggestions/types';
 import { invalidateSampleSchemaCache } from '../features/fieldSuggestions/sources/sampleSchemaSource';
 
+const OK: UpdateFieldOutcome = { ok: true };
+/** Collection listings the palette sweep keeps in flight at once. */
+const SWEEP_CONCURRENCY = 4;
+
 function WorkspaceInner() {
   const T = themeVars;
   const navigate = useNavigate();
@@ -66,6 +74,19 @@ function WorkspaceInner() {
   const [newTabOpen, setNewTabOpen] = React.useState(false);
 
   const panelPrefs = useWorkspacePanelPrefs();
+  // The navigator's tree, owned here: it outlives a collapsed sidebar and the
+  // palette's namespace commands read the same cache.
+  const navigatorData = useNavigatorData();
+  // A Connection that came back after a disconnect: its cached databases and
+  // collections predate the gap, so the palette's next sweep of it re-lists
+  // them all.
+  const reconnectedRef = React.useRef(new Set<string>());
+  const [reconnects, setReconnects] = React.useState(0);
+  const onNavigatorReconnect = React.useCallback((id: string) => {
+    reconnectedRef.current.add(id);
+    setReconnects((n) => n + 1);
+  }, []);
+  useNavigatorStatusSync(navigatorData, onNavigatorReconnect);
   const {
     prefsReady,
     leftWidth,
@@ -313,6 +334,24 @@ function WorkspaceInner() {
   const activeCollectionRef = useLatest(activeCollection);
   const activeScriptRef = useLatest(activeScript);
   const tabsRef = useLatest(tabs);
+  const focusedConnectionRef = useLatest(focusedConnection);
+
+  // "Go to Indexes" / "Go to Schema" from the palette: the Structure view may
+  // not be mounted yet when the command runs, so the scroll waits for the
+  // render that shows it. The nonce re-runs it when Structure is already
+  // active. Both sections share one scroller, so selecting the view alone can
+  // leave the schema below a long index list.
+  const structureScrollRef = React.useRef<'Indexes' | 'Schema' | null>(null);
+  const [structureScrollNonce, setStructureScrollNonce] = React.useState(0);
+  React.useEffect(() => {
+    const target = structureScrollRef.current;
+    if (!target || activeView !== 'structure') return;
+    structureScrollRef.current = null;
+    document
+      .querySelector<HTMLElement>(`[role="region"][aria-label="${target}"]`)
+      // jsdom has no scrollIntoView.
+      ?.scrollIntoView?.({ block: 'start' });
+  }, [structureScrollNonce, activeView]);
 
   // Stable callbacks for the major panels, reading state via the `*Ref` bag
   // so an unrelated re-render doesn't cascade through every child.
@@ -402,13 +441,14 @@ function WorkspaceInner() {
   // has landed to disable itself and stop a second click mid-flight from
   // firing a guard built on the value the first click is still saving.
   const updateField = React.useCallback(
-    (doc: unknown, fieldPath: string, newValue: unknown): Promise<void> => {
+    (doc: unknown, fieldPath: string, newValue: unknown): Promise<UpdateFieldOutcome> => {
       const a = activeCollectionRef.current;
-      if (!a) return Promise.resolve();
+      if (!a) return Promise.resolve({ ok: false, message: 'No collection is open to save to' });
       const revived = ejsonParse<unknown>(JSON.stringify(doc));
       if (!isPlainDocument(revived)) {
-        notify.error('Cannot edit a document without an _id');
-        return Promise.resolve();
+        const message = 'Cannot edit a document without an _id';
+        notify.error(message);
+        return Promise.resolve({ ok: false, message });
       }
       const original = revived as Record<string, unknown>;
       const draft = setAtSegments(original, [fieldPath], newValue);
@@ -416,10 +456,11 @@ function WorkspaceInner() {
       try {
         request = buildUpdateRequest(original, draft);
       } catch (e) {
-        notify.error(getErrorMessage(e, 'Cannot save this value'));
-        return Promise.resolve();
+        const message = getErrorMessage(e, 'Cannot save this value');
+        notify.error(message);
+        return Promise.resolve({ ok: false, message });
       }
-      if (request === null) return Promise.resolve(); // unchanged — same field, same value
+      if (request === null) return Promise.resolve(OK); // unchanged — same field, same value
       return api.doc
         .updateOne({
           connectionId: a.connectionId,
@@ -428,14 +469,13 @@ function WorkspaceInner() {
           filterJson: request.filterJson,
           updateJson: request.updateJson,
         })
-        .then(({ matchedCount, auditId }) => {
+        .then(({ matchedCount, auditId }): Promise<UpdateFieldOutcome> | UpdateFieldOutcome => {
           // Guarded: nothing matching means the field (or the document)
           // changed since it was loaded, not that the write landed unseen.
           if (matchedCount === 0) {
-            notify.error('This document changed since it was loaded; the edit was not saved.', {
-              title: 'Update failed',
-            });
-            return;
+            const message = 'This document changed since it was loaded; the edit was not saved.';
+            notify.error(message, { title: 'Update failed' });
+            return { ok: false, message };
           }
           // Quick Edit can change a field's type, and never passes through
           // `useDocumentDialogs`, so it drops the field-suggestion sample itself.
@@ -459,10 +499,12 @@ function WorkspaceInner() {
             invalidateSampleSchemaCache(a.connectionId, a.dbName, a.collection);
             void rerunEdited();
           });
-          return refreshed;
+          return refreshed.then(() => OK);
         })
-        .catch((e: unknown) => {
-          notify.error(getErrorMessage(e, 'Update failed'), { title: 'Update failed' });
+        .catch((e: unknown): UpdateFieldOutcome => {
+          const message = getErrorMessage(e, 'Update failed');
+          notify.error(message, { title: 'Update failed' });
+          return { ok: false, message };
         });
     },
     [activeCollectionRef, resolveRunnerTarget, run],
@@ -592,6 +634,42 @@ function WorkspaceInner() {
         },
       },
       {
+        id: 'shell.toggle',
+        title: shellOpen ? 'Close Shell' : 'Open Shell',
+        group: 'workspace',
+        keywords: ['shell', 'mongosh', 'repl', 'terminal'],
+        when: () => focusedConnectionRef.current !== null,
+        perform: () => setShellOpen((v) => !v),
+      },
+      {
+        id: 'view.structure.schema',
+        title: 'Go to Schema',
+        group: 'view',
+        keywords: ['structure', 'fields', 'types', 'sample'],
+        when: () => activeCollectionRef.current !== null,
+        perform: () => {
+          const a = activeCollectionRef.current;
+          if (!a) return;
+          structureScrollRef.current = 'Schema';
+          setStructureScrollNonce((n) => n + 1);
+          tabsRef.current.setActiveView(a.id, 'structure');
+        },
+      },
+      {
+        id: 'view.structure.indexes',
+        title: 'Go to Indexes',
+        group: 'view',
+        keywords: ['structure', 'index'],
+        when: () => activeCollectionRef.current !== null,
+        perform: () => {
+          const a = activeCollectionRef.current;
+          if (!a) return;
+          structureScrollRef.current = 'Indexes';
+          setStructureScrollNonce((n) => n + 1);
+          tabsRef.current.setActiveView(a.id, 'structure');
+        },
+      },
+      {
         id: 'query.drawer.toggle',
         title: builderCollapsed ? 'Expand query drawer' : 'Collapse query drawer',
         group: 'query',
@@ -668,56 +746,91 @@ function WorkspaceInner() {
         },
       })),
     ],
-    [active?.pinned, builderCollapsed, toggleBuilderWithFocus],
+    [active?.pinned, builderCollapsed, shellOpen, toggleBuilderWithFocus],
   );
 
-  // Mirrors the navigator's data for `⌘K → orders`-style collection commands,
-  // via its own meta:list fetch rather than sharing the navigator's cache.
-  const [paletteCollections, setPaletteCollections] = React.useState<
-    Array<{ db: string; coll: string }>
-  >([]);
+  // `⌘K → orders`-style commands for every collection of the focused
+  // Connection. The sweep fills the navigator's own cache, so the navigator
+  // never fetches what the palette already has, and the reverse.
+  const { tree: navigatorTree, loadDbs, loadColls } = navigatorData;
+  const focusedCache = focusedConnectionId
+    ? ownGet(navigatorTree.caches, focusedConnectionId)
+    : undefined;
+  const focusedIsConnected = focusedConnection?.status === 'connected';
+  // One attempt per database per database list: a database whose listing
+  // failed is not retried on every render, and a refreshed list sweeps again.
+  const sweptRef = React.useRef<{ dbs: DbInfo[] | null; done: Set<string> }>({
+    dbs: null,
+    done: new Set(),
+  });
+  // Databases a reconnect left with a stale listing: swept again although cached.
+  const relistRef = React.useRef<{ id: string | null; names: Set<string> }>({ id: null, names: new Set() });
+  const [relists, setRelists] = React.useState(0);
   React.useEffect(() => {
-    const cid = focusedConnectionId;
-    let cancelled = false;
-    void (async () => {
-      await Promise.resolve();
-      if (cancelled) return;
-      if (!cid) {
-        setPaletteCollections([]);
-        return;
-      }
-      try {
-        const dbs = await api.meta.listDatabases({ connectionId: cid });
-        const collsByDb = await Promise.all(
-          dbs.map(async (d) => {
-            try {
-              const colls = await api.meta.listCollections({
-                connectionId: cid,
-                dbName: d.name,
-              });
-              return colls.map((c) => ({ db: d.name, coll: c.name }));
-            } catch {
-              return [];
-            }
-          }),
-        );
-        if (!cancelled) setPaletteCollections(collsByDb.flat());
-      } catch {
-        if (!cancelled) setPaletteCollections([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [focusedConnectionId]);
+    if (!focusedConnectionId || !focusedIsConnected) return;
+    if (reconnectedRef.current.delete(focusedConnectionId)) {
+      // The expanded databases were already re-listed by the status sync.
+      const id = focusedConnectionId;
+      const expanded = ownGet(navigatorTree.expanded, id) ?? {};
+      void loadDbs(id, { force: true }).then((dbs) => {
+        const names = (dbs ?? []).filter((d) => !ownGet(expanded, d.name)).map((d) => d.name);
+        relistRef.current = { id, names: new Set(names) };
+        sweptRef.current = { dbs: null, done: new Set() };
+        setRelists((n) => n + 1);
+      });
+      return;
+    }
+    const c = focusedCache;
+    if (!c?.dbs) {
+      if (!c?.dbsLoading && !c?.err) void loadDbs(focusedConnectionId);
+      return;
+    }
+    if (sweptRef.current.dbs !== c.dbs) sweptRef.current = { dbs: c.dbs, done: new Set() };
+    const { done } = sweptRef.current;
+    const relist = relistRef.current.id === focusedConnectionId ? relistRef.current.names : null;
+    // A few listings at a time, the navigator's own included, so a server with
+    // hundreds of databases is not asked for all of them at once. Each one that
+    // settles changes the cache and so runs this again for the next.
+    let inFlight = c.dbs.filter((d) => ownGet(c.collsLoading, d.name)).length;
+    for (const d of c.dbs) {
+      if (inFlight >= SWEEP_CONCURRENCY) break;
+      if (done.has(d.name) || ownGet(c.collsLoading, d.name)) continue;
+      if (ownGet(c.colls, d.name) && !relist?.has(d.name)) continue;
+      done.add(d.name);
+      relist?.delete(d.name);
+      inFlight++;
+      void loadColls(focusedConnectionId, d.name);
+    }
+  }, [
+    focusedConnectionId,
+    focusedIsConnected,
+    focusedCache,
+    loadDbs,
+    loadColls,
+    reconnects,
+    relists,
+    navigatorTree.expanded,
+  ]);
+  // A disconnected Connection's cache is a snapshot that can't be opened from.
+  const paletteCollections = React.useMemo(() => {
+    const c = focusedCache;
+    if (!focusedIsConnected || !c?.dbs) return [];
+    return c.dbs.flatMap((d) =>
+      (ownGet(c.colls, d.name) ?? []).map((x) => ({ db: d.name, coll: x.name })),
+    );
+  }, [focusedCache, focusedIsConnected]);
 
   const collectionCommands = React.useMemo(
     () =>
       paletteCollections.map(({ db, coll }) => ({
-        id: `tab.open:${db}:${coll}`,
+        // Connection-qualified, so the same namespace on another Connection
+        // is not "recent".
+        id: `tab.open:${focusedConnectionId}:${db}:${coll}`,
         title: `Open: ${db}.${coll}`,
+        fuzzyText: `${db}.${coll}`,
         group: 'workspace' as const,
         keywords: ['collection', 'tab', 'new', db, coll],
+        hideWhenEmptyQuery: true,
         perform: () => {
           if (focusedConnectionId) {
             void tabsRef.current.openCollection({
@@ -1007,6 +1120,7 @@ function WorkspaceInner() {
         setNewTabOpen={setNewTabOpen}
         panelPrefs={panelPrefs}
         connectionDialogs={connectionDialogs}
+        navigatorData={navigatorData}
         onOpenReferences={() => setRefEditorOpen(true)}
       />
 

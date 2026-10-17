@@ -149,6 +149,10 @@ design, acceptance criteria and test position:
 | Reorder without a pointer | `ColumnChooser` | #57 |
 | Tablist | `ConnectionForm`'s own tab strip | #59 |
 
+The tablist pattern also covers the workspace's collection view strip (Documents / Aggregation / Structure), which uses Mantine `Tabs` like the query drawer; see W01 for its behaviour.
+
+What is bound is also discoverable: the "Keyboard shortcuts" dialog (X07 §5) lists every shortcut a command carries, and `⌘/` opens it.
+
 ## 4. Acceptance criteria
 
 Per interactive control this spec touches:

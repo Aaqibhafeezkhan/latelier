@@ -43,5 +43,13 @@ export interface Command {
   keywords?: string[];
   shortcut?: string;
   when?: (ctx: PaletteContext) => boolean;
+  /** Listed only once the user types: one row per collection would flood the empty palette. */
+  hideWhenEmptyQuery?: boolean;
+  /**
+   * What the fuzzy (subsequence) match reads instead of the title. Set when
+   * the title carries a fixed prefix, so `Open: ` is not a subsequence every
+   * row of the family shares.
+   */
+  fuzzyText?: string;
   perform: (ctx: PaletteContext) => void | Promise<void>;
 }

@@ -5,6 +5,7 @@ import { I } from '../../icons';
 import type { ResultViewMode } from '@shared/types';
 import { useCollectionWorkspace } from './context';
 import { api } from '../../api/atelier';
+import { notify } from '../../theme/notifications';
 import { DEFAULT_PAGE_SIZE_PREF_KEY, PAGE_SIZE_OPTIONS } from '../../state/workspaceTabs';
 import { FieldsControl } from './FieldsControl';
 import { ExportDialog } from './ExportDialog';
@@ -12,7 +13,8 @@ import { ExplainDrawer } from './Aggregation/ExplainDrawer';
 import { useFindExplain } from './useFindExplain';
 import { summarizeExplain } from '../../utils/explainSummary';
 import { ImportDialog } from './ImportDialog';
-import { findProblem } from './builder';
+import { compileFindOptions, findProblem } from './builder';
+import { LIMIT_EXPLANATION, limitChipText } from './queryCaps';
 
 const VIEWS: ResultViewMode[] = ['Tree', 'JSON', 'Table'];
 
@@ -78,6 +80,8 @@ export function ResultBar() {
     : planSummary?.usesIndex
       ? (planSummary.indexName ?? 'index')
       : null;
+  // The limit that actually applies (a coerced one shows as what it runs as).
+  const limitChip = limitChipText(compileFindOptions(state.builder).limit);
 
   const start = docCount !== null ? page * pageSize + 1 : null;
   const end = docCount !== null ? page * pageSize + docCount : null;
@@ -116,7 +120,9 @@ export function ResultBar() {
     actions.patch(patch);
     actions.run(patch);
     void api.prefs.set(DEFAULT_PAGE_SIZE_PREF_KEY, n).catch(() => {
-      // best-effort; the tab's own pageSize already persisted via patch.
+      // The tab's own pageSize already persisted via patch; only the sticky
+      // default for new tabs is lost, which the user is told.
+      notify.error('Could not save the rows-per-page default', { id: 'pref-save-failed' });
     });
   };
 
@@ -236,6 +242,14 @@ export function ResultBar() {
               >
                 (not current — fix the query above)
               </span>
+            )}
+            {limitChip !== null && (
+              <>
+                <span>·</span>
+                <span data-testid="result-limit-cap" title={LIMIT_EXPLANATION}>
+                  {limitChip}
+                </span>
+              </>
             )}
             {duration !== null && (
               <>

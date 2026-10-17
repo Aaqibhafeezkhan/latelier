@@ -25,7 +25,9 @@ const ROUND_TRIPS: Array<[string, unknown]> = [
   ['ui.workspace.shellSplit', 40],
   ['ui.workspace.sidebarCollapsed', true],
   ['ui.workspace.builderCollapsed', false],
+  ['ui.workspace.restoreTabs', false],
   ['ui.workspace.documentEditorSize', { width: 600, height: 400 }],
+  ['ui.commandPalette.mru', ['tab.new', 'tab.open:shop:orders']],
   [`ui.workspace.navigator.connExpanded:${UUID}`, true],
 ];
 
@@ -122,6 +124,16 @@ describe('prefs key allowlist and the main-confirmed plaintext switch', () => {
     );
     expect(appState.get('ui.workspace.leftWidth')).toBeNull();
     expect(appState.get('ui.hints.dismissed')).toBeNull();
+  });
+
+  it('bounds the palette history: strings only, at most 16 of them', async () => {
+    const { appState, invoke } = setup();
+    const key = 'ui.commandPalette.mru';
+    expectValidation(await invoke(IPC_CHANNELS.prefsSet, { key, value: ['ok', 7] }));
+    expectValidation(
+      await invoke(IPC_CHANNELS.prefsSet, { key, value: Array.from({ length: 17 }, () => 'a') }),
+    );
+    expect(appState.get(key)).toBeNull();
   });
 
   describe('secrets:set-plaintext-fallback', () => {

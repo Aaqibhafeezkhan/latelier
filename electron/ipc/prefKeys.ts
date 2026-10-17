@@ -33,7 +33,9 @@ const SET_SCHEMAS = new Map<string, z.ZodType>([
   ['ui.workspace.shellSplit', finite],
   ['ui.workspace.sidebarCollapsed', z.boolean()],
   ['ui.workspace.builderCollapsed', z.boolean()],
+  ['ui.workspace.restoreTabs', z.boolean()],
   ['ui.workspace.documentEditorSize', z.object({ width: finite, height: finite.optional() })],
+  ['ui.commandPalette.mru', z.array(z.string().max(512)).max(16)],
 ]);
 
 // Connection ids are `crypto.randomUUID()`. One bounded character class and an

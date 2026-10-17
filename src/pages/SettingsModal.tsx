@@ -1,10 +1,12 @@
 import React from 'react';
-import { Button, Group, Modal, Stack, Text } from '@mantine/core';
+import { Button, Group, Modal, Stack, Switch, Text } from '@mantine/core';
 import { useHints } from '../hints/HintsContext';
 import { api, getErrorMessage } from '../api/atelier';
 import { invalidateRecentValuesCache } from '../features/fieldSuggestions/sources';
 import { notify } from '../theme/notifications';
 import { useDialogFocusReturn } from '../hooks/useDialogFocusReturn';
+
+const RESTORE_TABS_KEY = 'ui.workspace.restoreTabs';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -16,6 +18,32 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [resetting, setResetting] = React.useState(false);
   const [exporting, setExporting] = React.useState(false);
   const [clearingValues, setClearingValues] = React.useState(false);
+
+  // Unset means restore, so the switch starts on.
+  const [restoreTabs, setRestoreTabs] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    api.prefs
+      .get<boolean>(RESTORE_TABS_KEY)
+      .then((v) => {
+        if (!cancelled) setRestoreTabs(v !== false);
+      })
+      .catch((err) => notify.error(getErrorMessage(err, 'Failed to read the tab restore setting.')));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleRestoreTabs = async (next: boolean) => {
+    setRestoreTabs(next);
+    try {
+      await api.prefs.set(RESTORE_TABS_KEY, next);
+    } catch (err) {
+      setRestoreTabs(!next);
+      notify.error(getErrorMessage(err, 'Failed to save the tab restore setting.'));
+    }
+  };
 
   const handleResetHints = () => {
     setResetting(true);
@@ -54,6 +82,24 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   return (
     <Modal opened onClose={close} title="Settings" centered size="md">
       <Stack gap="lg">
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <Stack gap={2} style={{ flex: 1 }}>
+            <Text size="sm" fw={600}>
+              Reopen tabs on launch
+            </Text>
+            <Text id="restore-tabs-description" size="xs" c="dimmed">
+              When off, the app starts with no tabs open, pinned ones included, and pipeline
+              changes that were never saved are lost with them.
+            </Text>
+          </Stack>
+          <Switch
+            aria-label="Reopen tabs on launch"
+            aria-describedby="restore-tabs-description"
+            checked={restoreTabs}
+            onChange={(e) => void handleRestoreTabs(e.currentTarget.checked)}
+          />
+        </Group>
+
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <Stack gap={2} style={{ flex: 1 }}>
             <Text size="sm" fw={600}>

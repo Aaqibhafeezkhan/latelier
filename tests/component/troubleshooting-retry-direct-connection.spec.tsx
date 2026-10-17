@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, waitFor } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import NewConnection from '../../src/pages/NewConnection';
 import { TroubleshootingProvider } from '../../src/troubleshooting/TroubleshootingProvider';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
@@ -15,11 +15,11 @@ afterEach(() => {
 function renderNew() {
   return render(
       <TroubleshootingProvider>
-        <MemoryRouter initialEntries={['/connections/new']}>
-          <Routes>
-            <Route path="/connections/new" element={<NewConnection />} />
-          </Routes>
-        </MemoryRouter>
+        <RouterProvider
+          router={createMemoryRouter([{ path: '/connections/new', element: <NewConnection /> }], {
+            initialEntries: ['/connections/new'],
+          })}
+        />
       </TroubleshootingProvider>
   );
 }

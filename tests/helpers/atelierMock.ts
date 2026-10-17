@@ -49,7 +49,7 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
     },
     updates: {
       getState: async () => ({ status: 'idle' as const }),
-      restart: async () => ({ restarting: true as const }),
+      restart: async (): Promise<{ restarting: boolean }> => ({ restarting: true }),
       onState: () => () => {},
     },
     shell: {
@@ -374,7 +374,7 @@ function makePermissiveStub(): IpcApi {
     },
     updates: {
       getState: async () => ({ status: 'idle' as const }),
-      restart: async () => ({ restarting: true as const }),
+      restart: async (): Promise<{ restarting: boolean }> => ({ restarting: true }),
       onState: () => () => {},
     },
     shell: {

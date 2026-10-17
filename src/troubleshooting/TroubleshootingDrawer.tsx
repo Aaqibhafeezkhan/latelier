@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button, Drawer, Group, Paper, Stack, Text } from '@mantine/core';
 import { api } from '../api/atelier';
+import { notify } from '../theme/notifications';
 import { useDialogFocusReturn } from '../hooks/useDialogFocusReturn';
 import { SubmitButton } from '../components/SubmitButton';
 import { InlineMarkdown } from './markdown';
@@ -147,7 +148,9 @@ export function TroubleshootingDrawer({
           variant="default"
           size="compact-xs"
           onClick={() => {
-            void api.app.openExternal(docHref).catch(() => {});
+            void api.app.openExternal(docHref).catch(() => {
+              notify.error('Could not open the link');
+            });
           }}
         >
           Open the full guide ↗

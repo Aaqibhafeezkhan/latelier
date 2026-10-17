@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, AppShell, Button, Group } from '@mantine/core';
+import { Alert, AppShell, Button, Group, Tabs } from '@mantine/core';
 import {
   Group as PanelGroup,
   Panel,
@@ -62,21 +62,20 @@ const SUB_TABS: ReadonlyArray<{
   { key: 'structure', label: 'Structure', icon: '⚙' },
 ];
 
-function SubTabStrip({
-  active,
-  onSelect,
-}: {
-  active: CollectionView;
-  onSelect: (view: CollectionView) => void;
-}) {
+/**
+ * The Documents / Aggregation / Structure strip. Mantine's `Tabs` gives it the
+ * tablist pattern (arrow keys, Home/End, a single tab stop, aria-controls). It
+ * must sit inside the same `<Tabs>` root as the `Tabs.Panel`s: Mantine only
+ * sets a tab's `aria-controls` once its panel is mounted.
+ */
+function SubTabStrip({ active }: { active: CollectionView }) {
   const T = themeVars;
   return (
-    <div
-      role="tablist"
+    <Tabs.List
       aria-label="Collection view"
       style={{
         height: 26,
-        display: 'flex',
+        flexWrap: 'nowrap',
         alignItems: 'stretch',
         borderBottom: `1px solid ${T.border}`,
         background: T.surfaceRaised,
@@ -87,36 +86,33 @@ function SubTabStrip({
       {SUB_TABS.map((t) => {
         const selected = t.key === active;
         return (
-          <button
+          <Tabs.Tab
             key={t.key}
-            role="tab"
-            aria-selected={selected}
-            onClick={() => onSelect(t.key)}
+            value={t.key}
+            leftSection={
+              <span aria-hidden="true" style={{ fontSize: 10, opacity: 0.7 }}>
+                {t.icon}
+              </span>
+            }
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
               padding: '0 11px',
               fontSize: 10,
               fontWeight: 600,
               letterSpacing: 0.5,
               textTransform: 'uppercase',
-              cursor: 'pointer',
               whiteSpace: 'nowrap',
               background: 'transparent',
               color: selected ? T.text : T.textMuted,
               border: 'none',
-              borderBottom: selected
-                ? `2px solid ${T.accent}`
-                : '2px solid transparent',
+              borderBottom: selected ? `2px solid ${T.accent}` : '2px solid transparent',
+              borderRadius: 0,
             }}
           >
-            <span style={{ fontSize: 10, opacity: 0.7 }}>{t.icon}</span>
-            <span>{t.label}</span>
-          </button>
+            {t.label}
+          </Tabs.Tab>
         );
       })}
-    </div>
+    </Tabs.List>
   );
 }
 
@@ -347,10 +343,17 @@ export function PanelBody({
               actions={collection.actions}
               meta={collection.meta}
             >
-              <SubTabStrip
-                active={collection.view}
-                onSelect={selectActiveView}
-              />
+              <Tabs
+                value={collection.view}
+                onChange={(v) => {
+                  if (v) selectActiveView(v as CollectionView);
+                }}
+                keepMounted={false}
+                variant="unstyled"
+                id="collection-view"
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
+              >
+              <SubTabStrip active={collection.view} />
               <PanelGroup
                 key={`h-${String(prefsReady)}`}
                 orientation="horizontal"
@@ -369,7 +372,7 @@ export function PanelBody({
                   minSize={30}
                   style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}
                 >
-                  {collection.view === 'documents' && (
+                  <Tabs.Panel value="documents" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
                     <>
                       <CollectionHeader
                         connectionId={collection.tab.connectionId}
@@ -425,8 +428,8 @@ export function PanelBody({
                         </div>
                       </ResultViewer>
                     </>
-                  )}
-                  {collection.view === 'aggregation' && (
+                  </Tabs.Panel>
+                  <Tabs.Panel value="aggregation" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
                     <AggregationTab
                       connectionId={collection.tab.connectionId}
                       dbName={collection.tab.dbName}
@@ -436,8 +439,8 @@ export function PanelBody({
                       sourceCount={null}
                       onPatch={patchAggregation}
                     />
-                  )}
-                  {collection.view === 'structure' && (
+                  </Tabs.Panel>
+                  <Tabs.Panel value="structure" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
                     <StructureView
                       connectionId={collection.tab.connectionId}
                       dbName={collection.tab.dbName}
@@ -447,7 +450,7 @@ export function PanelBody({
                       initialCreate={structureInitialCreate}
                       onInitialCreateConsumed={onStructureInitialCreateConsumed}
                     />
-                  )}
+                  </Tabs.Panel>
                 </Panel>
                 <PanelResizeHandle
                   style={{
@@ -568,6 +571,7 @@ export function PanelBody({
                   )}
                 </Panel>
               </PanelGroup>
+              </Tabs>
             </CollectionWorkspaceProvider>
           ) : (
             <div

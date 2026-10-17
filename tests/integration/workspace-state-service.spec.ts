@@ -337,6 +337,24 @@ describe('WorkspaceStateService', () => {
     expect(reread.state.page).toBe(2);
   });
 
+  it('closeAll removes every tab, the active and the pinned ones too', () => {
+    const a = svc.openCollection({ connectionId: 'conn', dbName: 'd', collection: 'a' });
+    svc.openCollection({ connectionId: 'conn', dbName: 'd', collection: 'b' });
+    svc.setPinned(a.id, true);
+    expect(svc.list().length).toBe(2);
+    svc.closeAll();
+    expect(svc.list()).toEqual([]);
+  });
+
+  it('the repo clears every row in one statement and reports how many went', () => {
+    for (let i = 0; i < 25; i += 1) {
+      svc.openCollection({ connectionId: 'conn', dbName: 'd', collection: `c${i}` });
+    }
+    expect(repo.deleteAll()).toBe(25);
+    expect(repo.list()).toEqual([]);
+    expect(repo.deleteAll()).toBe(0);
+  });
+
   it('close returns newActiveId = left neighbour when active closed', () => {
     const a = svc.openCollection({ connectionId: 'conn', dbName: 'd', collection: 'a' });
     const b = svc.openCollection({ connectionId: 'conn', dbName: 'd', collection: 'b' });

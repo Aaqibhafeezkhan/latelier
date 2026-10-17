@@ -1291,7 +1291,11 @@ export interface ShellSessionInfo {
   startedAt: string;
 }
 
-export type ShellOutputKind = 'stdout' | 'stderr' | 'exit';
+/**
+ * `prompt` carries no data: the REPL is ready for another line, so one
+ * previously written line has finished (its result, if any, was already sent).
+ */
+export type ShellOutputKind = 'stdout' | 'stderr' | 'prompt' | 'exit';
 
 export interface ShellOutputEvent {
   sessionId: string;

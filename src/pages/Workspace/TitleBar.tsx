@@ -2,6 +2,8 @@ import React from 'react';
 import { ActionIcon, Button, Group, Tooltip } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
+import { formatShortcut } from '../../commands/shortcutLabel';
+import { isMacRenderer } from '../../utils/platform';
 
 interface TitleBarProps {
   dark: boolean;
@@ -69,7 +71,7 @@ export function TitleBar({
           used to sit in a flex:1 no-drag Group, which made the whole
           middle of the bar (not just the button) undraggable. */}
       <div style={{ flex: 1 }} />
-      <Tooltip label="Search actions (⌘K)" withArrow>
+      <Tooltip label={`Search actions (${formatShortcut('⌘K', isMacRenderer())})`} withArrow>
         <Button
           variant="default"
           size="compact-xs"

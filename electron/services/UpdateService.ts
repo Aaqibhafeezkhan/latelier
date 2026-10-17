@@ -1,5 +1,6 @@
 import { ValidationError } from '../errors.ts';
 import type { Logger } from '../log.ts';
+import type { QuitGate } from '../quitGuard.ts';
 import type { UpdateState } from '@shared/types';
 
 /** The subset of electron-updater's `autoUpdater` this service touches. */
@@ -33,22 +34,28 @@ export function shouldCheckForUpdates(env: {
 export class UpdateService {
   private state: UpdateState = { status: 'idle' };
   private updater: UpdaterLike | null = null;
+  // Set while an approved restart is installing; the updater's error event
+  // clears it when the install fails and the app does not quit.
+  private restartPending = false;
 
   private readonly loadUpdater: () => Promise<UpdaterLike>;
   private readonly log: Logger;
   private readonly emit: (state: UpdateState) => void;
   private readonly enabled: boolean;
+  private readonly quitGate: Pick<QuitGate, 'check' | 'ask' | 'reset'>;
 
   constructor(
     loadUpdater: () => Promise<UpdaterLike>,
     log: Logger,
     emit: (state: UpdateState) => void,
     enabled: boolean,
+    quitGate: Pick<QuitGate, 'check' | 'ask' | 'reset'>,
   ) {
     this.loadUpdater = loadUpdater;
     this.log = log;
     this.emit = emit;
     this.enabled = enabled;
+    this.quitGate = quitGate;
   }
 
   /** Resolves once the check has settled; never rejects. */
@@ -65,6 +72,13 @@ export class UpdateService {
       });
       updater.on('error', (err) => {
         this.log.warn('updater', 'updater error', { err: String(err) });
+        // electron-updater reports every failed install here and then does not
+        // quit: take back the quit approval and offer Restart again.
+        if (this.restartPending) {
+          this.restartPending = false;
+          this.quitGate.reset();
+          this.emit(this.state);
+        }
       });
       await updater.checkForUpdates();
     } catch (err) {
@@ -76,10 +90,25 @@ export class UpdateService {
     return this.state;
   }
 
-  restart(): void {
+  /**
+   * Asks about running work first: electron-updater starts the installer inside
+   * `quitAndInstall`, before the app's quit event, so asking at `before-quit`
+   * would be too late to cancel. A yes lets the quit that follows through
+   * without a second dialog. A no installs nothing and re-sends `ready`, so the
+   * renderer offers Restart again, as does an install that fails without
+   * quitting. Resolves whether the restart went ahead.
+   */
+  async restart(): Promise<boolean> {
     if (this.state.status !== 'ready') {
       throw new ValidationError(`No update is ready to install (state: ${this.state.status})`);
     }
+    if (this.quitGate.check() === 'hold' && !(await this.quitGate.ask())) {
+      this.emit(this.state);
+      return false;
+    }
+    this.restartPending = true;
+    // A failed install emits `error` synchronously from inside this call.
     this.updater?.quitAndInstall(true, true);
+    return this.restartPending;
   }
 }

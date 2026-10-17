@@ -10,13 +10,18 @@ import { useRovingHighlight } from '../hooks/useRovingHighlight';
 import { useHints } from '../hints/HintsContext';
 import { useFeatureHint } from '../hints/useFeatureHint';
 import { FeatureHint } from '../hints/FeatureHint';
-import { commandRegistry } from './registry';
+import { api } from '../api/atelier';
+import { notify } from '../theme/notifications';
+import { useRegistrySnapshot } from './useRegistrySnapshot';
+import { formatShortcut } from './shortcutLabel';
+import { isMacRenderer } from '../utils/platform';
 import { usePaletteContext } from './PaletteContext';
 import { groupRows, rankCommands } from './rank';
 import { GROUP_LABEL } from './types';
 import type { Command } from './types';
 
 const MRU_CAP = 8;
+const MRU_PREF_KEY = 'ui.commandPalette.mru';
 
 // ── Dedicated Spotlight store ────────────────────────────────────────────────
 // Use a private store instead of the package's default. The public CJS bundle
@@ -77,17 +82,6 @@ export function usePaletteApi(): PaletteApi {
     }),
     [ref],
   );
-}
-
-// ── Registry snapshot ─────────────────────────────────────────────────────────
-
-function useRegistrySnapshot(): Command[] {
-  const subscribe = React.useCallback(
-    (cb: () => void) => commandRegistry.subscribe(cb),
-    [],
-  );
-  const getSnapshot = React.useCallback(() => commandRegistry.list(), []);
-  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 // ── Action item renderer ──────────────────────────────────────────────────────
@@ -152,7 +146,7 @@ function ActionItem({ cmd, isCursor, onActivate, onHover, index }: ActionItemPro
             color: 'var(--atelier-text-ghost)',
           }}
         >
-          {cmd.shortcut}
+          {formatShortcut(cmd.shortcut, isMacRenderer())}
         </span>
       )}
     </button>
@@ -323,7 +317,48 @@ export function CommandPalette({ registerApi }: PaletteShellProps) {
     });
   }, [registerApi, openPalette, closePalette, togglePalette]);
 
+  // History is a convenience: a failed read or write leaves the palette fully
+  // usable. A failed read is logged, like the theme's; a failed write is a toast,
+  // like the layout's. Stale ids are dropped by rankCommands.
+  // Nothing is written until the stored history has been read and merged, so a
+  // command run early never overwrites it; after a failed read, never.
+  const [historyRead, setHistoryRead] = React.useState<'pending' | 'done' | 'failed'>('pending');
+  React.useEffect(() => {
+    let active = true;
+    api.prefs
+      .get<unknown>(MRU_PREF_KEY)
+      .then((stored) => {
+        if (!active) return;
+        if (Array.isArray(stored) && stored.every((v): v is string => typeof v === 'string')) {
+          // Merged behind anything performed while the read was in flight.
+          setRecentIds((prev) =>
+            [...prev, ...stored.filter((id) => !prev.includes(id))].slice(0, MRU_CAP),
+          );
+        }
+        setHistoryRead('done');
+      })
+      .catch((err: unknown) => {
+        console.warn('[palette] could not load the command history', err);
+        if (active) setHistoryRead('failed');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Written from an effect, not the state updater (StrictMode runs updaters
+  // twice), and only after a perform — the seed is never written back.
+  const recentDirtyRef = React.useRef(false);
+  React.useEffect(() => {
+    if (historyRead !== 'done' || !recentDirtyRef.current) return;
+    recentDirtyRef.current = false;
+    void api.prefs.set(MRU_PREF_KEY, recentIds).catch(() => {
+      notify.error('Could not save the command history', { id: 'palette-history-save-failed' });
+    });
+  }, [recentIds, historyRead]);
+
   const recordRecent = React.useCallback((id: string) => {
+    recentDirtyRef.current = true;
     setRecentIds((prev) => {
       const next = [id, ...prev.filter((p) => p !== id)];
       return next.slice(0, MRU_CAP);

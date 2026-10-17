@@ -131,6 +131,8 @@ Quick Edit (the inline Table cell) keeps its behavior for strings and gains:
 - **numbers**: a numeric input that keeps the loaded numeric type, saved as a one-path diff through the same save path (§5) with its compare-and-set guard;
 - **booleans**: a toggle, saved the same way.
 
+A string or number cell stays open, read-only, until its write settles. A failed write (an error, or a compare-and-set that matched nothing) keeps the cell open with the typed value and the reason in an inline alert, as well as the toast; Enter, or editing the value first, tries again, and losing focus does not re-send the failed write. Escape, or the table swapping to other documents, drops a write still in flight: its late result touches nothing.
+
 Any other type (Date, ObjectId, Object, Array, …) opens the Document Editor on that field: scrolled into view, focused, and expanded if nested. `isInlineEditable` widens to match; `_id` stays non-editable.
 
 ## 9. What goes away
@@ -164,6 +166,7 @@ None new. `doc:updateOne` already returns `{ matchedCount, modifiedCount }`, whi
 - ⌘↵ saves; ⌘S does nothing; Escape closes a popup before the editor.
 - `E` on a focused row opens the editor in all three views; focus returns to the row on close.
 - Quick Edit edits numbers and booleans in place with types preserved; other types open the editor on that field.
+- A Quick Edit write that fails keeps the cell open with the typed value and an inline error.
 
 ## 12. Test cases
 

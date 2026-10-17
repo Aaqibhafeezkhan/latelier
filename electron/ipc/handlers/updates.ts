@@ -8,8 +8,7 @@ const NoInput = z.undefined().or(z.null()).or(z.object({}).strict());
 
 export function registerUpdatesChannels(router: Router, svc: UpdateService): void {
   router.register(IPC_CHANNELS.updatesGetState, zodValidator(NoInput), () => svc.getState());
-  router.register(IPC_CHANNELS.updatesRestart, zodValidator(NoInput), () => {
-    svc.restart();
-    return { restarting: true as const };
-  });
+  router.register(IPC_CHANNELS.updatesRestart, zodValidator(NoInput), async () => ({
+    restarting: await svc.restart(),
+  }));
 }
