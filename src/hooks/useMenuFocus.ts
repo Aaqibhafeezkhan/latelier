@@ -49,13 +49,15 @@ import React from 'react';
  * A click on a menu item lands inside the menu (`menuRef.current.contains`),
  * so it is never treated as "outside" and the restore still runs on close.
  * In practice a click never reaches this hook's `window` listener at all:
- * `TableView`'s cell and field menus stop propagation on the menu's own
- * wrapper div (`TableView.tsx`'s `onClick={(e) => e.stopPropagation()}`,
- * not on each item), while `TreeView`'s field menu has each item call
- * `e.stopPropagation()` itself — either way, the item's own `onClick`
- * closes the menu directly (`setContextMenu(null)`), which is exactly why
- * the reset below matters — that close path never runs this hook's
- * `onClick` and so never gets a chance to recompute `suppressRef` itself.
+ * the field items (Copy value / Copy field path / Add to filter, shared via
+ * `FieldActionsMenu`) call `e.stopPropagation()` themselves in every menu
+ * that renders them, and `TableView`'s cell and field menus also stop
+ * propagation on their wrapper div, which covers the cell menu's
+ * Edit/Duplicate/Delete items. Either way, the item's own `onClick` closes
+ * the menu directly through the menu's close callback (the same `close`
+ * passed here), which is exactly why the reset below matters — that close
+ * path never runs this hook's `onClick` and so never gets a chance to
+ * recompute `suppressRef` itself.
  *
  * `suppressRef` is reset to `false` at the top of the dismiss effect's body,
  * which only runs when `menu` is truthy (open, including a replacement) —
@@ -64,7 +66,7 @@ import React from 'react';
  * into the focus effect's body that runs in the same commit. Without this
  * reset: open a menu, suppress a close with an outside click (leaving
  * `suppressRef` `true`), reopen the menu, then activate an item — that
- * item's direct `setContextMenu(null)` never touches `suppressRef`, so the
+ * item's direct call to the close callback never touches `suppressRef`, so the
  * stale `true` survives and strands focus on the just-activated item
  * instead of restoring it. (An Escape-terminated version of that same
  * sequence is not a counterexample: `onKey` clears `suppressRef` itself

@@ -4,11 +4,13 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
-      '@shared': path.resolve(__dirname, 'shared'),
-      '@': path.resolve(__dirname, 'src'),
+      '@shared': path.resolve(import.meta.dirname, 'shared'),
+      '@': path.resolve(import.meta.dirname, 'src'),
     },
   },
   test: {
+    // jsdom is noisy at the 300ms default; flag only genuinely slow tests.
+    slowTestThreshold: 1_000,
     // Off unless asked for (`npm test -- --coverage`); CI sends the lcov
     // reports to SonarCloud. `include` lists the app's own code so a file no
     // test loads reports as uncovered rather than not at all.
@@ -32,6 +34,7 @@ export default defineConfig({
           name: 'integration',
           environment: 'node',
           include: ['tests/integration/**/*.spec.ts'],
+          globalSetup: ['tests/helpers/mongoGlobalSetup.ts'],
           testTimeout: 30_000,
           hookTimeout: 30_000,
         },
@@ -45,7 +48,10 @@ export default defineConfig({
           setupFiles: ['tests/helpers/jsdomSetup.ts'],
           // jsdom role queries over a large tree run ~8x slower on the CI
           // runner under --coverage than locally; the 5s default flaked (#550).
-          testTimeout: 20_000,
+          // Only coverage runs get the headroom, so a slow test still fails
+          // (or shows up via slowTestThreshold) in a plain run. `npm test`
+          // forwards `--coverage` into each child vitest's argv.
+          testTimeout: process.argv.includes('--coverage') ? 20_000 : 5_000,
         },
       },
     ],

@@ -40,6 +40,10 @@ Excluded, deliberately:
   already visible in the Indexes tab.
 - **`scriptRun` / `mshellWrite`** — arbitrary and unstructured. A script that deletes 400 documents
   is invisible to this feature.
+- **`agg:run` with a write stage / `agg:runAndSave`** — `$out` replaces a whole collection, which a
+  Pre-image cannot cover (unbounded, as with `collectionDrop`), so a row would record the write
+  without offering Undo. The pipeline text can hold user data. The write is already gated by an
+  explicit confirmation in the UI.
 
 **Recording taps the router**, driven by a static per-channel table. A channel absent from that
 table is not audited, so a channel added later fails closed. Pre-image capture lives in the

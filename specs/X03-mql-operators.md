@@ -23,8 +23,8 @@ the hand-curated `FIELD_OPS[valType]` subset.
   propagation through the grammar detector + textarea hook +
   `SuggestionContext`, ranking tweaks (strip leading `$`, downrank
   off-context), `SuggestionPopover` operator rendering, builder's op
-  autocomplete input + shape-bucketed `compileMql`, `describeCondProblem`
-  + invalid-row blocking.
+  autocomplete input + shape-bucketed `compileMql`, the condition-problem
+  check (W04 §2b) + invalid-row blocking.
 - **Out** (deferred): schema-validator-driven narrowing (e.g., hide geo
   ops when the collection has no geo index), operator signature hints,
   parameter typeaheads, AI-generated operator chains, update-expression
@@ -252,21 +252,19 @@ Every op the builder emits falls into one of:
 | size / bits  | `$size`, `$bitsAllClear/…AnySet/…AllSet/…AnyClear`           | `Number(value)`                                 |
 | needs-raw    | everything else (e.g., `$elemMatch`, `$text`, `$expr`, `$geo*`) | row flagged invalid; Run blocked             |
 
-`isCompilableOp(op)` names the buckets above; `isApplicableOp(op, valType)`
-checks `FIELD_OPS[valType]` membership.
+`isCompilableOp(op)` names the buckets above; applicability is
+`FIELD_OPS[valType]` membership (`FIELD_OPS` is the applicability table).
 
-### `describeCondProblem(cond) → string | null`
+### Condition problems
 
-Drives the red border + warning text on the row. Returns the first
-problem it finds, in order:
-
-1. Empty field → `null` (not yet a problem — row just doesn't compile).
-2. Op doesn't start with `$` → `'Operator must start with "$"'`.
-3. `!isCompilableOp(op)` → `'<op> needs raw JSON — open the query textarea'`.
-4. `!isApplicableOp(op, valType)` → `'<op> doesn\'t apply to <valType>'`.
-5. `$mod` specifically:
-   - value not a 2-element array → `'$mod value must be a 2-element array, e.g. [2, 1]'`
-   - divisor is 0 → `'$mod divisor cannot be 0'`
+`filterTree.ts`'s `condValueProblem(cond)` drives the warning text on the
+row; W04 §2b lists its rules and messages in order. In short: an op that
+doesn't start with `$` or isn't encodable (`'<op> is not encodable —
+convert to a raw clause'`), a value that isn't a value of its type, an empty
+or invalid `$in`/`$nin`/`$all` list, a malformed `{$oid}`/`{$date}`, and a
+malformed `$mod`. A condition with a blank field is pending and never
+checked. Applicability (`FIELD_OPS`) is not checked and no advisory is shown
+for it.
 
 ### `CompiledMql.invalidCondIds`
 
@@ -305,8 +303,8 @@ the lookup stays typed.
 - Operator row: same layout as field row. Left: monospace `$name`.
   Right: short class badge.
 - The builder op input shares the condition row's `inputStyle` with
-  `fontFamily: 'monospace'` and a warn-colored border when
-  `describeCondProblem` is non-null.
+  `fontFamily: 'monospace'` and an error state when the condition
+  problem is about the op (W04 §2b rules 1–2).
 - The error message under the row is 10px, `T.warn` colored, one line.
 
 ## 12. Persistence
@@ -318,11 +316,10 @@ lives in memory.
 
 - Catalog lookup misses (e.g., user-typed unknown op): the ranker
   returns no match, the popover just won't offer it. The row still
-  flags via `describeCondProblem`.
-- Malformed `$mod` / `$in` / `$all` values: `parseJsonArray` returns
-  `[]`; `describeCondProblem` traps the specific known-bad cases for
-  `$mod`. The remaining "parses to `[]`" cases are server-valid (just
-  match nothing) so we don't pre-block.
+  flags as not encodable (W04 §2b).
+- Malformed `$mod` / `$in` / `$nin` / `$all` values: a list that doesn't
+  parse reads as `[]` and blocks with `'<op> needs at least one value'`;
+  a malformed `$mod` blocks with its own `$mod` messages (W04 §2b).
 - `$facet` context resolution returns no tag; the full catalog shows.
   Documented limitation; refining it requires running the detector on
   each branch of the facet body.
@@ -379,11 +376,11 @@ lives in memory.
     value shape.
   - Object-shape op (`$elemMatch`) populates `invalidCondIds`.
   - `$size` on a `string` valType populates `invalidCondIds`.
-  - `describeCondProblem` returns the expected message for: valid row,
-    needs-raw op, mismatched valType, malformed `$mod` (missing /
-    single-element / divisor 0).
-  - `isCompilableOp` / `isApplicableOp` exercise the trivial-shape
-    and object-shape boundaries.
+  - `isCompilableOp` exercises the trivial-shape and object-shape
+    boundaries; `FIELD_OPS` is asserted as the exact per-valType table.
+- **filter-tree.spec.ts** — `printFilter`'s problems carry the W04 §2b
+  message for: non-`$` op, bad number / long / decimal values, the list
+  rules, a malformed `{$oid}`/`{$date}`, malformed `$mod`.
 
 ### Component
 

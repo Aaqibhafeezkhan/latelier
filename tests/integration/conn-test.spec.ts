@@ -1,5 +1,4 @@
-import { describe, it, expect, afterEach, beforeAll, afterAll, beforeEach } from 'vitest';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
+import { describe, it, expect, afterEach, beforeAll, beforeEach } from 'vitest';
 import { ConnectionRepo } from '../../electron/db/repositories/ConnectionRepo';
 import {
   ConnectionService,
@@ -10,7 +9,7 @@ import { MongoPool } from '../../electron/mongo/MongoPool';
 import type { ConnectionInput } from '@shared/types';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
-import { getSharedServer, stopSharedServer, uriToHostPort } from '../helpers/mongo';
+import { getSharedMongoUri, uriToHostPort } from '../helpers/mongo';
 
 function testInput(
   hp: { host: string; port: number },
@@ -40,16 +39,10 @@ function testInput(
 describe('ConnectionService.test', () => {
   let tmp: TempDb;
   let svc: ConnectionService;
-  let server: MongoMemoryServer;
   let hp: { host: string; port: number };
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
-  }, 60_000);
-
-  afterAll(async () => {
-    await stopSharedServer();
+    hp = uriToHostPort(getSharedMongoUri());
   });
 
   beforeEach(() => {

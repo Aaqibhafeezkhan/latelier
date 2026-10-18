@@ -18,7 +18,7 @@ import {
 import type { ConnectionInput } from '@shared/types';
 import { ejsonParse } from '../../electron/mongo/ejson';
 import { NotFoundError } from '../../electron/errors';
-import { getSharedServer, stopSharedServer, uriToHostPort } from '../helpers/mongo';
+import { getSharedMongoUri, uriToHostPort } from '../helpers/mongo';
 
 /** What the server sends when a role lacks `collStats`: code 13, `Unauthorized`. */
 function unauthorized(ns: string): Error {
@@ -60,7 +60,6 @@ async function seedData(uri: string) {
  * methods behave correctly end-to-end.
  */
 describe('MetaService', () => {
-  let server: MongoMemoryServer;
   let hp: { host: string; port: number };
   let tmp: TempDb;
   let pool: MongoPool;
@@ -68,13 +67,8 @@ describe('MetaService', () => {
   let connId: string;
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
-    await seedData(server.getUri());
-  }, 60_000);
-
-  afterAll(async () => {
-    await stopSharedServer();
+    hp = uriToHostPort(getSharedMongoUri());
+    await seedData(getSharedMongoUri());
   });
 
   afterEach(async () => {
@@ -178,7 +172,7 @@ describe('MetaService', () => {
     // Each test works on its own collection names so the shared server's
     // other suites never see them, and re-runs start from a clean slate.
     async function withDetailsDb<T>(fn: (db: Db) => Promise<T>): Promise<T> {
-      const c = new MongoClient(server.getUri());
+      const c = new MongoClient(getSharedMongoUri());
       try {
         await c.connect();
         return await fn(c.db(DETAILS_DB));

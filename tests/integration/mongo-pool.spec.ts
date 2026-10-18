@@ -10,8 +10,7 @@ import { SecretsVault } from '../../electron/secrets/SecretsVault';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import {
-  getSharedServer,
-  stopSharedServer,
+  getSharedMongoUri,
   uriToHostPort,
   makeConnection,
   makeReader,
@@ -41,18 +40,12 @@ const validConnectionInput: ConnectionInput = {
 // an EventEmitter and the pool now subscribes to `topologyDescriptionChanged`
 // on every client it builds, for involuntary-loss detection.
 describe('MongoPool', () => {
-  let server: MongoMemoryServer;
   let hp: { host: string; port: number };
   let tmp: TempDb;
   let vault: SecretsVault;
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
-  }, 60_000);
-
-  afterAll(async () => {
-    await stopSharedServer();
+    hp = uriToHostPort(getSharedMongoUri());
   });
 
   afterEach(() => {
@@ -530,8 +523,7 @@ describe('MongoPool', () => {
 
     // The one real replica set in the suite: a hand-built hello can only show
     // that the pool trusts the reply, this shows the reply a mongod actually
-    // sends classifies. Started on first use and stopped in afterAll, like the
-    // shared standalone.
+    // sends classifies. Started on first use and stopped in afterAll.
     describe('real replica set', () => {
       let replSet: MongoMemoryReplSet | undefined;
       afterAll(async () => {

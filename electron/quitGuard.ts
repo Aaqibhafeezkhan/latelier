@@ -81,3 +81,21 @@ export function createQuitGate(deps: {
     },
   };
 }
+
+/**
+ * Runs shutdown steps in order, each in its own try/catch, so one that throws
+ * or rejects cannot skip the ones after it (a failed step must not leave the
+ * pool connected or the database open). Never throws; failures go to `onError`.
+ */
+export async function runTeardown(
+  steps: ReadonlyArray<readonly [name: string, run: () => void | Promise<void>]>,
+  onError: (step: string, err: unknown) => void,
+): Promise<void> {
+  for (const [name, run] of steps) {
+    try {
+      await run();
+    } catch (err) {
+      onError(name, err);
+    }
+  }
+}

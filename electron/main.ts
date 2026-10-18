@@ -84,7 +84,7 @@ import { ImportService } from './mongo/ImportService.ts';
 import { DEFAULT_EXPORT_CAP, QueryService } from './mongo/QueryService.ts';
 import { DocumentService } from './mongo/DocumentService.ts';
 import { createLogger, type Logger } from './log.ts';
-import { createQuitGate, type RunningWork } from './quitGuard.ts';
+import { createQuitGate, runTeardown, type RunningWork } from './quitGuard.ts';
 import { PrivateModeError } from './utils/privateFs.ts';
 import { createRouter } from './ipc/router.ts';
 import { senderCheck } from './ipc/senderGuard.ts';
@@ -433,7 +433,7 @@ function createWindow(): void {
   // window actually holds is the same string the guards compare against. With
   // `loadFile` the expected value would be re-derived, and a difference in
   // percent-encoding or path normalisation would deny every navigation.
-  win.loadURL(APP_URL);
+  win.loadURL(APP_URL).catch((err: unknown) => log?.error('window', 'loadURL failed', { err: String(err) }));
 }
 
 // Platform events ------------------------------------------------------------
@@ -484,7 +484,7 @@ async function askToQuit(message: string): Promise<boolean> {
 // `before-quit` alike; see `createQuitGate` for what each answer lets through.
 const quitGate = createQuitGate({ counts: runningWork, confirm: askToQuit });
 
-app.on('before-quit', async (e) => {
+app.on('before-quit', (e) => {
   if (shuttingDown) return;
   if (quitGate.check() === 'hold') {
     e.preventDefault();
@@ -501,26 +501,27 @@ app.on('before-quit', async (e) => {
   log?.info('shutdown', 'begin');
 
   const timeoutMs = 8_000;
-  const work = (async () => {
-    try {
-      persistBoundsNow();
-      docSvc?.dispose();
-      if (mshellSvc) await mshellSvc.disposeAll();
-      scriptSvc?.cancelAll();
-      if (pool) await pool.disconnectAll();
-    } catch (err) {
-      log?.warn('shutdown', 'error during pool close', { err: String(err) });
-    }
-    try {
-      if (db) closeDatabase(db);
-    } catch (err) {
-      log?.warn('shutdown', 'error closing db', { err: String(err) });
-    }
-  })();
+  const work = runTeardown(
+    [
+      ['persist bounds', persistBoundsNow],
+      ['dispose documents', () => docSvc?.dispose()],
+      ['dispose shells', () => mshellSvc?.disposeAll()],
+      ['cancel scripts', () => scriptSvc?.cancelAll()],
+      ['disconnect pool', () => pool?.disconnectAll()],
+      [
+        'close db',
+        () => {
+          if (db) closeDatabase(db);
+        },
+      ],
+    ],
+    (step, err) => log?.warn('shutdown', `error during ${step}`, { err: String(err) }),
+  );
 
-  await Promise.race([work, new Promise<void>((r) => setTimeout(r, timeoutMs))]);
-  log?.info('shutdown', 'end');
-  app.exit(0);
+  void Promise.race([work, new Promise<void>((r) => setTimeout(r, timeoutMs))]).then(() => {
+    log?.info('shutdown', 'end');
+    app.exit(0);
+  });
 });
 
 // Nothing-happened safety: if something kept the promise pending forever,
@@ -852,4 +853,4 @@ app.whenReady().then(() => {
   registerDevResetShortcut();
 
   log.info('boot', 'ready');
-});
+}).catch((err: unknown) => reportFatalAndExit('Boot failed', err));

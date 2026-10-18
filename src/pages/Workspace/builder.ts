@@ -1,6 +1,6 @@
 import type { BuilderState, CollectionTabState, MqlOp, ValType } from '@shared/types';
 import { toDisplayValue, type DisplayType } from '../../utils/displayValue';
-import { isEjsonDocument, isValidEjson } from '../../utils/ejson';
+import { ejsonParse, isEjsonDocument, isPlainDocument, isValidEjson } from '../../utils/ejson';
 import {
   buildScalarWire,
   coerceArrayElementWire,
@@ -26,10 +26,6 @@ export const FIELD_OPS: Record<ValType, MqlOp[]> = {
   objectid: ['$eq', '$ne', '$in', '$nin', '$exists', '$type'],
   array:    ['$in', '$nin', '$all', '$exists', '$type', '$size'],
 };
-
-export function isApplicableOp(op: string, valType: ValType): boolean {
-  return (FIELD_OPS[valType] as readonly string[]).includes(op);
-}
 
 export function valTypeFromDisplayType(dt: DisplayType | undefined): ValType {
   switch (dt) {
@@ -57,78 +53,50 @@ export function opForValType(valType: ValType, currentOp: string): MqlOp {
   return ops[0] ?? '$eq';
 }
 
-const SIMPLE_OPS = new Set<string>(['$eq', '$ne', '$gt', '$gte', '$lt', '$lte']);
-const ARRAY_VALUE_OPS = new Set<string>(['$in', '$nin', '$all']);
-const BITS_OPS = new Set<string>(['$bitsAllClear', '$bitsAnyClear', '$bitsAllSet', '$bitsAnySet']);
-
-/** Ops the compiler can handle; others flag the row as needing raw JSON. */
-export function isCompilableOp(op: string): boolean {
-  return (
-    SIMPLE_OPS.has(op) ||
-    ARRAY_VALUE_OPS.has(op) ||
-    BITS_OPS.has(op) ||
-    op === '$exists' ||
-    op === '$regex' ||
-    op === '$type' ||
-    op === '$mod' ||
-    op === '$size'
-  );
-}
-
 export type SortDir = 1 | -1;
 
+/**
+ * The driver's own rule (`prepareDirection` in node_modules/mongodb/lib/sort.js):
+ * a direction is valid only when its lowercased string form is one of these six
+ * words. bson numerics stringify to their digits, so `{"$numberInt":"1"}`
+ * counts; `2`, `0.5` and `" asc"` make the driver throw, so they draw nothing.
+ * `{$meta}` is valid but has no ±1 to draw. Sub-documents and arrays are
+ * skipped before stringifying: `ejsonParse` builds sub-documents with a null
+ * prototype, which `String()` throws on. The driver would accept `[1]`; no
+ * sort the app writes has that shape.
+ */
+const SORT_DIRECTIONS: Record<string, SortDir> = {
+  '1': 1,
+  asc: 1,
+  ascending: 1,
+  '-1': -1,
+  desc: -1,
+  descending: -1,
+};
+
 function normalizeSortDir(v: unknown): SortDir | undefined {
-  // Stryker disable next-line ConditionalExpression: whenever v === 1,
-  // disabling this early return still falls through to the generic
-  // number branch below (typeof 1 === 'number', Number.isFinite(1), 1 > 0),
-  // which returns the identical `1` — verified for every input shape.
-  if (v === 1) return 1;
-  // Stryker disable next-line ConditionalExpression,UnaryOperator: same
-  // argument as the v === 1 case above — the generic number branch below
-  // (v < 0) reproduces -1 for v === -1 regardless of this check (or of
-  // comparing against the wrong literal, since whatever value the check
-  // targets, either the v===1 branch above or this generic branch already
-  // returns the same result for it).
-  if (v === -1) return -1;
-  // Stryker disable next-line ConditionalExpression: Number.isFinite is
-  // type-strict — it already returns false for any non-number v — so the
-  // redundant `typeof v === 'number'` conjunct can't change the result.
-  if (typeof v === 'number' && Number.isFinite(v)) {
-    if (v > 0) return 1;
-    if (v < 0) return -1;
-    return undefined;
-  }
-  if (typeof v === 'string') {
-    const s = v.trim().toLowerCase();
-    if (s === 'asc' || s === 'ascending' || s === '1') return 1;
-    if (s === 'desc' || s === 'descending' || s === '-1') return -1;
-  }
-  return undefined;
+  if (Array.isArray(v) || isPlainDocument(v)) return undefined;
+  return ownGet(SORT_DIRECTIONS, String(v).toLowerCase());
 }
 
-/** Parses `{"name":1,"age":-1}`. Unparseable/unmodeled shapes drop silently to `{}`. */
+/** Parses `{"name":1,"age":-1}` as EJSON. Unparseable/unmodeled shapes drop silently to `{}`. */
 export function parseSortString(raw: string): Record<string, SortDir> {
   // Stryker disable next-line StringLiteral: this fallback only fires when
-  // `raw` is null/undefined, and whatever non-JSON placeholder text stands in
-  // for '' still fails JSON.parse below the same way — trimmed is non-empty,
-  // parsing throws, and the catch returns the identical {} either way.
+  // `raw` is null/undefined, and ejsonParse throws on '' and on any
+  // placeholder text Stryker substitutes alike, so the catch returns the
+  // identical {} either way.
   const trimmed = (raw ?? '').trim();
-  // Stryker disable next-line ConditionalExpression: whenever trimmed === '',
-  // JSON.parse('') always throws (empty input), so removing this early
-  // return still lands on the identical `{}` via the catch block below.
-  if (!trimmed) return {};
   let parsed: unknown;
   try {
-    parsed = JSON.parse(trimmed);
+    parsed = ejsonParse(trimmed);
   }
   // Stryker disable next-line BlockStatement: an emptied catch leaves
-  // `parsed` at its initial `undefined`, and the very next line's
-  // `!parsed` is then true — returning the identical `{}` this catch
-  // returns explicitly.
+  // `parsed` at its initial `undefined`, which isPlainDocument on the next
+  // line rejects — returning the identical `{}` this catch returns.
   catch {
     return {};
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  if (!isPlainDocument(parsed)) return {};
   const out: Record<string, SortDir> = {};
   for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
     const dir = normalizeSortDir(v);
@@ -204,7 +172,17 @@ export function sortProblem(raw: string): string | null {
   if (raw.trim() === '') return null;
   if (!isValidEjson(raw)) return "Can't parse this sort. Expected EJSON like { field: 1 }.";
   if (!isEjsonDocument(raw)) return 'A sort must be a document, like { field: 1 }.';
+  for (const [field, dir] of Object.entries(ejsonParse<Record<string, unknown>>(raw))) {
+    if (normalizeSortDir(dir) === undefined && !isMetaSort(dir)) {
+      return `Sort direction for "${field}" must be 1, -1, "asc" or "desc".`;
+    }
+  }
   return null;
+}
+
+/** The driver's `isMeta`: a `{ $meta: "<string>" }` direction, e.g. `textScore`. */
+function isMetaSort(dir: unknown): boolean {
+  return isPlainDocument(dir) && typeof ownGet(dir as Record<string, unknown>, '$meta') === 'string';
 }
 
 export type SortClass =
@@ -228,29 +206,9 @@ export function classifySort(
 ): SortClass {
   if ((raw ?? '').trim() === '') return 'none';
   if (sortProblem(raw) !== null) return 'invalid';
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  }
-  // Stryker disable next-line BlockStatement: sortProblem above already
-  // calls isValidEjson(raw), which parses the identical `raw` string via
-  // `JSON.parse` under the hood (ejsonParse) — if that had thrown, we'd
-  // already have returned 'invalid' on the line above, so this JSON.parse
-  // can never throw here; the whole catch body is unreachable dead code.
-  catch {
-    // Stryker disable next-line StringLiteral: unreachable per the same
-    // proof above — this literal can never actually be returned.
-    return 'invalid';
-  }
-  // Stryker disable next-line ConditionalExpression,LogicalOperator,StringLiteral:
-  // sortProblem's `isEjsonDocument` check (line above) calls `isPlainDocument`,
-  // whose own first line is the byte-identical condition
-  // `!parsed || typeof parsed !== 'object' || Array.isArray(parsed)` — since
-  // that already returned false (i.e. sortProblem was null) for us to reach
-  // this point, this line's condition is always false too; verified by
-  // reading `isPlainDocument` in src/utils/ejson.ts.
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return 'unrepresentable';
-  const total = Object.keys(parsed).length;
+  // sortProblem has already parsed `raw` as an EJSON document whose every
+  // value is a driver direction or a `$meta`, so this parse cannot throw.
+  const total = Object.keys(ejsonParse<Record<string, unknown>>(raw)).length;
   if (total === 0) return 'none';
   const mapped = Object.keys(parseSortString(raw));
   const drawn = shownFields ? mapped.filter((k) => shownFields.has(k)).length : mapped.length;

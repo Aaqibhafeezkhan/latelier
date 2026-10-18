@@ -4,17 +4,15 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { Collection, Decimal128, Long, MongoClient, MongoNetworkError, ObjectId } from 'mongodb';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { createReadStream } from 'node:fs';
 import { ImportService, jsonlRecords } from '../../electron/mongo/ImportService';
 import { importDigest, undoCaptureOf } from '../../electron/mongo/undo';
 import type { SecretsVault } from '../../electron/secrets/SecretsVault';
 import type { CsvColumnMapping, CsvColumnType } from '../../shared/types';
-import { getSharedServer, makeConnection, makeReader, uriToHostPort } from '../helpers/mongo';
+import { getSharedMongoUri, makeConnection, makeReader, uriToHostPort } from '../helpers/mongo';
 
 describe('ImportService.importFile', () => {
-  let server: MongoMemoryServer;
   let client: MongoClient;
   let pool: MongoPool;
   let svc: ImportService;
@@ -23,14 +21,13 @@ describe('ImportService.importFile', () => {
   const coll = 'people';
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    const hp = uriToHostPort(server.getUri());
-    client = await MongoClient.connect(server.getUri());
+    const hp = uriToHostPort(getSharedMongoUri());
+    client = await MongoClient.connect(getSharedMongoUri());
     pool = new MongoPool({
       repo: makeReader([makeConnection('c1', hp), makeConnection('c-ro', hp, { readOnly: true })]),
       vault: { get: () => null } as unknown as SecretsVault,
     });
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await pool.disconnectAll();

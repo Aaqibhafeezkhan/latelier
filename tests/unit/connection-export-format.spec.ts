@@ -281,7 +281,7 @@ describe('parseConnectionExport', () => {
     for (const v of [0, '1', null]) {
       const f = await fileOf();
       f.version = v;
-      expectCode(() => parse(f), 'VALIDATION');
+      await expectCode(() => parse(f), 'VALIDATION');
     }
   });
 
@@ -303,21 +303,21 @@ describe('parseConnectionExport', () => {
     expect(message(() => parse(f))).toContain("isn't a L'Atelier Connection Export");
   });
 
-  it('rejects malformed JSON as a validation error', () => {
-    expectCode(() => parseConnectionExport('{nope'), 'VALIDATION');
+  it('rejects malformed JSON as a validation error', async () => {
+    await expectCode(() => parseConnectionExport('{nope'), 'VALIDATION');
     expect(message(() => parseConnectionExport('{nope'))).toBe("This file isn't valid JSON.");
   });
 
   it('rejects an unknown field at the root and on an entry', async () => {
     const root = await fileOf();
     root.extra = 1;
-    expectCode(() => parse(root), 'VALIDATION');
+    await expectCode(() => parse(root), 'VALIDATION');
     const ent = await fileOf();
     ent.connections[0].extra = 1;
-    expectCode(() => parse(ent), 'VALIDATION');
+    await expectCode(() => parse(ent), 'VALIDATION');
     const adv = await fileOf();
     adv.connections[0].advanced.extra = 1;
-    expectCode(() => parse(adv), 'VALIDATION');
+    await expectCode(() => parse(adv), 'VALIDATION');
   });
 
   it.each([

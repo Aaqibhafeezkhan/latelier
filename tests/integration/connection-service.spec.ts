@@ -213,4 +213,14 @@ describe('ConnectionService', () => {
     // No row should remain from the aborted create.
     expect(repo.list().length).toBe(0);
   });
+  it('update leaves the row unchanged when the vault fails', async () => {
+    const c = await svc.create(validInput());
+    const before = repo.findById(c.id);
+    const badVault = new SecretsVault(tmp.db, createSafeStorageMock({ available: false }));
+    const brokenSvc = new ConnectionService({ repo, vault: badVault, pool });
+    await expect(
+      brokenSvc.update(c.id, { host: 'changed', password: 'p' }),
+    ).rejects.toThrow();
+    expect(repo.findById(c.id)).toEqual(before);
+  });
 });

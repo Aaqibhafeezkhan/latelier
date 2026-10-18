@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, expectKeyboardDisclosureToggle } from '../helpers/render';
+import { render, screen, waitFor, act, expectKeyboardDisclosureToggle } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import { UsersTab } from '../../src/pages/UsersTab';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
@@ -236,5 +236,63 @@ describe('UsersTab — render', () => {
     await waitFor(() => {
       expect(screen.getByText(/lacks the privilege to read users/)).toBeTruthy();
     });
+  });
+
+  it('shows the newer database\'s users when an older list call resolves last', async () => {
+    const pending: Record<string, { resolve: (r: UserInfo[]) => void; reject: (e: unknown) => void }> = {};
+    installAtelierMock({
+      conn: { get: async () => makeFullConn() },
+      meta: { listDatabases: async () => [{ name: 'myapp', sizeOnDisk: 0, empty: false }] },
+      user: {
+        list: ({ dbName }) =>
+          new Promise<UserInfo[]>((resolve, reject) => {
+            pending[dbName ?? 'all'] = { resolve, reject };
+          }),
+      },
+    });
+
+    renderTab();
+    await waitFor(() => expect(pending.all).toBeDefined());
+    await userEvent.selectOptions(await screen.findByRole('option', { name: 'myapp' }).then(() => screen.getByLabelText('Database')), 'myapp');
+    await waitFor(() => expect(pending.myapp).toBeDefined());
+
+    await act(async () => {
+      pending.myapp.resolve([READER]);
+    });
+    await act(async () => {
+      pending.all.resolve([X509]);
+    });
+
+    expect(screen.getByText('reader')).toBeTruthy();
+    expect(screen.queryByText('CN=client')).toBeNull();
+  });
+
+  it('ignores a stale failure from the database left behind', async () => {
+    const pending: Record<string, { resolve: (r: UserInfo[]) => void; reject: (e: unknown) => void }> = {};
+    installAtelierMock({
+      conn: { get: async () => makeFullConn() },
+      meta: { listDatabases: async () => [{ name: 'myapp', sizeOnDisk: 0, empty: false }] },
+      user: {
+        list: ({ dbName }) =>
+          new Promise<UserInfo[]>((resolve, reject) => {
+            pending[dbName ?? 'all'] = { resolve, reject };
+          }),
+      },
+    });
+
+    renderTab();
+    await waitFor(() => expect(pending.all).toBeDefined());
+    await userEvent.selectOptions(await screen.findByRole('option', { name: 'myapp' }).then(() => screen.getByLabelText('Database')), 'myapp');
+    await waitFor(() => expect(pending.myapp).toBeDefined());
+
+    await act(async () => {
+      pending.all.reject(new Error('stale boom'));
+    });
+    expect(screen.queryByText(/stale boom/)).toBeNull();
+
+    await act(async () => {
+      pending.myapp.resolve([READER]);
+    });
+    expect(screen.getByText('reader')).toBeTruthy();
   });
 });

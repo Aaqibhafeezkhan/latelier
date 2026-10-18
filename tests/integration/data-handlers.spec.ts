@@ -5,7 +5,6 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { Collection, MongoClient, MongoNetworkError } from 'mongodb';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { createRouter } from '../../electron/ipc/router';
 import { registerDataChannels } from '../../electron/ipc/handlers/data';
 import { registerAuditChannels } from '../../electron/ipc/handlers/audit';
@@ -22,7 +21,7 @@ import type { AuditEntry, ImportReport, UndoResult } from '../../shared/types';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
-import { getSharedServer, uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
+import { getSharedMongoUri, uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
 
 type Handler = (evt: IpcMainInvokeEvent, payload: unknown) => unknown;
 
@@ -31,7 +30,6 @@ type Handler = (evt: IpcMainInvokeEvent, payload: unknown) => unknown;
 const BODY_MARKER = 'body-only-value-9c1e';
 
 describe('data:import via the router', () => {
-  let server: MongoMemoryServer;
   let client: MongoClient;
   let tmp: TempDb;
   let pool: MongoPool;
@@ -62,9 +60,8 @@ describe('data:import via the router', () => {
     }) as unknown as AuditEntry);
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    client = await MongoClient.connect(server.getUri());
-  }, 60_000);
+    client = await MongoClient.connect(getSharedMongoUri());
+  });
 
   afterAll(async () => {
     await client.close();
@@ -80,7 +77,7 @@ describe('data:import via the router', () => {
          VALUES (?, ?, 'standard', 'localhost', 27017, 'none', ?, ?)`,
       ).run(id, `conn-${id}`, now, now);
     }
-    const hp = uriToHostPort(server.getUri());
+    const hp = uriToHostPort(getSharedMongoUri());
     pool = new MongoPool({
       repo: makeReader([makeConnection('c1', hp), makeConnection('c-ro', hp, { readOnly: true })]),
       vault: new SecretsVault(tmp.db, createSafeStorageMock()),

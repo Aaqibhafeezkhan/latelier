@@ -5,7 +5,7 @@
 // is in `tests/component/builder-operator-symbols.spec.tsx`.
 import { describe, it, expect } from 'vitest';
 import { OPERATORS, resolveOperatorSymbol } from '../../src/features/fieldSuggestions/operators';
-import { isCompilableOp } from '../../src/pages/Workspace/builder';
+import { isCompilableOp } from '../../src/pages/Workspace/filterTree';
 import { operatorSource } from '../../src/features/fieldSuggestions/sources/operatorSource';
 
 /**

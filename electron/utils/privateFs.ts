@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import fsp, { type FileHandle } from 'node:fs/promises';
 
 // POSIX modes carry no meaning on Windows, where the profile dir is already
 // per-user by ACL. Read at call time so a test can stub the platform.
@@ -49,5 +50,34 @@ export function ensurePrivateFile(path: string): void {
     fs.chmodSync(path, 0o600);
   } catch (err) {
     throw new PrivateModeError(path, err);
+  }
+}
+
+/**
+ * Opens `path` for writing (truncating), owner-only. The `open` mode applies
+ * only when the file is created, so an existing 0644 file is chmod-ed through
+ * the handle before the caller writes anything: no data ever sits in a
+ * group/world-readable file. The caller closes the handle. A failed open throws
+ * as-is; a failed chmod closes the handle and throws `PrivateModeError`.
+ */
+export async function openPrivateFile(path: string): Promise<FileHandle> {
+  const handle = await fsp.open(path, 'w', 0o600);
+  if (!posixModes()) return handle;
+  try {
+    await handle.chmod(0o600);
+  } catch (err) {
+    await handle.close();
+    throw new PrivateModeError(path, err);
+  }
+  return handle;
+}
+
+/** Writes `data` to `path` as UTF-8, owner-only even over an existing file. */
+export async function writePrivateFile(path: string, data: string): Promise<void> {
+  const handle = await openPrivateFile(path);
+  try {
+    await handle.writeFile(data, 'utf8');
+  } finally {
+    await handle.close();
   }
 }

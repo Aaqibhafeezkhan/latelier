@@ -108,6 +108,9 @@ export class AggregationService {
     }
     const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
     let t0 = Date.now();
+    // Once a $out/$merge is sent it cannot be stopped, so its own error is
+    // the real outcome and a cancel no longer turns it into "cancelled".
+    let writeSent = false;
 
     this.running++;
     try {
@@ -127,24 +130,38 @@ export class AggregationService {
         // Write pipelines run untouched and skip instrumentation for the
         // final write stage (it produces no documents).
         const nonWrite = enabled.slice(0, enabled.length - 1);
+        // No `signal` here on purpose: aborting makes the driver drop the
+        // socket and throw at once, but the server does not stop a $out/$merge
+        // when its client disconnects — the write lands seconds later while the
+        // UI would already say "cancelled". So a write, once sent, runs to the end.
         const cursor = coll.aggregate(pipeline, {
           allowDiskUse: true,
           maxTimeMS: QUERY_TIMEOUT_MS,
         });
         if (controller.signal.aborted) throw new SystemError('INTERNAL', 'cancelled');
+        writeSent = true;
         await cursor.toArray();
         durationMs = Date.now() - t0;
         rowsJson = '[]';
         rowCount = 0;
         hasMore = false;
-        const instrumented = await this.instrument(coll, nonWrite, controller.signal);
-        stageCounts = instrumented.stageCounts;
-        stageSamples = instrumented.stageSamples;
+        try {
+          const instrumented = await this.instrument(coll, nonWrite, controller.signal);
+          stageCounts = instrumented.stageCounts;
+          stageSamples = instrumented.stageSamples;
+        } catch (err) {
+          // The write already landed: a cancel now only skips the per-stage
+          // counts, and the run is reported as completed.
+          if (!controller.signal.aborted) throw err;
+          stageCounts = {};
+          stageSamples = {};
+        }
       } else {
         const mainPipeline = [...pipeline, { $limit: limit }];
         const cursor = coll.aggregate(mainPipeline, {
           allowDiskUse: true,
           maxTimeMS: QUERY_TIMEOUT_MS,
+          signal: controller.signal,
         });
         const [rawRows, instrumented] = await Promise.all([
           cursor.toArray(),
@@ -183,7 +200,7 @@ export class AggregationService {
         hasMore,
       };
     } catch (err) {
-      if (controller.signal.aborted) {
+      if (controller.signal.aborted && !writeSent) {
         throw new SystemError('INTERNAL', 'cancelled');
       }
       const classified = classifyMongoOpError(err);
@@ -467,6 +484,7 @@ export class AggregationService {
     const cursor = coll.aggregate([{ $facet: facet }], {
       allowDiskUse: true,
       maxTimeMS: QUERY_TIMEOUT_MS,
+      signal,
     });
     const arr = (await cursor.toArray()) as [Record<string, Document[]>] | [];
     const row = arr[0] ?? {};
@@ -500,6 +518,7 @@ export class AggregationService {
           .aggregate([...cumulative, { $count: 'c' }], {
             allowDiskUse: true,
             maxTimeMS: QUERY_TIMEOUT_MS,
+            signal,
           })
           .toArray()) as Array<{ c?: number }>;
         stageCounts[stage.id] = countArr[0]?.c ?? 0;
@@ -511,6 +530,7 @@ export class AggregationService {
           .aggregate([...cumulative, { $limit: SAMPLE_PER_STAGE }], {
             allowDiskUse: true,
             maxTimeMS: QUERY_TIMEOUT_MS,
+            signal,
           })
           .toArray();
         stageSamples[stage.id] = ejsonEncodeArray(sampleDocs, false);

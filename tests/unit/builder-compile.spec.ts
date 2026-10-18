@@ -8,8 +8,6 @@ import {
   effectivePageLimit,
   findProblem,
   filterProblem,
-  isApplicableOp,
-  isCompilableOp,
   isDefaultQueryState,
   isUnfilteredFirstPage,
   limitWarning,
@@ -26,7 +24,7 @@ import {
 } from '../../src/pages/Workspace/builder';
 import { DEFAULT_COLLECTION_TAB_STATE } from '@shared/defaults';
 import type { BuilderState, CollectionTabState } from '@shared/types';
-import type { FilterNode } from '../../src/pages/Workspace/filterTree';
+import { isCompilableOp, type FilterNode } from '../../src/pages/Workspace/filterTree';
 
 function makeTabState(overrides: Partial<CollectionTabState> = {}): CollectionTabState {
   return {
@@ -149,6 +147,32 @@ describe('sortProblem', () => {
     expect(sortProblem('{"a":1')).toMatch(/parse/i);
     expect(sortProblem('{"a":1')).not.toMatch(/must be a document/i);
   });
+
+  // The driver throws "Invalid sort direction" on these at run time, so the
+  // Run gate refuses them up front and names the field.
+  it.each(['2', '-7', '0.5', '0', '" asc"', 'true', 'null', '"bogus"', '{"x":1}', '[1]', '{"$meta":1}'])(
+    'refuses the driver-refused direction %s, naming the field',
+    (dir) => {
+      expect(sortProblem('{"a":1,"b":' + dir + '}')).toBe(
+        'Sort direction for "b" must be 1, -1, "asc" or "desc".',
+      );
+    },
+  );
+
+  it.each([
+    '"asc"',
+    '"DESC"',
+    '"ascending"',
+    '"descending"',
+    '"1"',
+    '"-1"',
+    '{"$numberInt":"-1"}',
+    '{"$numberLong":"1"}',
+    '{"$meta":"textScore"}',
+    '{"$meta":"indexKey","x":1}',
+  ])('accepts the driver direction %s', (dir) => {
+    expect(sortProblem('{"a":' + dir + '}')).toBeNull();
+  });
 });
 
 // W15 §4.1 — the compiled value and the message shown for it, asserted
@@ -187,7 +211,7 @@ describe('limitWarning', () => {
   });
 });
 
-describe('isCompilableOp / isApplicableOp', () => {
+describe('isCompilableOp / FIELD_OPS', () => {
   it('isCompilableOp covers the trivial-shape ops', () => {
     for (const op of ['$eq', '$ne', '$in', '$regex', '$type', '$mod', '$size', '$bitsAllClear']) {
       expect(isCompilableOp(op)).toBe(true);
@@ -198,12 +222,6 @@ describe('isCompilableOp / isApplicableOp', () => {
     for (const op of ['$elemMatch', '$text', '$expr', '$geoWithin', '$jsonSchema']) {
       expect(isCompilableOp(op)).toBe(false);
     }
-  });
-
-  it('isApplicableOp respects FIELD_OPS', () => {
-    expect(isApplicableOp('$regex', 'string')).toBe(true);
-    expect(isApplicableOp('$regex', 'number')).toBe(false);
-    expect(isApplicableOp('$all', 'array')).toBe(true);
   });
 
   it('FIELD_OPS is exactly the documented table, per valType', () => {
@@ -504,19 +522,19 @@ describe('parseSortString', () => {
     expect(parseSortString('{"name":1,"age":-1}')).toEqual({ name: 1, age: -1 });
   });
 
-  it('accepts "asc"/"desc" strings (case-insensitive, trimmed)', () => {
+  it('accepts "asc"/"desc" strings (case-insensitive)', () => {
     expect(parseSortString('{"name":"asc","age":"DESC"}')).toEqual({
       name: 1,
       age: -1,
     });
-    expect(parseSortString('{"a":" Ascending ","b":"descending"}')).toEqual({
+    expect(parseSortString('{"a":"Ascending","b":"descending"}')).toEqual({
       a: 1,
       b: -1,
     });
   });
 
-  it('coerces positive/negative numbers other than ±1', () => {
-    expect(parseSortString('{"a":2,"b":-7}')).toEqual({ a: 1, b: -1 });
+  it('drops numbers other than ±1, which the driver refuses', () => {
+    expect(parseSortString('{"a":2,"b":-7}')).toEqual({});
   });
 
   it('drops fields with shapes we don\'t model (e.g. $meta textScore)', () => {
@@ -539,8 +557,8 @@ describe('parseSortString', () => {
     expect(parseSortString('{"a":1e999,"b":1}')).toEqual({ b: 1 });
   });
 
-  it('a fractional positive/negative number still resolves by sign, at the >0/<0 boundary', () => {
-    expect(parseSortString('{"a":0.5,"b":-0.5}')).toEqual({ a: 1, b: -1 });
+  it('drops a fractional direction, which the driver refuses', () => {
+    expect(parseSortString('{"a":0.5,"b":-0.5}')).toEqual({});
   });
 
   it('drops a field whose direction string is unrecognized', () => {
@@ -554,6 +572,58 @@ describe('parseSortString', () => {
 
   it('a null raw input is treated as empty, not a crash', () => {
     expect(parseSortString(null as unknown as string)).toEqual({});
+  });
+
+  // The driver decides what runs: `prepareDirection` in
+  // node_modules/mongodb/lib/sort.js accepts a direction only when its
+  // lowercased string form is one of the six words below (plus `{$meta}`,
+  // which has no ±1 to draw). Anything it would throw on draws no arrow.
+  it.each([
+    ['1', 1],
+    ['-1', -1],
+    ['"1"', 1],
+    ['"-1"', -1],
+    ['"asc"', 1],
+    ['"desc"', -1],
+    ['"ascending"', 1],
+    ['"descending"', -1],
+    ['"ASC"', 1],
+    ['"Descending"', -1],
+    ['{"$numberInt":"1"}', 1],
+    ['{"$numberInt":"-1"}', -1],
+    ['{"$numberLong":"1"}', 1],
+    ['{"$numberDouble":"-1.0"}', -1],
+    ['{"$numberDecimal":"1"}', 1],
+  ] as const)('accepts the driver direction %s', (dir, expected) => {
+    expect(parseSortString('{"f":' + dir + '}')).toEqual({ f: expected });
+  });
+
+  it.each([
+    '2',
+    '-7',
+    '0.5',
+    '0',
+    '1.5',
+    '" asc"',
+    '"asc "',
+    '"+1"',
+    '"1.0"',
+    'true',
+    'null',
+    '"bogus"',
+    '"constructor"',
+    '"__proto__"',
+    '{"$numberInt":"2"}',
+    '{"$meta":"textScore"}',
+    '{"x":1}',
+    '[1]',
+    '[{"x":1}]',
+  ])('drops the driver-refused direction %s', (dir) => {
+    expect(parseSortString('{"f":' + dir + ',"g":1}')).toEqual({ g: 1 });
+  });
+
+  it('a lone EJSON sentinel is a value, not a sort document', () => {
+    expect(parseSortString('{"$numberInt":"1"}')).toEqual({});
   });
 });
 
@@ -583,7 +653,7 @@ describe('classifySort', () => {
   it('every key modelled is a fully mapped sort', () => {
     expect(classifySort('{"name":1}')).toBe('mapped');
     expect(classifySort('{"name":1,"age":-1}')).toBe('mapped');
-    // The lenient direction forms `parseSortString` accepts count as mapped.
+    // String directions the driver accepts count as mapped.
     expect(classifySort('{"name":"asc","age":"desc"}')).toBe('mapped');
   });
 
@@ -621,6 +691,15 @@ describe('classifySort', () => {
     expect(classifySort('nonsense')).toBe('invalid');
   });
 
+  it('a direction the driver refuses is invalid, not an undrawable sort', () => {
+    expect(classifySort('{"a":2}')).toBe('invalid');
+    expect(classifySort('{"a":1,"b":" asc"}')).toBe('invalid');
+  });
+
+  it('EJSON number directions are drawn like plain ones', () => {
+    expect(classifySort('{"a":{"$numberInt":"1"},"b":{"$numberLong":"-1"}}')).toBe('mapped');
+  });
+
   it('agrees with the gate on every input: `invalid` iff `sortProblem` complains', () => {
     // The two must not drift — that divergence is the whole reason
     // this rule was centralised. A classifier with its own parser would pass every
@@ -635,6 +714,8 @@ describe('classifySort', () => {
       '{"a":1',
       'nonsense',
       '{"$oid":"not-an-oid"}',
+      '{"a":2}',
+      '{"a":"asc","b":{"$numberInt":"-1"}}',
     ]) {
       expect([raw, classifySort(raw) === 'invalid']).toEqual([raw, sortProblem(raw) !== null]);
     }

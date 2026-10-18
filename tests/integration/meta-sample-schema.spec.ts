@@ -1,31 +1,23 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { SecretsVault } from '../../electron/secrets/SecretsVault';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import {
-  getSharedServer,
-  stopSharedServer,
+  getSharedMongoUri,
   uriToHostPort,
   makeConnection,
   makeReader,
 } from '../helpers/mongo';
 
 describe('meta:sampleSchema aggregation ($facet recent + random)', () => {
-  let server: MongoMemoryServer;
   let hp: { host: string; port: number };
   let tmp: TempDb;
   let vault: SecretsVault;
   let pool: MongoPool;
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
-  }, 60_000);
-
-  afterAll(async () => {
-    await stopSharedServer();
+    hp = uriToHostPort(getSharedMongoUri());
   });
 
   afterEach(async () => {

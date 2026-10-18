@@ -3,7 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { Code, Double, Int32, Long, Timestamp } from 'bson';
 import type { IpcMainInvokeEvent } from 'electron';
 import { MongoPool } from '../../electron/mongo/MongoPool';
@@ -17,24 +16,22 @@ import { createRouter } from '../../electron/ipc/router';
 import type { Envelope } from '../../shared/ipc';
 import type { Logger } from '../../electron/log';
 import { createTempDb, type TempDb } from '../helpers/db';
-import { getSharedServer, makeConnection, makeReader } from '../helpers/mongo';
+import { getSharedMongoUri, makeConnection, makeReader } from '../helpers/mongo';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
 import { serializeJsonArray, serializeJsonl, serializeCsv, type ExportColumn } from '../../src/pages/Workspace/exportFormat';
 import { useUmask022 } from '../helpers/umask';
 
 describe('QueryService.exportToFile', () => {
-  let server: MongoMemoryServer;
   let pool: MongoPool;
   let svc: QueryService;
   let tmp: TempDb;
   let outDir: string;
   const connId = 'test-conn';
-  const dbName = 'testdb';
+  const dbName = 'query_export_db';
   const collName = 'items';
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    const uri = server.getUri();
+    const uri = getSharedMongoUri();
     const hp = { host: new URL(uri).hostname, port: Number(new URL(uri).port) };
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({
@@ -463,20 +460,18 @@ describe('QueryService.exportToFile', () => {
 });
 
 describe.skipIf(process.platform === 'win32')('query:export file mode', () => {
-  let server: MongoMemoryServer;
   let pool: MongoPool;
   let svc: QueryService;
   let tmp: TempDb;
   let outDir: string;
   let restoreUmask: () => void;
   const connId = 'test-conn';
-  const dbName = 'testdb';
+  const dbName = 'query_export_db';
   const collName = 'items';
   const mode = (p: string) => fsSync.statSync(p).mode & 0o777;
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    const uri = server.getUri();
+    const uri = getSharedMongoUri();
     const hp = { host: new URL(uri).hostname, port: Number(new URL(uri).port) };
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({

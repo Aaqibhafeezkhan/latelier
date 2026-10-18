@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { Collection } from 'mongodb';
 import type { Stage } from '@shared/types';
 import { MongoPool } from '../../electron/mongo/MongoPool';
@@ -7,10 +6,9 @@ import { AggregationService } from '../../electron/mongo/AggregationService';
 import { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo';
 import { createTempDb, type TempDb } from '../helpers/db';
-import { getSharedServer, makeConnection, makeReader } from '../helpers/mongo';
+import { getSharedMongoUri, makeConnection, makeReader } from '../helpers/mongo';
 
 describe('AggregationService', () => {
-  let server: MongoMemoryServer;
   let pool: MongoPool;
   let svc: AggregationService;
   let tmp: TempDb;
@@ -19,8 +17,7 @@ describe('AggregationService', () => {
   const collName = 'transactions';
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    const uri = server.getUri();
+    const uri = getSharedMongoUri();
     const hp = { host: new URL(uri).hostname, port: Number(new URL(uri).port) };
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({
@@ -353,7 +350,7 @@ describe('AggregationService', () => {
     const roConnId = 'agg-guard-ro';
 
     beforeAll(() => {
-      const hp = { host: new URL(server.getUri()).hostname, port: Number(new URL(server.getUri()).port) };
+      const hp = { host: new URL(getSharedMongoUri()).hostname, port: Number(new URL(getSharedMongoUri()).port) };
       const rwConn = makeConnection(rwConnId, hp, { defaultDb: dbName });
       const roConn = makeConnection(roConnId, hp, { defaultDb: dbName, readOnly: true });
       guardPool = new MongoPool({
@@ -495,6 +492,202 @@ describe('AggregationService', () => {
       }
     });
   });
+
+  /**
+   * Cancel against a real server, mid-pipeline. The slow stage is a JS
+   * `$function` busy loop (`$where`/`sleep` is refused in aggregation), about
+   * 3ms per document, so an uncancelled run takes about 4.5s.
+   *
+   * A read aggregate is killed server-side once the driver aborts and drops
+   * the socket. A `$out` aggregate is not: the server finishes it and the
+   * write lands anyway. So a write pipeline must never report "cancelled" once
+   * its write can no longer be stopped — it runs to completion and reports
+   * completed.
+   */
+  describe('cancel mid-pipeline', () => {
+    const cancelDb = 'aggcancel';
+    const slowColl = 'slow_src';
+    const docCount = 1500;
+    const slowMatch: Stage = {
+      id: 1,
+      op: '$match',
+      body: JSON.stringify({
+        $expr: {
+          $function: {
+            body: 'function(){ var t = Date.now(); while (Date.now() - t < 3) {} return true; }',
+            args: [],
+            lang: 'js',
+          },
+        },
+      }),
+      enabled: true,
+    };
+
+    const db = async () => (await pool.write(connId).client()).db(cancelDb);
+
+    const aggregatesOnSlowColl = async (): Promise<number> => {
+      const client = await pool.write(connId).client();
+      // Match on namespace only: currentOp shows a long command (the
+      // instrumentation $facet) as `command.$truncated`, so a filter on
+      // `command.aggregate` would never see it.
+      const res = await client.db('admin').command({
+        currentOp: 1,
+        ns: `${cancelDb}.${slowColl}`,
+      });
+      return (res.inprog as unknown[]).length;
+    };
+
+    const untilNoAggregate = async (budgetMs: number): Promise<number> => {
+      const deadline = Date.now() + budgetMs;
+      let n = await aggregatesOnSlowColl();
+      while (n > 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        n = await aggregatesOnSlowColl();
+      }
+      return n;
+    };
+
+    // Poll until the server is running an op on the source collection, so a
+    // cancel lands mid-flight however slow setup was on a loaded machine.
+    const untilAggregateRunning = async (budgetMs: number): Promise<void> => {
+      const deadline = Date.now() + budgetMs;
+      while ((await aggregatesOnSlowColl()) === 0) {
+        if (Date.now() > deadline) throw new Error('aggregate never started on the server');
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    };
+
+    beforeAll(async () => {
+      const d = await db();
+      await d.dropDatabase();
+      await d
+        .collection(slowColl)
+        .insertMany(Array.from({ length: docCount }, (_, i) => ({ i })));
+    });
+
+    afterAll(async () => {
+      // Let any op a failing run left behind drain before the next suite.
+      await untilNoAggregate(10_000);
+      await (await db()).dropDatabase();
+    });
+
+    it('a cancelled read pipeline rejects at once and stops working on the server', async () => {
+      const token = 'cancel-read-mid-pipeline';
+      const t0 = Date.now();
+      const run = svc
+        .run({
+          connectionId: connId,
+          dbName: cancelDb,
+          collection: slowColl,
+          // `$group` emits nothing until it has read every document, so the
+          // whole read is one long `aggregate` command currentOp can see
+          // (otherwise the first batch returns early and the rest runs as
+          // `getMore`s the probe does not match).
+          stages: [
+            slowMatch,
+            { id: 2, op: '$group', body: '{"_id":null,"n":{"$sum":1}}', enabled: true },
+          ],
+          cancelToken: token,
+        })
+        .catch((e: unknown) => e);
+      setTimeout(() => svc.cancel(token), 300);
+      const err = await run;
+      const elapsed = Date.now() - t0;
+
+      expect(err).toMatchObject({ message: 'cancelled' });
+      // The uncancelled run takes ~4.5s.
+      expect(elapsed).toBeLessThan(2500);
+      // Without the signal on the main aggregate or on the instrumentation
+      // $facet, that aggregate keeps the server busy after the run has
+      // already reported cancelled.
+      expect(await untilNoAggregate(3000)).toBe(0);
+    });
+
+    it('a write pipeline cancelled mid-flight completes and is reported as completed', async () => {
+      const target = 'cancel_out_target';
+      const token = 'cancel-write-mid-pipeline';
+      const run = svc.run({
+        connectionId: connId,
+        dbName: cancelDb,
+        collection: slowColl,
+        stages: [slowMatch, { id: 2, op: '$out', body: JSON.stringify(target), enabled: true }],
+        allowWrite: true,
+        cancelToken: token,
+      });
+      await untilAggregateRunning(15_000);
+      svc.cancel(token);
+
+      const result = await run;
+      expect(result.rowsJson).toBe('[]');
+      expect(await (await db()).collection(target).countDocuments()).toBe(docCount);
+    });
+
+    it("a sent write's own failure after a cancel is reported as that failure, not cancelled", async () => {
+      const target = 'cancel_merge_fail_target';
+      const token = 'cancel-write-then-fail';
+      const d = await db();
+      // Every source `_id` already exists in the target, so `whenMatched:
+      // 'fail'` rejects when $merge flushes, after the slow stage has run.
+      const ids = await d.collection(slowColl).find({}, { projection: { _id: 1 } }).toArray();
+      await d.collection(target).insertMany(ids.map(({ _id }) => ({ _id, old: true })));
+      const run = svc
+        .run({
+          connectionId: connId,
+          dbName: cancelDb,
+          collection: slowColl,
+          stages: [
+            slowMatch,
+            {
+              id: 2,
+              op: '$merge',
+              body: JSON.stringify({ into: target, whenMatched: 'fail' }),
+              enabled: true,
+            },
+          ],
+          allowWrite: true,
+          cancelToken: token,
+        })
+        .catch((e: unknown) => e);
+      await untilAggregateRunning(15_000);
+      svc.cancel(token);
+
+      const err = await run;
+      expect(err).toMatchObject({ code: 'CONFLICT', details: { mongoCode: 11000 } });
+      expect((err as Error).message).not.toBe('cancelled');
+    });
+
+    it('a cancel during instrumentation, after the write landed, is reported as completed', async () => {
+      type WithInstrument = { instrument: (...a: unknown[]) => unknown };
+      const target = 'cancel_race_target';
+      const token = 'cancel-after-write';
+      const original = (svc as unknown as WithInstrument).instrument;
+      const spy = vi
+        .spyOn(svc as unknown as WithInstrument, 'instrument')
+        .mockImplementation(function (this: unknown, ...args: unknown[]) {
+          svc.cancel(token);
+          return original.apply(this, args);
+        });
+      try {
+        const result = await svc.run({
+          connectionId: connId,
+          dbName,
+          collection: collName,
+          stages: [
+            { id: 1, op: '$match', body: '{"posted":true}', enabled: true },
+            { id: 2, op: '$out', body: JSON.stringify(target), enabled: true },
+          ],
+          allowWrite: true,
+          cancelToken: token,
+        });
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(result.rowsJson).toBe('[]');
+        const client = await pool.write(connId).client();
+        expect(await client.db(dbName).collection(target).countDocuments()).toBe(4);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
 });
 
 /**
@@ -594,7 +787,6 @@ describe('AggregationService — cancel during connection setup', () => {
  * threw, which is why it needed a test rather than a bug report.
  */
 describe('AggregationService — a write stage rejected by a validator', () => {
-  let server: MongoMemoryServer;
   let pool: MongoPool;
   let svc: AggregationService;
   let tmp: TempDb;
@@ -604,8 +796,7 @@ describe('AggregationService — a write stage rejected by a validator', () => {
   const destColl = 'dv_validated';
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    const uri = server.getUri();
+    const uri = getSharedMongoUri();
     const hp = { host: new URL(uri).hostname, port: Number(new URL(uri).port) };
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({
@@ -625,7 +816,7 @@ describe('AggregationService — a write stage rejected by a validator', () => {
         $jsonSchema: { bsonType: 'object', required: ['n'], properties: { n: { bsonType: 'int' } } },
       },
     });
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await pool.disconnectAll();

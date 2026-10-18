@@ -10,19 +10,29 @@ export interface DocMenuState {
 }
 
 /**
- * Open state, dismiss and focus wiring for Tree's and JSON's per-document
- * "More actions" popup; render it with `DocActionsPopup`.
+ * Open state, dismiss and focus wiring for a per-document "More actions"
+ * popup. Tree and JSON render it with `DocActionsPopup`; Table renders its
+ * own cell menu from it and passes the clicked cell's `field`/`value`/
+ * `hasValue` as `extra`, which is spread into the state.
  */
-export function useDocMenu() {
-  const [docMenu, setDocMenu] = React.useState<DocMenuState | null>(null);
+export function useDocMenu<E extends object = object>() {
+  const [docMenu, setDocMenu] = React.useState<(DocMenuState & Partial<E>) | null>(null);
   const docMenuRef = React.useRef<HTMLDivElement | null>(null);
   const openDocMenu = React.useCallback(
     (
       doc: unknown,
       anchor: { x: number; y: number },
       focus?: { returnFocusTo?: HTMLElement | null; focusMenuOnOpen?: boolean },
+      extra?: E,
     ) => {
-      setDocMenu({ ...anchor, doc, returnFocusTo: focus?.returnFocusTo, focusMenuOnOpen: focus?.focusMenuOnOpen });
+      const base: Partial<E> = extra ?? {};
+      setDocMenu({
+        ...base,
+        ...anchor,
+        doc,
+        returnFocusTo: focus?.returnFocusTo,
+        focusMenuOnOpen: focus?.focusMenuOnOpen,
+      });
     },
     [],
   );

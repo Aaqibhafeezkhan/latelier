@@ -16,10 +16,9 @@ import { createIpcShim } from '../helpers/ipcShim';
 import { expectSchemaReject } from '../helpers/ipcAssert';
 import { testSenderCheck } from '../helpers/ipcSender';
 import {
-  getSharedServer,
+  getSharedMongoUri,
   makeConnection,
   makeReader,
-  stopSharedServer,
   uriToHostPort,
 } from '../helpers/mongo';
 
@@ -75,8 +74,7 @@ describe('agg:* channels via router', () => {
     (await (await pool.readDb(RW, DB)).listCollections({ name: collection }).toArray()).length === 1;
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    const seed = new MongoClient(server.getUri());
+    const seed = new MongoClient(getSharedMongoUri());
     try {
       await seed.connect();
       await seed
@@ -94,7 +92,7 @@ describe('agg:* channels via router', () => {
     // without these rows the FK failure is swallowed and hides a real one.
     insertConnectionRow(tmp.db, RW);
     insertConnectionRow(tmp.db, RO);
-    const hp = uriToHostPort(server.getUri());
+    const hp = uriToHostPort(getSharedMongoUri());
     pool = new MongoPool({
       repo: makeReader([
         makeConnection(RW, hp, { defaultDb: DB }),
@@ -117,7 +115,7 @@ describe('agg:* channels via router', () => {
     });
     svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)));
     registerAggChannels(createRouter(shim.ipcMain, testSenderCheck), svc);
-  }, 60_000);
+  });
 
   afterEach(() => {
     vi.restoreAllMocks();
@@ -126,7 +124,6 @@ describe('agg:* channels via router', () => {
   afterAll(async () => {
     await pool.disconnectAll();
     tmp.cleanup();
-    await stopSharedServer();
   });
 
   // Every channel but agg:cancel validates the same collection target and stage

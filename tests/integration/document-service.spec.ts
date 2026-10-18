@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { Collection, MongoClient, ObjectId } from 'mongodb';
 import { Int32, Long } from 'bson';
 import { repairToCanonicalEjson } from '../../src/utils/shellSyntax';
@@ -18,8 +17,7 @@ import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
 import {
-  getSharedServer,
-  stopSharedServer,
+  getSharedMongoUri,
   uriToHostPort,
   makeConnection,
   makeReader,
@@ -62,7 +60,6 @@ async function sleep(ms: number): Promise<void> {
 }
 
 describe('DocumentService.confirmDeleteMany token sweep', () => {
-  let server: MongoMemoryServer;
   let hp: { host: string; port: number };
   let tmp: TempDb;
   let vault: SecretsVault;
@@ -70,12 +67,7 @@ describe('DocumentService.confirmDeleteMany token sweep', () => {
   let services: DocumentService[] = [];
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
-  }, 60_000);
-
-  afterAll(async () => {
-    await stopSharedServer();
+    hp = uriToHostPort(getSharedMongoUri());
   });
 
   afterEach(async () => {
@@ -88,7 +80,7 @@ describe('DocumentService.confirmDeleteMany token sweep', () => {
   function setup(): void {
     tmp = createTempDb();
     vault = new SecretsVault(tmp.db, createSafeStorageMock());
-    const conn = makeConnection('c1', hp, { defaultDb: 'test' });
+    const conn = makeConnection('c1', hp, { defaultDb: 'doc_service_db' });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
   }
 
@@ -104,7 +96,7 @@ describe('DocumentService.confirmDeleteMany token sweep', () => {
 
     const { confirmToken } = await svc.confirmDeleteMany({
       connectionId: 'c1',
-      dbName: 'test',
+      dbName: 'doc_service_db',
       collection: 'docs_sweep_expired',
       filterJson: '{}',
     });
@@ -123,7 +115,7 @@ describe('DocumentService.confirmDeleteMany token sweep', () => {
 
     await svc.confirmDeleteMany({
       connectionId: 'c1',
-      dbName: 'test',
+      dbName: 'doc_service_db',
       collection: 'docs_sweep_preserve',
       filterJson: '{}',
     });
@@ -139,7 +131,7 @@ describe('DocumentService.confirmDeleteMany token sweep', () => {
 
     const { confirmToken } = await svc.confirmDeleteMany({
       connectionId: 'c1',
-      dbName: 'test',
+      dbName: 'doc_service_db',
       collection: 'docs_consume',
       filterJson: '{}',
     });
@@ -147,7 +139,7 @@ describe('DocumentService.confirmDeleteMany token sweep', () => {
 
     await svc.deleteMany({
       connectionId: 'c1',
-      dbName: 'test',
+      dbName: 'doc_service_db',
       collection: 'docs_consume',
       filterJson: '{}',
       confirmToken,
@@ -162,7 +154,7 @@ describe('DocumentService.confirmDeleteMany token sweep', () => {
 
     const { confirmToken } = await svc.confirmDeleteMany({
       connectionId: 'c1',
-      dbName: 'test',
+      dbName: 'doc_service_db',
       collection: 'docs_expired_delete',
       filterJson: '{}',
     });
@@ -173,7 +165,7 @@ describe('DocumentService.confirmDeleteMany token sweep', () => {
     await expect(
       svc.deleteMany({
         connectionId: 'c1',
-        dbName: 'test',
+        dbName: 'doc_service_db',
         collection: 'docs_expired_delete',
         filterJson: '{}',
         confirmToken,
@@ -191,7 +183,7 @@ describe('DocumentService.confirmDeleteMany token sweep', () => {
 
     await svc.confirmDeleteMany({
       connectionId: 'c1',
-      dbName: 'test',
+      dbName: 'doc_service_db',
       collection: 'docs_dispose',
       filterJson: '{}',
     });
@@ -227,17 +219,14 @@ describe('DocumentService insert EJSON round-trip (REPRO 2.3)', () => {
   const dbName = 'rr_db';
 
   beforeAll(async () => {
-    // The shared server may have been stopped by the sibling describe above;
-    // getSharedServer() restarts it if needed.
-    const server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
 
     tmp = createTempDb();
     vault = new SecretsVault(tmp.db, createSafeStorageMock());
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -349,15 +338,14 @@ describe('DocumentService.updateOne — ObjectId _id filter built from a JSON.pa
   const dbName = 'oid_filter_db';
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
 
     tmp = createTempDb();
     vault = new SecretsVault(tmp.db, createSafeStorageMock());
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -411,15 +399,14 @@ describe('DocumentService.insertMany', () => {
   const dbName = 'insert_many_db';
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
 
     tmp = createTempDb();
     vault = new SecretsVault(tmp.db, createSafeStorageMock());
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -540,15 +527,14 @@ describe('DocumentService.deleteOne / updateOne — empty filter guard (N0.1)', 
   const dbName = 'empty_filter_db';
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
 
     tmp = createTempDb();
     vault = new SecretsVault(tmp.db, createSafeStorageMock());
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -602,15 +588,14 @@ describe('DocumentService — the filter guard matches QueryService', () => {
   const coll = 'doc_guard_docs';
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
 
     tmp = createTempDb();
     vault = new SecretsVault(tmp.db, createSafeStorageMock());
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -741,14 +726,13 @@ describe('DocumentService — text produced by the Shell Syntax transform', () =
   }
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
     tmp = createTempDb();
     vault = new SecretsVault(tmp.db, createSafeStorageMock());
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -869,7 +853,6 @@ describe('DocumentService — text produced by the Shell Syntax transform', () =
 // one connectionId is force-closed the moment a call against the other
 // connectionId connects — see MongoPool.connect().
 describe('DocumentService — read-only connection guard', () => {
-  let server: MongoMemoryServer;
   let hp: { host: string; port: number };
   let pool: MongoPool;
   let svc: DocumentService;
@@ -881,9 +864,8 @@ describe('DocumentService — read-only connection guard', () => {
   const dbName = 'ro_guard_db';
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
-    verify = new MongoClient(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
+    verify = new MongoClient(getSharedMongoUri());
     await verify.connect();
 
     tmp = createTempDb();
@@ -892,7 +874,7 @@ describe('DocumentService — read-only connection guard', () => {
     const roConn = makeConnection(roConnId, hp, { defaultDb: dbName, readOnly: true });
     pool = new MongoPool({ repo: makeReader([rwConn, roConn]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -1042,15 +1024,14 @@ describe('DocumentService — fuzz-found write-validation bugs', () => {
   const dbName = 'fuzz_db';
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
 
     tmp = createTempDb();
     vault = new SecretsVault(tmp.db, createSafeStorageMock());
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -1283,14 +1264,13 @@ describe('DocumentService — every driver call carries maxTimeMS', () => {
   const coll = 'maxtimems_docs';
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
     tmp = createTempDb();
     vault = new SecretsVault(tmp.db, createSafeStorageMock());
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -1391,8 +1371,7 @@ describe('DocumentService — a schema-validator rejection is a VALIDATION error
   const coll = 'validated';
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
     tmp = createTempDb();
     const vault = new SecretsVault(tmp.db, createSafeStorageMock());
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
@@ -1412,7 +1391,7 @@ describe('DocumentService — a schema-validator rejection is a VALIDATION error
       validationLevel: 'strict',
       validationAction: 'error',
     });
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -1479,14 +1458,13 @@ describe('DocumentService.confirmUpdateMany / updateMany', () => {
   const dbName = 'update_many_db';
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
     tmp = createTempDb();
     vault = new SecretsVault(tmp.db, createSafeStorageMock());
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -1643,7 +1621,6 @@ describe('DocumentService.confirmUpdateMany / updateMany', () => {
 // token-then-grant order) must report READ_ONLY even against a bogus token,
 // proving the grant really is asked for before the token is inspected.
 describe('DocumentService.updateMany — read-only connection guard', () => {
-  let server: MongoMemoryServer;
   let hp: { host: string; port: number };
   let pool: MongoPool;
   let svc: DocumentService;
@@ -1655,9 +1632,8 @@ describe('DocumentService.updateMany — read-only connection guard', () => {
   const dbName = 'update_many_ro_guard_db';
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
-    verify = new MongoClient(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
+    verify = new MongoClient(getSharedMongoUri());
     await verify.connect();
 
     tmp = createTempDb();
@@ -1666,7 +1642,7 @@ describe('DocumentService.updateMany — read-only connection guard', () => {
     const roConn = makeConnection(roConnId, hp, { defaultDb: dbName, readOnly: true });
     pool = new MongoPool({ repo: makeReader([rwConn, roConn]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();
@@ -1733,12 +1709,11 @@ describe('DocumentService.updateOne — the Document Editor compare-and-set', ()
   const coll = 'cas_docs';
 
   beforeAll(async () => {
-    const server = await getSharedServer();
     tmp = createTempDb();
     const vault = new SecretsVault(tmp.db, createSafeStorageMock());
-    pool = new MongoPool({ repo: makeReader([makeConnection(connId, uriToHostPort(server.getUri()), { defaultDb: dbName })]), vault });
+    pool = new MongoPool({ repo: makeReader([makeConnection(connId, uriToHostPort(getSharedMongoUri()), { defaultDb: dbName })]), vault });
     svc = new DocumentService(pool);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     svc.dispose();

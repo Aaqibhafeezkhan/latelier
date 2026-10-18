@@ -64,7 +64,7 @@ describe('useRovingHighlight', () => {
       const { result, rerender } = renderHook(({ count }) => useRovingHighlight(count), {
         initialProps: { count: 5 },
       });
-      act(() => result.current.setIndex(2));
+      act(() => { result.current.setIndex(2); });
       rerender({ count: 3 });
       act(() => {
         result.current.move(1);
@@ -91,20 +91,20 @@ describe('useRovingHighlight', () => {
 
   it('wraps forward past the last row back to 0', () => {
     const { result } = renderHook(() => useRovingHighlight(3));
-    act(() => result.current.setIndex(2));
-    act(() => result.current.move(1));
+    act(() => { result.current.setIndex(2); });
+    act(() => { result.current.move(1); });
     expect(result.current.index).toBe(0);
   });
 
   it('wraps backward past the first row to the last', () => {
     const { result } = renderHook(() => useRovingHighlight(3));
-    act(() => result.current.move(-1));
+    act(() => { result.current.move(-1); });
     expect(result.current.index).toBe(2);
   });
 
   it('moves within bounds without wrapping', () => {
     const { result } = renderHook(() => useRovingHighlight(3));
-    act(() => result.current.move(1));
+    act(() => { result.current.move(1); });
     expect(result.current.index).toBe(1);
   });
 
@@ -115,7 +115,7 @@ describe('useRovingHighlight', () => {
     const { result, rerender } = renderHook(({ count }) => useRovingHighlight(count), {
       initialProps: { count: 5 },
     });
-    act(() => result.current.setIndex(4));
+    act(() => { result.current.setIndex(4); });
     expect(result.current.index).toBe(4);
 
     rerender({ count: 2 });
@@ -126,11 +126,11 @@ describe('useRovingHighlight', () => {
     const { result, rerender } = renderHook(({ count }) => useRovingHighlight(count), {
       initialProps: { count: 3 },
     });
-    act(() => result.current.setIndex(2));
+    act(() => { result.current.setIndex(2); });
     rerender({ count: 0 });
     expect(result.current.index).toBe(0);
 
-    act(() => result.current.move(1));
+    act(() => { result.current.move(1); });
     expect(result.current.index).toBe(0);
   });
 
@@ -142,11 +142,11 @@ describe('useRovingHighlight', () => {
     const { result, rerender } = renderHook(({ count }) => useRovingHighlight(count), {
       initialProps: { count: 5 },
     });
-    act(() => result.current.setIndex(4));
+    act(() => { result.current.setIndex(4); });
     rerender({ count: 2 });
     expect(result.current.index).toBe(1);
 
-    act(() => result.current.move(1));
+    act(() => { result.current.move(1); });
     expect(result.current.index).toBe(0);
   });
 
@@ -155,7 +155,7 @@ describe('useRovingHighlight', () => {
       ({ count, resetKey }) => useRovingHighlight(count, resetKey),
       { initialProps: { count: 5, resetKey: 'a' } },
     );
-    act(() => result.current.setIndex(3));
+    act(() => { result.current.setIndex(3); });
     expect(result.current.index).toBe(3);
 
     rerender({ count: 5, resetKey: 'b' });
@@ -166,7 +166,7 @@ describe('useRovingHighlight', () => {
     const { result, rerender } = renderHook(({ count }) => useRovingHighlight(count), {
       initialProps: { count: 5 },
     });
-    act(() => result.current.setIndex(3));
+    act(() => { result.current.setIndex(3); });
     rerender({ count: 5 });
     expect(result.current.index).toBe(3);
   });
@@ -185,7 +185,7 @@ describe('useRovingHighlight', () => {
       { initialProps: { resetKey: 'a' } },
     );
     rerender({ resetKey: 'b' });
-    act(() => result.current.setIndex(3));
+    act(() => { result.current.setIndex(3); });
     expect(result.current.index).toBe(3);
   });
 
@@ -199,7 +199,7 @@ describe('useRovingHighlight', () => {
     const { result, rerender } = renderHook(({ count }) => useRovingHighlight(count), {
       initialProps: { count: 0 },
     });
-    act(() => result.current.move(1));
+    act(() => { result.current.move(1); });
     rerender({ count: 3 });
     expect(result.current.index).toBe(0);
   });

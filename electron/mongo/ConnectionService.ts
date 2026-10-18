@@ -84,17 +84,13 @@ export class ConnectionService {
     const id = randomUUID();
     const now = new Date().toISOString();
     const row = inputToRow(id, input, now);
-    this.repo.insert(row);
-    // Persist secrets after the row exists so FK references hold.
-    try {
+    // Row and secrets commit together: a vault failure rolls the row back.
+    this.repo.transaction(() => {
+      this.repo.insert(row);
       if (input.password) this.vault.set(id, 'password', input.password);
       if (input.sshPassword) this.vault.set(id, 'ssh_password', input.sshPassword);
       if (input.sshPassphrase) this.vault.set(id, 'ssh_passphrase', input.sshPassphrase);
-    } catch (err) {
-      // Roll back the connection row; propagate the original error.
-      this.repo.deleteById(id);
-      throw err;
-    }
+    });
     return this.get(id);
   }
 
@@ -124,11 +120,12 @@ export class ConnectionService {
         updated_at: now,
         last_used_at: existing.last_used_at,
       };
-      this.repo.update(newRow);
-
-      this.applySecretPatch(id, 'password', patch.password, patch.clearPassword);
-      this.applySecretPatch(id, 'ssh_password', patch.sshPassword, patch.clearSshPassword);
-      this.applySecretPatch(id, 'ssh_passphrase', patch.sshPassphrase, patch.clearSshPassphrase);
+      this.repo.transaction(() => {
+        this.repo.update(newRow);
+        this.applySecretPatch(id, 'password', patch.password, patch.clearPassword);
+        this.applySecretPatch(id, 'ssh_password', patch.sshPassword, patch.clearSshPassword);
+        this.applySecretPatch(id, 'ssh_passphrase', patch.sshPassphrase, patch.clearSshPassphrase);
+      });
 
       // A running script already has every call checked against the live flag,
       // but one started on a writable connection should not carry on once it is

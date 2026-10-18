@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { Collection, MongoClient } from 'mongodb';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { IndexService } from '../../electron/mongo/IndexService';
@@ -10,8 +9,7 @@ import { SecretsVault } from '../../electron/secrets/SecretsVault';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import {
-  getSharedServer,
-  stopSharedServer,
+  getSharedMongoUri,
   uriToHostPort,
   makeConnection,
   makeReader,
@@ -44,7 +42,6 @@ async function seedIndexes(uri: string): Promise<void> {
 }
 
 describe('IndexService.list', () => {
-  let server: MongoMemoryServer;
   let hp: { host: string; port: number };
   let tmp: TempDb;
   let pool: MongoPool;
@@ -52,13 +49,8 @@ describe('IndexService.list', () => {
   const connId = 'conn-idx';
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
-    await seedIndexes(server.getUri());
-  }, 60_000);
-
-  afterAll(async () => {
-    await stopSharedServer();
+    hp = uriToHostPort(getSharedMongoUri());
+    await seedIndexes(getSharedMongoUri());
   });
 
   afterEach(async () => {

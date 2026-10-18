@@ -1,7 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { MongoClient } from 'mongodb';
 import { Long } from 'bson';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import type { ShellOutputEvent } from '@shared/types';
 import { ShellService } from '../../electron/services/ShellService';
 import { MongoPool } from '../../electron/mongo/MongoPool';
@@ -10,8 +9,7 @@ import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { createTestSpawner, type TestSpawner } from '../helpers/runnerSpawner';
 import {
-  getSharedServer,
-  stopSharedServer,
+  getSharedMongoUri,
   uriToHostPort,
   makeConnection,
   makeReader,
@@ -23,7 +21,9 @@ import {
  * through the real service against a real mongod.
  */
 
-let server: MongoMemoryServer;
+// Unique to this file: every integration file shares one mongod.
+const DB = 'shell_runner_db';
+
 let hp: { host: string; port: number };
 let tmp: TempDb | undefined;
 let pool: MongoPool | undefined;
@@ -32,12 +32,7 @@ let svc: ShellService | undefined;
 let events: ShellOutputEvent[];
 
 beforeAll(async () => {
-  server = await getSharedServer();
-  hp = uriToHostPort(server.getUri());
-}, 60_000);
-
-afterAll(async () => {
-  await stopSharedServer();
+  hp = uriToHostPort(getSharedMongoUri());
 });
 
 afterEach(async () => {
@@ -63,7 +58,7 @@ function setup(
   const vault = new SecretsVault(tmp.db, createSafeStorageMock());
   const conns = ['c1', 'c2'].map((id) =>
     makeConnection(id, hp, {
-      defaultDb: 'test',
+      defaultDb: DB,
       readOnly: readOnlyIds.includes(id),
       ...overrides[id],
     }),
@@ -100,7 +95,7 @@ async function say(sessionId: string, line: string, marker: string): Promise<str
 }
 
 async function countDocs(dbName: string, coll: string): Promise<number> {
-  const client = new MongoClient(server.getUri());
+  const client = new MongoClient(getSharedMongoUri());
   try {
     return await client.db(dbName).collection(coll).countDocuments();
   } finally {
@@ -115,7 +110,7 @@ describe('ShellService — the REPL runs in a child', () => {
     expect(await say(info.sessionId, '1+1', '2')).toContain('2');
 
     await say(info.sessionId, 'await db.shell_items.insertOne({ k: "v1" })', 'acknowledged');
-    expect(await countDocs('test', 'shell_items')).toBe(1);
+    expect(await countDocs(DB, 'shell_items')).toBe(1);
     const read = await say(info.sessionId, 'await db.shell_items.findOne()', '"k": "v1"');
     expect(read).toContain('"k": "v1"');
     // The REPL ran in a child of its own, not in this process.
@@ -133,7 +128,7 @@ describe('ShellService — the REPL runs in a child', () => {
     // The prompt follows the db the REPL is on.
     await until(() => outputOf().endsWith('shell_other> '), 'prompt for the new db');
     expect(await countDocs('shell_other', 'moved')).toBe(1);
-    expect(await countDocs('test', 'moved')).toBe(0);
+    expect(await countDocs(DB, 'moved')).toBe(0);
   });
 
   it('`show dbs` and `show collections` go through main', async () => {
@@ -153,7 +148,7 @@ describe('ShellService — the database a session starts on', () => {
     await until(() => outputOf().endsWith('smoke> '), 'prompt for the default db');
     await say(info.sessionId, 'await db.items.insertOne({ k: 1 })', 'acknowledged');
     expect(await countDocs('smoke', 'items')).toBe(1);
-    expect(await countDocs('test', 'items')).toBe(0);
+    expect(await countDocs(DB, 'items')).toBe(0);
   });
 
   it('an explicit dbName wins over the connection default', async () => {
@@ -196,11 +191,11 @@ describe('ShellService — cursors', () => {
     const s = setup();
     const info = await s.start({ connectionId: 'c1' });
     const out = await say(info.sessionId, 'db.hint_items.find()', 'Cursor on');
-    expect(out).toContain('Cursor on test.hint_items — iterate it or call .toArray()');
+    expect(out).toContain(`Cursor on ${DB}.hint_items — iterate it or call .toArray()`);
     expect(out).not.toContain('FacadeCursor');
     // A database-level cursor names the database.
-    const dbOut = await say(info.sessionId, 'db.listCollections()', 'Cursor on test —');
-    expect(dbOut).toContain('Cursor on test — iterate it or call .toArray()');
+    const dbOut = await say(info.sessionId, 'db.listCollections()', `Cursor on ${DB} —`);
+    expect(dbOut).toContain(`Cursor on ${DB} — iterate it or call .toArray()`);
   });
 
   it('a long session never runs out of cursor slots', async () => {
@@ -222,10 +217,10 @@ describe('ShellService — a bare collection', () => {
     const s = setup();
     const info = await s.start({ connectionId: 'c1' });
     // The banner ends in a newline too: wait for the first prompt so only a result can match below.
-    await until(() => outputOf().endsWith('test> '), 'the first prompt');
+    await until(() => outputOf().endsWith(`${DB}> `), 'the first prompt');
     // A printed result ends in a newline, a prompt does not.
     const out = await say(info.sessionId, 'db.hint_coll', '\n');
-    expect(out).toContain('[Collection test.hint_coll]');
+    expect(out).toContain(`[Collection ${DB}.hint_coll]`);
     expect(out).not.toMatch(/(?:^|> )\{\}$/m);
     // The hint follows `use`, and a cursor off the same collection still prints its own.
     await say(info.sessionId, 'use hint_other', 'switched to db hint_other');
@@ -247,9 +242,9 @@ describe('ShellService — a bare collection', () => {
 describe('ShellService — a Long past 2^53', () => {
   it('prints a stored Long with its exact digits, and a safe one as a bare number', async () => {
     // The shell has no Long constructor, so the document goes in from outside.
-    const client = new MongoClient(server.getUri());
+    const client = new MongoClient(getSharedMongoUri());
     try {
-      const coll = client.db('test').collection('shell_wide');
+      const coll = client.db(DB).collection('shell_wide');
       await coll.deleteMany({});
       await coll.insertOne({ big: Long.fromString('9007199254740993'), safe: Long.fromString('5') });
     } finally {
@@ -287,11 +282,11 @@ describe('ShellService — `.clear`', () => {
 });
 
 describe('ShellService — un-awaited results', () => {
-  // A result starts right after its prompt (`test> 3`) unless that prompt was
+  // A result starts right after its prompt (`shell_runner_db> 3`) unless that prompt was
   // already printed before the line was sent, so a line start is `> ` or `^`.
   const emptyObject = /(?:^|> )\{\}$/m;
 
-  /** A session on `test` with exactly three documents in `async_items`; the mongod outlives each test. */
+  /** A session on `DB` with exactly three documents in `async_items`; the mongod outlives each test. */
   async function seeded(): Promise<string> {
     const info = await setup().start({ connectionId: 'c1' });
     await say(
@@ -450,8 +445,8 @@ describe('ShellService — un-awaited results', () => {
 
   it('a bare cursor and a bare collection are not awaited', async () => {
     const sessionId = await seeded();
-    expect(await say(sessionId, 'db.async_items.find()', 'Cursor on test.async_items')).toContain(
-      'Cursor on test.async_items — iterate it or call .toArray()',
+    expect(await say(sessionId, 'db.async_items.find()', `Cursor on ${DB}.async_items`)).toContain(
+      `Cursor on ${DB}.async_items — iterate it or call .toArray()`,
     );
     // A printed result ends in a newline, a prompt does not, so a newline
     // means the proxy was printed rather than mistaken for a thenable and awaited.
@@ -463,9 +458,9 @@ describe('ShellService — un-awaited results', () => {
 describe('ShellService — error output', () => {
   it('a validator rejection says which rule failed, not only that validation failed', async () => {
     const coll = `validated_${Date.now()}`;
-    const client = new MongoClient(server.getUri());
+    const client = new MongoClient(getSharedMongoUri());
     try {
-      await client.db('test').createCollection(coll, {
+      await client.db(DB).createCollection(coll, {
         validator: { $jsonSchema: { bsonType: 'object', required: ['name'], properties: { name: { bsonType: 'string' } } } },
       });
     } finally {
@@ -704,7 +699,7 @@ describe('ShellService — what the child can see', () => {
     const vault = new SecretsVault(tmp.db, createSafeStorageMock());
     vault.set('authed', 'password', sentinel);
     const authed = makeConnection('authed', hp, {
-      defaultDb: 'test',
+      defaultDb: DB,
       authMech: 'scram256',
       authUsername: 'nobody',
     });
@@ -712,7 +707,7 @@ describe('ShellService — what the child can see', () => {
     // The user is unknown to the server, so the pool's own connect would fail
     // authentication; stand in for it with an unauthenticated client. What the
     // tests inspect is what main hands the child.
-    const direct = new MongoClient(server.getUri());
+    const direct = new MongoClient(getSharedMongoUri());
     pool.readClient = () => Promise.resolve(direct);
     spawner = createTestSpawner();
     events = [];

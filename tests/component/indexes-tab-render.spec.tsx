@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, expectKeyboardDisclosureToggle } from '../helpers/render';
+import { render, screen, waitFor, act, expectKeyboardDisclosureToggle } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import { IndexesTab } from '../../src/pages/IndexesTab';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
@@ -171,5 +171,63 @@ describe('IndexesTab — render', () => {
       { dbName: 'alpha', collection: 'people' },
       { dbName: 'beta', collection: 'logs' },
     ]);
+  });
+
+  it('shows the newer collection\'s indexes when an older list call resolves last', async () => {
+    const pending: Record<string, { resolve: (r: IndexInfo[]) => void; reject: (e: unknown) => void }> = {};
+    installAtelierMock({
+      index: {
+        list: ({ collection }) =>
+          new Promise<IndexInfo[]>((resolve, reject) => {
+            pending[collection] = { resolve, reject };
+          }),
+      },
+    });
+
+    const { rerender } = renderTab();
+    await waitFor(() => expect(pending.people).toBeDefined());
+    rerender(<IndexesTab connectionId="c1" dbName="alpha" collection="orders" />);
+    await waitFor(() => expect(pending.orders).toBeDefined());
+
+    await act(async () => {
+      pending.orders.resolve([UNIQUE_INDEX]);
+    });
+    await act(async () => {
+      pending.people.resolve([TTL_INDEX]);
+    });
+
+    expect(screen.getByText('email_unique')).toBeTruthy();
+    expect(screen.queryByText('created_-1_ttl')).toBeNull();
+  });
+
+  it('ignores a stale failure and a stale loading flag from the collection left behind', async () => {
+    const pending: Record<string, { resolve: (r: IndexInfo[]) => void; reject: (e: unknown) => void }> = {};
+    installAtelierMock({
+      index: {
+        list: ({ collection }) =>
+          new Promise<IndexInfo[]>((resolve, reject) => {
+            pending[collection] = { resolve, reject };
+          }),
+      },
+    });
+
+    const { rerender } = renderTab();
+    await waitFor(() => expect(pending.people).toBeDefined());
+    rerender(<IndexesTab connectionId="c1" dbName="alpha" collection="orders" />);
+    await waitFor(() => expect(pending.orders).toBeDefined());
+
+    // The stale call fails first: it must neither show its error nor clear the
+    // loading state the newer call is still holding.
+    await act(async () => {
+      pending.people.reject(new Error('stale boom'));
+    });
+    expect(screen.queryByText(/stale boom/)).toBeNull();
+    expect((screen.getByRole('button', { name: /refresh/i }) as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      pending.orders.resolve([UNIQUE_INDEX]);
+    });
+    expect(screen.getByText('email_unique')).toBeTruthy();
+    expect((screen.getByRole('button', { name: /refresh/i }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

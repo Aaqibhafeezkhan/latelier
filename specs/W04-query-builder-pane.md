@@ -8,8 +8,9 @@
 > fail-closed guard), and §8 below describe the shipped pre-W13 behavior
 > and are frozen. Still authoritative and
 > reused verbatim by W13: **§2a** (shape buckets), **§2b**
-> (`describeCondProblem`), **§5**'s condition-row layout and the two
-> autocompletes, and the **`FIELD_OPS`** table.
+> (condition problems, now `filterTree.ts`'s `condValueProblem`), **§5**'s
+> condition-row layout and the two autocompletes, and the **`FIELD_OPS`**
+> table.
 
 ## Purpose
 
@@ -32,7 +33,7 @@ The right-hand "Builder / Saved / Recent" pane that lets users assemble a MQL `f
 // MqlOp is the compiler-known set — the ops `compileMql` can encode as a
 // simple `{ field: { $op: value } }` pair. `Cond.op` is a `string`
 // because the user can type any op via autocomplete (see X03); the
-// compiler flags rows with unknown ops via `describeCondProblem`.
+// compiler flags rows with unknown ops via the §2b check.
 export type MqlOp =
   | '$eq' | '$ne' | '$gt' | '$gte' | '$lt' | '$lte'
   | '$in' | '$nin' | '$regex' | '$exists' | '$type' | '$all'
@@ -66,7 +67,7 @@ interface CompiledMql {
   sort?: string;
   projection?: string;
   limit: number | null;
-  invalidCondIds: number[];    // rows flagged by describeCondProblem
+  invalidCondIds: number[];    // rows flagged by the §2b check
 }
 
 compileMql(state: BuilderState): CompiledMql;
@@ -86,7 +87,7 @@ Algorithm:
    supplies default 50).
 5. **`invalidCondIds`**: IDs of conditions whose op the compiler can't
    encode (`!isCompilableOp(op)`), whose op doesn't apply to the
-   valType (`!isApplicableOp(op, valType)`), or which have an
+   valType (op not in `FIELD_OPS[valType]`), or which have an
    op-specific value problem (`$mod` with a malformed or divisor-0
    value). See §2b.
 
@@ -112,20 +113,42 @@ mapping from the original spec (`string` → quoted, `number` → numeric,
 `boolean` → true/false, `date` → `{$date}`, `null` → `null`,
 `regex` → `{$regex}`, `objectid` → `{$oid}`, `array` → parsed JSON).
 
-### 2b. `describeCondProblem(cond) → string | null`
+### 2b. Condition problems — `condValueProblem(cond) → string | null`
 
-Drives row-level warning text. Returns the first applicable:
+Lives in `filterTree.ts` (W13) and is not exported. `printFilter` runs it on
+every enabled condition whose field is not blank; a condition with a blank
+field is pending and never reaches it. `toRawNode` uses it too: a condition
+with a problem converts to a blank raw clause. It returns the first problem
+it finds, in order:
 
-1. Empty field → `null` (not yet a problem — skipped entirely).
-2. Op doesn't start with `$` → `'Operator must start with "$"'`.
-3. `!isCompilableOp(op)` → `'<op> needs raw JSON — open the query textarea'`.
-4. `!isApplicableOp(op, valType)` → `"<op> doesn't apply to <valType>"`.
-5. `$mod` specifically:
-   - value not a 2-element array → `'$mod value must be a 2-element array, e.g. [2, 1]'`
-   - divisor is 0 → `'$mod divisor cannot be 0'`
+1. Op doesn't start with `$` → `'Operator must start with "$"'`.
+2. `!isCompilableOp(op)` → `'<op> is not encodable — convert to a raw clause'`.
+3. A scalar value that isn't a value of its type: `'Value must be a valid
+   number'` (`number`), `'Long value must be an integer'` (`long`),
+   `'Decimal value must be a number'` (`decimal`), or the precision message
+   for a `number` beyond 2^53.
+4. For `$in`/`$nin`/`$all`: a raw number element beyond 2^53 (precision
+   message); an empty list → `'<op> needs at least one value'`; an element
+   that fails rule 3 for the row's type; on a `boolean` row, an element other
+   than `true`/`false` → `'Boolean value must be true or false'`.
+5. A sent `{$oid}` that isn't 24 hex characters → `'ObjectId must be 24 hex
+   characters'`; a sent `{$date}` that doesn't parse → `'Date must be a date,
+   e.g. 2026-01-31T00:00:00Z'`.
+6. `$mod`: not a 2-element array → `'$mod value must be a 2-element array,
+   e.g. [2, 1]'`; then `'$mod divisor must be a finite number'`, `'$mod
+   divisor cannot be 0'`, `'$mod remainder must be a finite number'`.
 
-`isApplicableOp(op, valType)` = `FIELD_OPS[valType].includes(op)`.
-`isCompilableOp(op)` enumerates the shape buckets above.
+The precision message is `'Contains a number too large to represent exactly
+— use {"$numberLong": "..."} or {"$numberDecimal": "..."} instead'`.
+
+Applicability is not checked: an op outside `FIELD_OPS[valType]` prints and
+runs, and no advisory for it is shown. `isCompilableOp(op)` enumerates the
+shape buckets above.
+
+A problem blocks the print: the drawer keeps `queryRaw` at its last good
+value, pauses the live count, shows `⚠ N not applied: …` above the tree, and
+puts the message on the row — under the value input when the op is
+encodable, on the row otherwise.
 
 ## 3. Parse — MQL → builder (best-effort)
 
@@ -188,7 +211,7 @@ Each `CondRow` is two lines:
 
 - **Line 1**: `field` input (the label, flex-fills) + `op` input (fixed width, monospace) + remove button.
 - **Line 2**: `valType` select (fixed width) + `value` input (flex-fills). The value input is hidden when `op === '$exists'`; the type select remains.
-- Row-level warning text from `describeCondProblem(cond)` renders beneath both lines.
+- Row-level warning text from the §2b check renders beneath both lines.
 
 ### Conditions field selector
 - On focus, the `field` input shows a field-name autocomplete popover
@@ -205,16 +228,17 @@ Each `CondRow` is two lines:
   popover offers the full catalog; query-side ops rank first.
 - Users can type any `$`-prefixed op; the compiler (§2) decides whether
   it's representable.
-- The input renders with a warn-colored border when
-  `describeCondProblem(cond)` is non-null. The message shows under the
-  row.
+- The input renders in its error state (`aria-invalid`) when the §2b
+  problem is about the op (rules 1–2), and the message shows under the
+  row. A value problem marks the value input instead.
 - On accept, dispatches `{ t: 'patchCond', patch: { op: s.name } }`.
 
 ### Applicable ops per valType — `FIELD_OPS`
 
-Drives ranking bonuses in the op autocomplete and the applicability
-check in `describeCondProblem`. Ops outside this set still appear in
-the popover (the catalog is the source) but flag the row.
+Used when a row's valType changes: the row keeps its op if the new type's
+set holds it, and otherwise switches to that set's first op. Ops outside
+this set still appear in the popover (the catalog is the source); the
+§2b check does not flag them.
 
 | valType   | Ops                              |
 | --------- | -------------------------------- |
@@ -236,7 +260,7 @@ Renders up to 5 saved queries scoped to `(connectionId, dbName, collection)`. Ea
 ## 7. Compile errors
 
 `compileMql` returns `invalidCondIds` — conditions caught by
-`describeCondProblem` (§2b). When that list is non-empty:
+the §2b check. When that list is non-empty:
 
 - Run is disabled with tooltip `"One or more conditions need raw JSON mode"`.
   This applies to **both** Run buttons — the pane's and W05's — which share
@@ -309,9 +333,9 @@ hand-edits to escape the flag.
   sort, limit, projection, `invalidCondIds`). Covers every valType,
   logic AND/OR, single-condition short-circuit, empty state → `{}`,
   each shape bucket (`$in`, `$mod`, `$size`, `$bits*`, `$regex`,
-  `$type`), `describeCondProblem` messages for needs-raw, mismatched
-  valType, and the `$mod`-specific cases, plus `isCompilableOp` /
-  `isApplicableOp` boundaries.
+  `$type`), and `isCompilableOp` and `FIELD_OPS` boundaries.
+- **filter-tree.spec.ts**: the §2b messages, through `printFilter`'s
+  problems.
 - **parseMqlToBuilder.spec.ts**: round-trips for supported shapes;
   failures for free-form filters; recognizes `$and`, `$or`, `$date`,
   `$oid`, `$regex`.

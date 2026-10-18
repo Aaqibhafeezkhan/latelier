@@ -2,7 +2,7 @@ import React from 'react';
 import { api } from '../../api/atelier';
 import { ejsonParse, isEjsonDocument, isPlainDocument } from '../../utils/ejson';
 import { suggestIndex } from '../../utils/indexSuggestion';
-import { compileFindOptions } from './builder';
+import { compileFindOptions, parseSortString } from './builder';
 import { useCollectionWorkspace } from './context';
 import type { ExplainRunResult } from './Aggregation/ExplainDrawer';
 import type { ExplainVerbosity } from '@shared/types';
@@ -15,30 +15,6 @@ function parseFilterDoc(raw: string): Record<string, unknown> {
   } catch {
     return {};
   }
-}
-
-/**
- * `suggestIndex`'s sort argument. Per W16 §6/platform facts: the sort is a
- * raw EJSON string (`compileFindOptions`'s output, not a filterTree node),
- * parsed the same way as the filter and then normalized with `Number()` —
- * a direction other than `±1` (e.g. `{$meta:'textScore'}`) drops that field
- * rather than prefilling it.
- */
-function parseSortDoc(raw: string | undefined): Record<string, 1 | -1> | undefined {
-  if (!raw) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = ejsonParse(raw);
-  } catch {
-    return undefined;
-  }
-  if (!isPlainDocument(parsed)) return undefined;
-  const result: Record<string, 1 | -1> = {};
-  for (const [field, direction] of Object.entries(parsed as Record<string, unknown>)) {
-    const n = Number(direction);
-    if (n === 1 || n === -1) result[field] = n;
-  }
-  return result;
 }
 
 /**
@@ -86,7 +62,9 @@ export function useFindExplain(readFilterText: () => string): {
   const onCreateIndex = openCreateIndex
     ? () => {
         openCreateIndex(
-          suggestIndex(parseFilterDoc(readFilterText()), parseSortDoc(findOptions.sort)),
+          // The table header's parser: a direction the driver refuses, or a
+          // `{$meta}` key, drops that field rather than prefilling it.
+          suggestIndex(parseFilterDoc(readFilterText()), parseSortString(findOptions.sort ?? '')),
         );
       }
     : undefined;

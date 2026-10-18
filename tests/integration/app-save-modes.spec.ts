@@ -56,7 +56,7 @@ describe.skipIf(process.platform === 'win32')('app save handlers file modes', ()
     expect(mode(filePath)).toBe(0o600);
   });
 
-  it('app:saveFile does not change the mode when overwriting an existing file', async () => {
+  it('app:saveFile tightens an existing 0644 file to 0600 when overwriting it', async () => {
     const filePath = path.join(tmpDir, 'existing.json');
     // Create an existing file with a different mode
     fs.writeFileSync(filePath, '{"old": "data"}', { mode: 0o644 });
@@ -71,8 +71,8 @@ describe.skipIf(process.platform === 'win32')('app save handlers file modes', ()
     });
 
     expect(result).toEqual({ ok: true, data: { path: filePath } });
-    // Mode should remain unchanged when overwriting
-    expect(mode(filePath)).toBe(0o644);
+    expect(mode(filePath)).toBe(0o600);
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('{"test": "data"}');
   });
 });
 

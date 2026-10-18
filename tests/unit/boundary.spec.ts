@@ -32,5 +32,8 @@ void Database;
     } finally {
       fs.rmSync(probePath, { force: true });
     }
-  });
+    // The config is type-aware, so linting even one file builds a TypeScript
+    // program for the whole renderer: ~2s locally, ~12s on the CI runner under
+    // coverage, past the unit project's 5s default.
+  }, 30_000);
 });

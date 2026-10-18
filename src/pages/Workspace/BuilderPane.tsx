@@ -21,7 +21,6 @@ import {
   effectivePageLimit,
   findProblem,
   FIELD_OPS,
-  isCompilableOp,
   DRAGGED_FIELD_MIME,
   condFromDragged,
   mergeOrReplaceDragged,
@@ -30,6 +29,7 @@ import {
   type DraggedField,
 } from './builder';
 import {
+  isCompilableOp,
   parseFilter,
   printFilter,
   updateAt,

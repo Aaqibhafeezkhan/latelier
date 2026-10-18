@@ -1912,7 +1912,7 @@ const EXPRESSION_NAMES: readonly string[] = [
   // literal / variable
   '$literal', '$let', '$getField', '$setField', '$rand', '$sampleRate',
   // object
-  '$mergeObjects', '$objectToArray',
+  '$mergeObjects',
   // set
   '$allElementsTrue', '$anyElementTrue', '$setDifference', '$setEquals',
   '$setIntersection', '$setIsSubset', '$setUnion',

@@ -1,5 +1,4 @@
 import React from 'react';
-import { notify } from '../../../theme/notifications';
 import {
   List,
   useDynamicRowHeight,
@@ -12,12 +11,9 @@ import { anchorFromRect, isEditKey } from '../../../utils/contextMenuKey';
 import { I } from '../../../icons';
 import { isRecord, toDisplayValue, valueToClipboardText } from '../../../utils/displayValue';
 import type { ReferenceRule } from '@shared/types';
-import { confirmDestructive } from '../../../utils/confirm';
-import { copyToClipboard } from '../../../utils/clipboard';
 import { ownGet } from '../../../utils/ownProperty';
-import { condFromDragged } from '../builder';
 import { useCollectionWorkspace } from '../context';
-import { andAtRoot, parseFilter, printFilter } from '../filterTree';
+import { parseFilter } from '../filterTree';
 import { useResultSelection } from '../resultSelection';
 import { DocFieldTree, DOC_FIELD_TREE_GRID_TEMPLATE, type FieldMenuOpenPayload } from './DocFieldTree';
 import { getDocId, getFullDocId } from './docId';
@@ -25,6 +21,10 @@ import { deriveColumns, orderFields } from './tableColumns';
 import { SelectToggle } from './SelectToggle';
 import { DocActionsPopup } from './RowActionsMenu';
 import { useDocMenu } from './useDocMenu';
+import { FieldActionsMenu } from './FieldActionsMenu';
+import { useAddToFilter } from './useAddToFilter';
+import { useCopiedFlash } from './useCopiedFlash';
+import { useDeepPaths } from './useDeepPaths';
 
 interface TreeViewProps {
   documents: unknown[];
@@ -465,17 +465,8 @@ export function TreeView({
   const onDuplicateDoc = actions.openDuplicate;
   // Falls back to local state when rendered standalone (no provider mounted).
   const selection = useResultSelection(documents);
-  const [deepPaths, setDeepPaths] = React.useState<Set<string>>(new Set());
-  // Resets on document-set change so the Set doesn't grow monotonically
-  // across queries. "Adjust state during render" pattern, not a useEffect,
-  // to avoid a cascading effect-then-render cycle.
-  const [prevDocuments, setPrevDocuments] =
-    React.useState<unknown[]>(documents);
-  if (prevDocuments !== documents) {
-    setPrevDocuments(documents);
-    setDeepPaths(new Set());
-  }
-  const [copiedPath, setCopiedPath] = React.useState<string | null>(null);
+  const { deepPaths, toggleDeepPath } = useDeepPaths(documents);
+  const { copied: copiedPath, flash } = useCopiedFlash<string>();
   const [contextMenu, setContextMenu] = React.useState<{
     x: number;
     y: number;
@@ -495,24 +486,10 @@ export function TreeView({
     [expandedRowsProp],
   );
 
-  const toggleDeepPath = React.useCallback((p: string) => {
-    setDeepPaths((prev) => {
-      const next = new Set(prev);
-      if (next.has(p)) next.delete(p);
-      else next.add(p);
-      return next;
-    });
-  }, []);
-
-  const handleCopy = React.useCallback((path: string, value: unknown) => {
-    void copyToClipboard(valueToClipboardText(value)).then((ok) => {
-      if (!ok) return;
-      setCopiedPath(path);
-      window.setTimeout(() => {
-        setCopiedPath((prev) => (prev === path ? null : prev));
-      }, 600);
-    });
-  }, []);
+  const handleCopy = React.useCallback(
+    (path: string, value: unknown) => flash(valueToClipboardText(value), path),
+    [flash],
+  );
 
   // "More actions" per-row menu — Duplicate only, since Edit/Delete already
   // have their own always-visible buttons on this row. Separate from the
@@ -535,36 +512,8 @@ export function TreeView({
   // than showing a toast on click.
   const filterBarValid = React.useMemo(() => parseFilter(state.queryRaw).ok, [state.queryRaw]);
 
-  // Non-drag discovery path onto the Query Builder: same root-level insert
-  // the pane's own drop does. Confirms whenever the Filter drawer is open —
-  // deliberate over-warn, since it may hold newer local input this patch
-  // (direct to state.queryRaw) can't see and would silently discard.
-  const handleAddToFilter = React.useCallback(
-    async (fieldPath: string, value: unknown) => {
-      if (state.activeBuilderTab === 'Builder') {
-        const proceed = await confirmDestructive({
-          title: 'Add to filter?',
-          body: 'The filter drawer is open and may hold edits that haven\'t been applied yet. Adding this field will replace the drawer\'s content.',
-          confirmLabel: 'Add',
-        });
-        if (!proceed) return;
-      }
-      const parsed = parseFilter(state.queryRaw);
-      if (!parsed.ok) {
-        notify.error("Nothing added — the filter bar's text isn't valid JSON.");
-        return;
-      }
-      const nextRoot = andAtRoot(parsed.root, condFromDragged({ field: fieldPath, value }));
-      const printed = printFilter(nextRoot);
-      if (!printed.ok) {
-        notify.error('Nothing added — the filter could not be updated.');
-        return;
-      }
-      actions.expandBuilder?.();
-      actions.patch({ queryRaw: printed.json });
-    },
-    [state.queryRaw, state.activeBuilderTab, actions],
-  );
+  // Shared with TableView; confirms whenever the Filter drawer is open.
+  const handleAddToFilter = useAddToFilter({ state, actions });
 
   // #68 — this menu previously had no Escape path at all, only
   // click-outside; a keyboard-opened menu with no keyboard way out would
@@ -819,78 +768,15 @@ export function TreeView({
             padding: '4px 0',
           }}
         >
-          {contextMenu.value !== undefined && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                void copyToClipboard(
-                  valueToClipboardText(contextMenu.value),
-                  'Value copied to the clipboard.',
-                );
-                setContextMenu(null);
-              }}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '6px 12px',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: 12,
-                color: 'var(--atelier-text)',
-              }}
-            >
-              Copy value
-            </button>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              void copyToClipboard(
-                contextMenu.fieldPath,
-                'Field name copied to the clipboard.',
-              );
-              setContextMenu(null);
-            }}
-            style={{
-              display: 'block',
-              width: '100%',
-              textAlign: 'left',
-              padding: '6px 12px',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 12,
-              color: 'var(--atelier-text)',
-            }}
-          >
-            Copy field path
-          </button>
-          {!meta.isReadOnly && contextMenu.value !== undefined && (
-            <button
-              disabled={!filterBarValid}
-              onClick={(e) => {
-                e.stopPropagation();
-                void handleAddToFilter(contextMenu.fieldPath, contextMenu.value);
-                setContextMenu(null);
-              }}
-              title={filterBarValid ? undefined : "The filter bar's text isn't valid JSON"}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '6px 12px',
-                background: 'none',
-                border: 'none',
-                cursor: filterBarValid ? 'pointer' : 'not-allowed',
-                fontSize: 12,
-                color: filterBarValid ? 'var(--atelier-text)' : 'var(--atelier-text-muted)',
-              }}
-            >
-              Add to filter
-            </button>
-          )}
+          <FieldActionsMenu
+            fieldPath={contextMenu.fieldPath}
+            value={contextMenu.value}
+            hasValue={contextMenu.value !== undefined}
+            isReadOnly={meta.isReadOnly}
+            filterBarValid={filterBarValid}
+            onAddToFilter={handleAddToFilter}
+            onClose={closeContextMenu}
+          />
         </div>
       )}
       {docMenu && (

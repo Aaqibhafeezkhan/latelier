@@ -116,7 +116,7 @@ export function GlobalCommands() {
         when: (ctx) => ctx.connectionId !== null,
         perform: (ctx) => {
           if (ctx.connectionId) {
-            navigate(`/connections/${ctx.connectionId}/edit`, { state: { returnTo: ctx.pathname } });
+            void navigate(`/connections/${ctx.connectionId}/edit`, { state: { returnTo: ctx.pathname } });
           }
         },
       },

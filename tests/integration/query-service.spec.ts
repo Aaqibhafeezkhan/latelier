@@ -1,26 +1,23 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { QueryService } from '../../electron/mongo/QueryService';
 import { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo';
 import { ValidationError } from '../../electron/errors';
 import { createTempDb, type TempDb } from '../helpers/db';
-import { getSharedServer, makeConnection, makeReader } from '../helpers/mongo';
+import { getSharedMongoUri, makeConnection, makeReader } from '../helpers/mongo';
 import { repairToCanonicalEjson } from '../../src/utils/shellSyntax';
 
 describe('QueryService', () => {
-  let server: MongoMemoryServer;
   let pool: MongoPool;
   let svc: QueryService;
   let tmp: TempDb;
   const connId = 'test-conn';
-  const dbName = 'testdb';
+  const dbName = 'query_service_db';
   const collName = 'items';
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    const uri = server.getUri();
+    const uri = getSharedMongoUri();
     const hp = { host: new URL(uri).hostname, port: Number(new URL(uri).port) };
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({

@@ -506,7 +506,7 @@ function CollectionsTab({ conn, runtime }: {
                       <div style={{ padding: '6px 0' }}>
                         <Button size="compact-xs" variant="subtle" leftSection={I.open} onClick={() => {
                           void api.conn.touchUsed(conn.id);
-                          navigate('/workspace', {
+                          void navigate('/workspace', {
                             state: {
                               openConnectionId: conn.id,
                               openCollection: { dbName: db.name, collection: c.name },
@@ -662,7 +662,7 @@ export function DetailPanel({ selected, loading, onDelete, onDisconnect }: {
             )}
             <Button variant="filled" size="compact-xs" leftSection={I.open} onClick={() => {
               void api.conn.touchUsed(selected.id);
-              navigate('/workspace', { state: { openConnectionId: selected.id } });
+              void navigate('/workspace', { state: { openConnectionId: selected.id } });
             }}>
               Open workspace
             </Button>

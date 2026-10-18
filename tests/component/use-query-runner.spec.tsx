@@ -949,7 +949,7 @@ describe('useQueryRunner', () => {
   });
 
   it('leaves a strictly-parsing sort and raw projection untouched on a run', async () => {
-    const HAND_SORT = '{ "b" : 1,   "a" : 2 }';
+    const HAND_SORT = '{ "b" : 1,   "a" : -1 }';
     const findSpy = vi.fn<IpcApi['query']['find']>(async () => ({
       documents: [],
       durationMs: 1,

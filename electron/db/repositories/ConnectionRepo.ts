@@ -9,6 +9,7 @@ import type {
 } from '@shared/types';
 import { ConflictError } from '../../errors.ts';
 import { isUniqueConstraintError } from '../sqliteErrors.ts';
+import { withTransaction } from '../sqlite.ts';
 
 /**
  * Shape of a row in the `connections` table. Keys mirror SQL columns exactly.
@@ -48,6 +49,7 @@ export interface ConnectionRow {
 }
 
 export class ConnectionRepo {
+  private db: Database;
   private insertStmt: Statement;
   private updateStmt: Statement;
   private deleteStmt: Statement<[string]>;
@@ -57,6 +59,7 @@ export class ConnectionRepo {
   private touchStmt: Statement<[string, string, string]>;
 
   constructor(db: Database) {
+    this.db = db;
     this.insertStmt = db.prepare(`
       INSERT INTO connections (
         id, name, color, connection_type, host, port, default_db,
@@ -118,6 +121,11 @@ export class ConnectionRepo {
     this.touchStmt = db.prepare(
       'UPDATE connections SET last_used_at = ?, updated_at = ? WHERE id = ?',
     );
+  }
+
+  /** Run `fn` in one SQLite transaction; it must stay synchronous. */
+  transaction<T>(fn: () => T): T {
+    return withTransaction(this.db, fn);
   }
 
   insert(row: ConnectionRow): void {

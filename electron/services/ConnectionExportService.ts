@@ -5,6 +5,7 @@ import type {
   ConnectionExportResult,
   ExportSecretField,
 } from '@shared/types';
+import { writePrivateFile } from '../utils/privateFs.ts';
 import { AppError, SystemError, ValidationError } from '../errors.ts';
 import type { ConnectionService } from '../mongo/ConnectionService.ts';
 import type { Logger } from '../log.ts';
@@ -166,10 +167,7 @@ export class ConnectionExportService {
       await fs.mkdir(path.dirname(target), { recursive: true });
       // The file can carry sealed secrets and always carries hostnames: owner-only (0600),
       // the way the diagnostic bundle is written.
-      await fs.writeFile(target, content, { encoding: 'utf8', mode: 0o600 });
-      // `mode` only applies to a file that is being created; the user may have
-      // picked an existing one, and this file can carry sealed secrets.
-      await fs.chmod(target, 0o600);
+      await writePrivateFile(target, content);
     } catch (err) {
       throw new SystemError(
         'INTERNAL',

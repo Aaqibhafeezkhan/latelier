@@ -123,6 +123,8 @@ Preview-up-to-stage is simpler: run the truncated pipeline plus `$limit: N`; ret
 
 - `registerCancel(token)` creates an `AbortController` keyed by token.
 - `agg:cancel` aborts it; active cursors close.
+- A write pipeline (`$out`/`$merge`) is the exception: the server does not stop the write when its client disconnects, so once the write is sent it runs to completion and the run reports completed (with empty per-stage counts when the cancel lands before instrumentation finishes), never "cancelled". A cancel that arrives before the write is sent still rejects with "cancelled". A sent write that fails on its own (a duplicate key under `whenMatched: 'fail'`, a timeout, a permission error) is reported as that error even after a cancel, since part of it may have landed.
+- In the tab, Cancel on a read-only run stops it at once and drops its late result. Cancel on a confirmed write run keeps waiting instead: the run button reads "Stopping…" and a toast explains that a started write stage can't be interrupted; the run then shows its normal result plus a "ran to completion" notice, shows main's error in the output panel if the write failed, or stops quietly if main reports "cancelled".
 - Auto-cancel on tab close.
 
 ## 6. Write-stage confirmation

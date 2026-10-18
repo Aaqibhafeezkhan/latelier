@@ -94,7 +94,7 @@ Files: `shared/types.ts` (`UpdateState`), `shared/ipc.ts` (`IpcApi.updates`, `IP
 
 ### 5.2 release workflow
 
-`release.yml` keeps `--publish never` and its upload step. One `latest-mac.yml` lists both arch zips (electron-builder merges them), so the macOS job builds `--x64 --arm64` as it does today. The macOS glob adds `release/*.zip.blockmap` so differential downloads work; without it the updater falls back to a full download.
+`release.yml` keeps `--publish never`. A `verify` job runs lint, typecheck, the IPC audit and the vitest suite against the tagged commit, and fails a tag that is not `v` plus the `package.json` version; the build legs need it. Each build leg uploads its release files as a workflow artifact, and on a tag a single `publish` job (the only one with `contents: write`) downloads them all and attaches them to the GitHub release. One `latest-mac.yml` lists both arch zips (electron-builder merges them), so the macOS job builds `--x64 --arm64` as it does today. The macOS glob adds `release/*.zip.blockmap` so differential downloads work; without it the updater falls back to a full download.
 
 ## 6. Renderer
 

@@ -75,6 +75,13 @@ export function AggregationTab({
     target?: string;
   } | null>(null);
   const runTokenRef = React.useRef<string | null>(null);
+  // A confirmed write run can't be dropped on Cancel: main lets a write that
+  // was already sent run to completion. `runIsWriteRef` marks the run in
+  // flight as one; `stopping` (state for the button, ref for the settling
+  // run's closure) is the Cancel-was-pressed state while it settles.
+  const runIsWriteRef = React.useRef(false);
+  const stoppingRef = React.useRef(false);
+  const [stopping, setStopping] = React.useState(false);
   const [lastRunSig, setLastRunSig] = React.useState<Map<number, string>>(
     () => new Map(),
   );
@@ -237,6 +244,9 @@ export function AggregationTab({
       const runStages = repairStageBodies();
       const token = crypto.randomUUID();
       runTokenRef.current = token;
+      runIsWriteRef.current = allowWrite;
+      stoppingRef.current = false;
+      setStopping(false);
       setRunning(true);
       try {
         const result = await api.agg.run({
@@ -258,8 +268,14 @@ export function AggregationTab({
         };
         onPatch({ lastRun });
         setLastRunSig(new Map(runStages.map((s) => [s.id, stageSig(s)])));
+        if (stoppingRef.current) {
+          notify.info('The write had already started, so it ran to completion.');
+        }
       } catch (e) {
         if (runTokenRef.current !== token) return;
+        // The cancel reached main before the write was sent: nothing ran, and
+        // the tab stops quietly, as it does for a cancelled read-only run.
+        if (stoppingRef.current && isIpcError(e) && e.message === 'cancelled') return;
         if (isIpcError(e)) {
           const details = (e.details ?? {}) as {
             kind?: string;
@@ -303,6 +319,8 @@ export function AggregationTab({
         if (allowWrite) invalidateSampleSchemaCache(connectionId);
         if (runTokenRef.current === token) {
           runTokenRef.current = null;
+          stoppingRef.current = false;
+          setStopping(false);
           setRunning(false);
         }
       }
@@ -317,8 +335,18 @@ export function AggregationTab({
 
   const onCancelRun = () => {
     const token = runTokenRef.current;
-    if (!token) return;
+    if (!token || stoppingRef.current) return;
     void api.agg.cancel({ token }).catch(() => {});
+    if (runIsWriteRef.current) {
+      // Keep the token: the run settles as completed (the write was already
+      // sent) or as cancelled (it was not), and executeRun reports which.
+      stoppingRef.current = true;
+      setStopping(true);
+      notify.info("A write stage can't be interrupted once it has started.", {
+        title: 'Stopping…',
+      });
+      return;
+    }
     runTokenRef.current = null;
     setRunning(false);
   };
@@ -596,10 +624,10 @@ export function AggregationTab({
           size="compact-xs"
           variant="filled"
           leftSection={running ? I.close : I.play}
-          disabled={!running && !validation.ok}
+          disabled={stopping || (!running && !validation.ok)}
           onClick={running ? onCancelRun : onRun}
         >
-          {running ? 'Cancel' : 'Run'}
+          {running ? (stopping ? 'Stopping…' : 'Cancel') : 'Run'}
         </Button>
         <Button size="compact-xs" variant="default" leftSection={I.eye} disabled={running || !validation.ok} onClick={onExplain}>
           Explain

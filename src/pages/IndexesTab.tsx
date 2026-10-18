@@ -162,8 +162,13 @@ export function IndexesTab({
   // FieldsControl.tsx:84-91 — which is the bug this exists to fix.
   const scrollRegionRef = React.useRef<HTMLDivElement>(null);
 
+  // Only the latest request may write state: a slow reply for a collection the
+  // tab has since left must not overwrite the one now on screen.
+  const latest = React.useRef(0);
+
   const loadIndexes = React.useCallback(
     async (t: { dbName: string; collection: string }) => {
+      const id = ++latest.current;
       setLoadingIndexes(true);
       setIndexError(null);
       try {
@@ -172,16 +177,18 @@ export function IndexesTab({
           dbName: t.dbName,
           collection: t.collection,
         });
-        setIndexes(rows);
+        if (id === latest.current) setIndexes(rows);
       } catch (err) {
-        if (isIpcError(err)) {
-          setIndexError({ message: err.message, code: err.code });
-        } else {
-          setIndexError({ message: String(err) });
+        if (id === latest.current) {
+          if (isIpcError(err)) {
+            setIndexError({ message: err.message, code: err.code });
+          } else {
+            setIndexError({ message: String(err) });
+          }
+          setIndexes(null);
         }
-        setIndexes(null);
       } finally {
-        setLoadingIndexes(false);
+        if (id === latest.current) setLoadingIndexes(false);
       }
     },
     [connectionId],
@@ -192,6 +199,10 @@ export function IndexesTab({
     if (viewOn !== undefined) return;
     void loadIndexes(target);
     setExpandedRow(null);
+    const request = latest;
+    return () => {
+      request.current++;
+    };
   }, [target, loadIndexes, viewOn]);
   /* eslint-enable react-hooks/set-state-in-effect */
 

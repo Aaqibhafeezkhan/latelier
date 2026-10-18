@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { Db, MongoClient } from 'mongodb';
 import { Double } from 'bson';
 import { MongoPool } from '../../electron/mongo/MongoPool';
@@ -10,8 +9,7 @@ import { SecretsVault } from '../../electron/secrets/SecretsVault';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import {
-  getSharedServer,
-  stopSharedServer,
+  getSharedMongoUri,
   uriToHostPort,
   makeConnection,
   makeReader,
@@ -62,7 +60,6 @@ async function teardownUsers(uri: string): Promise<void> {
 }
 
 describe('UserService', () => {
-  let server: MongoMemoryServer;
   let hp: { host: string; port: number };
   let tmp: TempDb;
   let pool: MongoPool;
@@ -70,14 +67,12 @@ describe('UserService', () => {
   const connId = 'conn-user';
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
-    await seedUsers(server.getUri());
-  }, 60_000);
+    hp = uriToHostPort(getSharedMongoUri());
+    await seedUsers(getSharedMongoUri());
+  });
 
   afterAll(async () => {
-    await teardownUsers(server.getUri());
-    await stopSharedServer();
+    await teardownUsers(getSharedMongoUri());
   });
 
   afterEach(async () => {

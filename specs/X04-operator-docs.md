@@ -737,9 +737,9 @@ works in any environment.
 - Icon only shows when `cond.op` starts with `$` AND
   `findOperatorDocs(cond.op, 'query')` returns an entry with a
   `description`.
-- Icon does **not** show when the op input has a validation problem
-  (`describeCondProblem` non-null) — the existing warn border is
-  enough signal.
+- Icon does **not** show while the row has a condition problem (W04 §2b),
+  whether about the op or the value — the existing warning is enough
+  signal.
 
 ---
 

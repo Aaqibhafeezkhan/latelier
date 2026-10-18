@@ -6,6 +6,13 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # The @types/node major follows the Node that Electron embeds (Node 24 for
+    # Electron 44), not the latest Node release: newer typings let tsc accept
+    # APIs that throw at runtime in main and in tests. Bump it by hand together
+    # with Electron.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # Every `uses:` in .github/workflows is pinned to a commit SHA rather than a
   # tag, because a tag is mutable and a compromised action rewrites it. That

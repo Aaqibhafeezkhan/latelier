@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
+import { openPrivateFile } from '../utils/privateFs.ts';
 import type { Sort } from 'mongodb';
 import type { FindInput, FindResultWire, ExplainInput, QueryExportInput, QueryExportResult } from '@shared/types';
 import {
@@ -311,7 +312,7 @@ export class QueryService {
     try {
       try {
         // Export file contents can include user data; open owner-only (0600).
-        handle = await fs.open(filePath, 'w', 0o600);
+        handle = await openPrivateFile(filePath);
       } catch (err) {
         throw fsError('open', err);
       }

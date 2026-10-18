@@ -7,14 +7,84 @@ on:
   # Manual trigger for dry-running the workflow without cutting a tag.
   workflow_dispatch:
 
-# Permissions required by softprops/action-gh-release to create the
-# release and attach assets.
+# Read-only by default. Only the `publish` job, which creates the GitHub
+# release, is granted `contents: write`.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # Gates the release on the same checks CI runs, against the tagged commit
+  # itself. It runs them rather than polling CI for this SHA: a tag pushed right
+  # after a merge races the push-to-main CI run, `cancel-in-progress` can leave
+  # a SHA with no successful run at all, and polling would need `actions: read`
+  # plus a timeout loop. Tradeoff: e2e is not run here (it is four shards and
+  # ~10 minutes on its own); it is still owed on the PR that merged the commit.
+  verify:
+    name: Verify (tag, lint, typecheck, tests)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Same budget as ci.yml's test job, which runs the same steps.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      # A release tag must name the version it ships, or the auto-update feed
+      # and the release page disagree. First, so a bad tag fails in seconds.
+      # Skipped on workflow_dispatch, which keeps dry runs usable.
+      - name: Check tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "$expected" \
+            || { echo "::error::tag $GITHUB_REF_NAME != $expected (package.json version)"; exit 1; }
+
+      # See ci.yml for why this is `npm ci --ignore-scripts`.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # Copied from ci.yml: electron's own installer no-ops on this runner, and
+      # the diagnostic-service integration test requires the binary.
+      - name: Install Electron binary
+        run: |
+          ver=$(node -p "require('./node_modules/electron/package.json').version")
+          zip="electron-v${ver}-linux-x64.zip"
+          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 -o "/tmp/${zip}" \
+            "https://github.com/electron/electron/releases/download/v${ver}/${zip}"
+          rm -rf node_modules/electron/dist
+          unzip -q "/tmp/${zip}" -d node_modules/electron/dist
+          printf electron > node_modules/electron/path.txt
+          test -x node_modules/electron/dist/electron \
+            && echo "electron binary OK ($ver)" \
+            || { echo "::error::electron binary missing after unzip"; exit 1; }
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Audit IPC secret allowlist
+        run: npm run audit:ipc
+
+      # See ci.yml: one mongod download before the integration workers race
+      # to fill an empty cache.
+      - name: Download mongod
+        run: node node_modules/mongodb-memory-server/postinstall.js
+
+      - name: Unit + integration + component tests
+        run: npm test
+
   build:
     name: Build (${{ matrix.os }})
+    needs: verify
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -131,7 +201,7 @@ jobs:
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          # GitHub publishing is handled by the release step below; tell
+          # GitHub publishing is handled by the publish job below; tell
           # electron-builder not to attempt its own publish.
           GH_TOKEN: ''
         run: npx ${{ matrix.build_script }} --publish never
@@ -176,23 +246,53 @@ jobs:
             xcrun stapler validate "$app"
           done
 
-      - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          files: ${{ matrix.artifact_glob }}
-          # Don't fail if a glob matches nothing (e.g., the .yml feed file
-          # naming conventions vary across electron-builder versions).
-          fail_on_unmatched_files: false
-          # Created on first job to land; subsequent jobs append assets.
-          generate_release_notes: true
-
-      # workflow_dispatch runs (no tag) — keep the artifacts as workflow
-      # outputs so we can grab them for testing the pipeline before tagging.
-      - name: Upload as workflow artifact (dry-run only)
-        if: github.event_name == 'workflow_dispatch'
+      # Hands the release files to the publish job on a tag, and keeps them as
+      # workflow outputs on a workflow_dispatch dry run. Only the release files,
+      # not all of release/ (the unpacked .app dirs are large). The common
+      # `release/` prefix is stripped inside the artifact.
+      - name: Upload release files as workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.os }}
-          path: release/
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
           retention-days: 7
+
+  # The only job with write access. It runs once every build leg has passed,
+  # so a failed OS leg skips publishing entirely instead of leaving a release
+  # with half its assets.
+  publish:
+    name: Publish GitHub release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Required by softprops/action-gh-release to create the release and
+    # attach assets.
+    permissions:
+      contents: write
+    steps:
+      # `path: release` restores the prefix the upload stripped, so the globs
+      # below match.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: |
+            release/*.dmg
+            release/*.dmg.blockmap
+            release/*.zip
+            release/*.zip.blockmap
+            release/latest-mac.yml
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest.yml
+          # Don't fail if a glob matches nothing (e.g., the .yml feed file
+          # naming conventions vary across electron-builder versions).
+          fail_on_unmatched_files: false
+          generate_release_notes: true

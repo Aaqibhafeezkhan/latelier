@@ -36,6 +36,26 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+      parserOptions: {
+        // Type information for the promise rules below. These configs sit in
+        // no tsconfig project, so the default project lints them.
+        projectService: {
+          allowDefaultProject: [
+            'vitest.config.ts',
+            'vitest.stryker.config.ts',
+            'playwright.config.ts',
+            '.claude/skills/crash-fuzz/harness.ts',
+          ],
+        },
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      // A floating rejection in main is fatal (unhandledRejection handler).
+      '@typescript-eslint/no-floating-promises': 'error',
+      // JSX attributes are off: a rejected renderer handler is not fatal and a
+      // `void` wrapper would only silence it.
+      '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: { attributes: false } }],
     },
   },
   {

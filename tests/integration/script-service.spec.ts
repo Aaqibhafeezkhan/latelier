@@ -1,7 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { MongoClient } from 'mongodb';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { ScriptService } from '../../electron/services/ScriptService';
 import { ConnectionRepo } from '../../electron/db/repositories/ConnectionRepo';
 import { ConnectionService, connectionReader } from '../../electron/mongo/ConnectionService';
@@ -12,17 +11,16 @@ import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { createTestSpawner, type TestSpawner } from '../helpers/runnerSpawner';
 import {
-  getSharedServer,
-  stopSharedServer,
+  getSharedMongoUri,
   uriToHostPort,
   makeConnection,
   makeReader,
 } from '../helpers/mongo';
 
-// Scripts run against the `test` database unless the call names another.
-const DB = 'test';
+// The connection default for these scripts. Unique to this file: every
+// integration file shares one mongod.
+const DB = 'script_service_db';
 
-let server: MongoMemoryServer;
 let hp: { host: string; port: number };
 let tmp: TempDb | undefined;
 let pool: MongoPool | undefined;
@@ -30,12 +28,7 @@ let spawner: TestSpawner;
 let svc: ScriptService | undefined;
 
 beforeAll(async () => {
-  server = await getSharedServer();
-  hp = uriToHostPort(server.getUri());
-}, 60_000);
-
-afterAll(async () => {
-  await stopSharedServer();
+  hp = uriToHostPort(getSharedMongoUri());
 });
 
 afterEach(async () => {
@@ -81,7 +74,7 @@ function fakePool(readClient: () => Promise<unknown>): MongoPool {
 }
 
 async function countDocs(coll: string): Promise<number> {
-  const client = new MongoClient(server.getUri());
+  const client = new MongoClient(getSharedMongoUri());
   try {
     return await client.db(DB).collection(coll).countDocuments();
   } finally {
@@ -207,15 +200,15 @@ describe('ScriptService — results', () => {
       connectionId: 'c1',
       source: 'print(db.print_hint); console.log(db.print_hint.find()); use("print_other"); printjson(db.print_hint); 1',
     });
-    expect(r.printBuffer).toContain('[Collection test.print_hint]');
-    expect(r.printBuffer).toContain('Cursor on test.print_hint');
+    expect(r.printBuffer).toContain(`[Collection ${DB}.print_hint]`);
+    expect(r.printBuffer).toContain(`Cursor on ${DB}.print_hint`);
     expect(r.printBuffer).toContain('[Collection print_other.print_hint]');
     expect(r.printBuffer).not.toMatch(/^\{\}$/m);
   });
 
   it('returns a bare collection as its one-line hint, not an empty object', async () => {
     const r = await setup().run({ connectionId: 'c1', source: 'db.print_hint' });
-    expect(JSON.parse(r.valueJson!)).toBe('[Collection test.print_hint]');
+    expect(JSON.parse(r.valueJson!)).toBe(`[Collection ${DB}.print_hint]`);
   });
 
   it('caps the print buffer at ~64 KB', async () => {
@@ -545,7 +538,7 @@ describe('ScriptService — runner lifecycle', () => {
       authUsername: 'nobody',
     });
     pool = new MongoPool({ repo: makeReader([authed]), vault });
-    const direct = new MongoClient(server.getUri());
+    const direct = new MongoClient(getSharedMongoUri());
     vi.spyOn(pool, 'readClient').mockResolvedValue(direct);
     svc = new ScriptService({ pool, spawner });
     try {

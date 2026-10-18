@@ -6,8 +6,8 @@ import electron from 'vite-plugin-electron/simple';
 export default defineConfig({
   resolve: {
     alias: {
-      '@shared': path.resolve(__dirname, 'shared'),
-      '@': path.resolve(__dirname, 'src'),
+      '@shared': path.resolve(import.meta.dirname, 'shared'),
+      '@': path.resolve(import.meta.dirname, 'src'),
     },
   },
   plugins: [
@@ -18,7 +18,7 @@ export default defineConfig({
         vite: {
           resolve: {
             alias: {
-              '@shared': path.resolve(__dirname, 'shared'),
+              '@shared': path.resolve(import.meta.dirname, 'shared'),
             },
           },
           build: {
@@ -40,11 +40,11 @@ export default defineConfig({
       // `mongodb` and `bson` from node_modules at run time, like main does.
       preload: [
         {
-          input: path.join(__dirname, 'electron/preload.ts'),
+          input: path.join(import.meta.dirname, 'electron/preload.ts'),
           vite: {
             resolve: {
               alias: {
-                '@shared': path.resolve(__dirname, 'shared'),
+                '@shared': path.resolve(import.meta.dirname, 'shared'),
               },
             },
             build: {
@@ -58,13 +58,13 @@ export default defineConfig({
           },
         },
         {
-          input: { 'script-runner': path.join(__dirname, 'electron/script-runner/runner.ts') },
+          input: { 'script-runner': path.join(import.meta.dirname, 'electron/script-runner/runner.ts') },
           // Nothing in the renderer depends on the runner; skip the page reload.
           onstart() {},
           vite: {
             resolve: {
               alias: {
-                '@shared': path.resolve(__dirname, 'shared'),
+                '@shared': path.resolve(import.meta.dirname, 'shared'),
               },
             },
             build: {

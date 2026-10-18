@@ -37,11 +37,28 @@ export function loadMigrations(): Migration[] {
 }
 
 /**
+ * Versions must be exactly 1..N in order. A duplicate would be skipped forever
+ * once its twin ran (the runner filters on version), and a gap hides a file.
+ */
+export function assertMigrationSequence(migrations: Migration[]): void {
+  migrations.forEach((m, i) => {
+    const prev = migrations[i - 1];
+    if (prev && m.version === prev.version) {
+      throw new Error(`duplicate migration version ${m.version}: ${prev.name}, ${m.name}`);
+    }
+    if (m.version !== i + 1) {
+      throw new Error(`migration version gap: expected ${i + 1}, found ${m.version} (${m.name})`);
+    }
+  });
+}
+
+/**
  * Apply any migrations newer than the DB's current schema_version.
  * Each migration runs in its own transaction — failures roll back.
  * Returns how many migrations ran.
  */
 export function runMigrations(db: Database, migrations: Migration[]): number {
+  assertMigrationSequence(migrations);
   // Ensure schema_version exists. The first migration may create it; to handle
   // fresh DBs safely we read conditionally.
   const hasTable = db
@@ -69,7 +86,16 @@ export function runMigrations(db: Database, migrations: Migration[]): number {
   try {
     for (const m of pending) {
       const tx = db.transaction(() => {
+        // ponytail: compares counts, so orphans from older FK-off rebuilds don't
+        // brick boot; a migration that fixes and re-breaks rows goes unnoticed.
+        const before = db.pragma('foreign_key_check') as unknown[];
         db.exec(m.sql);
+        const after = db.pragma('foreign_key_check') as unknown[];
+        if (after.length > before.length) {
+          throw new Error(
+            `migration ${m.name} introduced ${after.length - before.length} foreign key violation(s): ${JSON.stringify(after.slice(0, 3))}`,
+          );
+        }
       });
       tx();
       const row = db.prepare('SELECT version FROM schema_version LIMIT 1').get() as

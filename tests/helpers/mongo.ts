@@ -1,26 +1,16 @@
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { inject } from 'vitest';
 import type { Connection } from '@shared/types';
 import type { ConnectionReader } from '../../electron/mongo/MongoPool';
 
-let singleton: Promise<MongoMemoryServer> | null = null;
-
 /**
- * Start (or reuse) a single in-process Mongo instance across the whole vitest
- * suite. The returned URI is of the form mongodb://localhost:<port>.
- *
- * Stop is not wired automatically; the OS reaps it at process exit. If you
- * need isolation, call stopSharedServer() in a global teardown.
+ * URI of the one mongod the integration project's globalSetup
+ * (`mongoGlobalSetup.ts`) starts for the whole run. Test files share it in
+ * parallel, so each file works in database names no other file uses. A test
+ * that kills its server, needs a replica set, sets a server-global fail point
+ * or reads server-global counters starts its own MongoMemoryServer instead.
  */
-export async function getSharedServer(): Promise<MongoMemoryServer> {
-  if (!singleton) singleton = MongoMemoryServer.create();
-  return singleton;
-}
-
-export async function stopSharedServer(): Promise<void> {
-  if (!singleton) return;
-  const s = await singleton;
-  await s.stop();
-  singleton = null;
+export function getSharedMongoUri(): string {
+  return inject('mongoUri');
 }
 
 /**

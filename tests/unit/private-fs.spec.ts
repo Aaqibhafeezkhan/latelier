@@ -1,8 +1,15 @@
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ensurePrivateDir, ensurePrivateFile, PrivateModeError } from '../../electron/utils/privateFs';
+import {
+  ensurePrivateDir,
+  ensurePrivateFile,
+  openPrivateFile,
+  writePrivateFile,
+  PrivateModeError,
+} from '../../electron/utils/privateFs';
 import { useUmask022 } from '../helpers/umask';
 
 const posix = process.platform !== 'win32';
@@ -104,6 +111,79 @@ describe('privateFs', () => {
       expect(() => ensurePrivateFile(file)).toThrow(PrivateModeError);
     });
 
+    it('writePrivateFile leaves a pre-existing 0644 file 0600 with the new content', async () => {
+      const file = path.join(root, 'export.json');
+      fs.writeFileSync(file, 'old content that is longer', { mode: 0o644 });
+      await writePrivateFile(file, 'new');
+      expect(mode(file)).toBe(0o600);
+      expect(fs.readFileSync(file, 'utf8')).toBe('new');
+    });
+
+    it('writePrivateFile creates a missing file as 0600', async () => {
+      const file = path.join(root, 'fresh.json');
+      await writePrivateFile(file, 'x');
+      expect(mode(file)).toBe(0o600);
+      expect(fs.readFileSync(file, 'utf8')).toBe('x');
+    });
+
+    it('openPrivateFile tightens an existing 0644 file before any write', async () => {
+      const file = path.join(root, 'stream.ndjson');
+      fs.writeFileSync(file, 'old', { mode: 0o644 });
+      const handle = await openPrivateFile(file);
+      try {
+        expect(mode(file)).toBe(0o600);
+        await handle.write('streamed');
+      } finally {
+        await handle.close();
+      }
+      expect(mode(file)).toBe(0o600);
+      expect(fs.readFileSync(file, 'utf8')).toBe('streamed');
+    });
+
+    it('openPrivateFile wraps a failed chmod in a PrivateModeError and closes the handle', async () => {
+      const file = path.join(root, 'f');
+      const eperm = new Error('EPERM');
+      const close = vi.fn(async () => {});
+      const fakeHandle = {
+        chmod: vi.fn(async () => {
+          throw eperm;
+        }),
+        close,
+      };
+      vi.spyOn(fsp, 'open').mockResolvedValue(fakeHandle as never);
+      let caught: unknown;
+      try {
+        await openPrivateFile(file);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(PrivateModeError);
+      expect((caught as PrivateModeError).cause).toBe(eperm);
+      expect((caught as PrivateModeError).message).toContain(file);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it('openPrivateFile lets a failed open through as a plain error', async () => {
+      const file = path.join(root, 'missing-dir', 'f');
+      const attempt = openPrivateFile(file);
+      await expect(attempt).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(attempt).rejects.not.toBeInstanceOf(PrivateModeError);
+    });
+
+    it('writePrivateFile closes the handle when the write fails', async () => {
+      const close = vi.fn(async () => {});
+      const boom = new Error('ENOSPC');
+      vi.spyOn(fsp, 'open').mockResolvedValue({
+        chmod: async () => {},
+        writeFile: async () => {
+          throw boom;
+        },
+        close,
+      } as never);
+      await expect(writePrivateFile(path.join(root, 'f'), 'x')).rejects.toBe(boom);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
     it('describes a non-Error cause by its string form', () => {
       expect(new PrivateModeError('/x', 'boom').message).toContain('(boom)');
     });
@@ -119,6 +199,21 @@ describe('privateFs', () => {
       const dir = path.join(root, 'win');
       ensurePrivateDir(dir);
       expect(fs.existsSync(dir)).toBe(true);
+      expect(chmod).not.toHaveBeenCalled();
+    });
+
+    it('writePrivateFile still writes the file and calls no chmod', async () => {
+      const file = path.join(root, 'win.json');
+      const chmod = vi.spyOn(fsp, 'chmod');
+      await writePrivateFile(file, 'data');
+      expect(fs.readFileSync(file, 'utf8')).toBe('data');
+      expect(chmod).not.toHaveBeenCalled();
+    });
+
+    it('openPrivateFile never calls chmod on the handle', async () => {
+      const chmod = vi.fn(async () => {});
+      vi.spyOn(fsp, 'open').mockResolvedValue({ chmod, close: async () => {} } as never);
+      await openPrivateFile(path.join(root, 'w'));
       expect(chmod).not.toHaveBeenCalled();
     });
 

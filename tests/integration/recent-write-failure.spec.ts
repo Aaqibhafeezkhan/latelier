@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import type { Stage } from '@shared/types';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { QueryService } from '../../electron/mongo/QueryService';
@@ -8,7 +7,7 @@ import { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo';
 import type { Logger } from '../../electron/log';
 import { createTempDb, insertConnectionRow, type TempDb } from '../helpers/db';
-import { getSharedServer, makeConnection, makeReader } from '../helpers/mongo';
+import { getSharedMongoUri, makeConnection, makeReader } from '../helpers/mongo';
 
 /**
  * Recording a run into `recent_queries` is fire-and-forget: it must never fail
@@ -16,7 +15,6 @@ import { getSharedServer, makeConnection, makeReader } from '../helpers/mongo';
  * logger while the query result stays exactly what the user would have got.
  */
 describe('recent-query write failures are logged, not swallowed', () => {
-  let server: MongoMemoryServer;
   let pool: MongoPool;
   let tmp: TempDb;
   let repo: RecentQueryRepo;
@@ -44,8 +42,7 @@ describe('recent-query write failures are logged, not swallowed', () => {
   });
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    const uri = server.getUri();
+    const uri = getSharedMongoUri();
     const hp = { host: new URL(uri).hostname, port: Number(new URL(uri).port) };
     pool = new MongoPool({
       repo: makeReader([makeConnection(connId, hp, { defaultDb: dbName }), makeConnection('rwf-ghost', hp, { defaultDb: dbName })]),
@@ -62,7 +59,7 @@ describe('recent-query write failures are logged, not swallowed', () => {
     const coll = client.db(dbName).collection(collName);
     await coll.deleteMany({});
     await coll.insertMany([{ n: 1 }, { n: 2 }, { n: 3 }]);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await pool.disconnectAll();

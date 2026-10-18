@@ -136,8 +136,13 @@ export function UsersTab({
     }
   }, [conn.id, runtime.status]);
 
+  // Only the latest request may write state: a slow reply for a database the
+  // picker has since left must not overwrite the one now on screen.
+  const latest = React.useRef(0);
+
   const loadUsers = React.useCallback(async () => {
     if (runtime.status !== 'connected') return;
+    const id = ++latest.current;
     setLoading(true);
     setError(null);
     try {
@@ -145,16 +150,18 @@ export function UsersTab({
         connectionId: conn.id,
         ...(picked === ALL_DBS ? {} : { dbName: picked }),
       });
-      setUsers(rows);
+      if (id === latest.current) setUsers(rows);
     } catch (err) {
-      if (isIpcError(err)) {
-        setError({ message: err.message, code: err.code });
-      } else {
-        setError({ message: String(err) });
+      if (id === latest.current) {
+        if (isIpcError(err)) {
+          setError({ message: err.message, code: err.code });
+        } else {
+          setError({ message: String(err) });
+        }
+        setUsers(null);
       }
-      setUsers(null);
     } finally {
-      setLoading(false);
+      if (id === latest.current) setLoading(false);
     }
   }, [conn.id, runtime.status, picked]);
 
@@ -166,6 +173,10 @@ export function UsersTab({
   React.useEffect(() => {
     void loadUsers();
     setExpandedRow(null);
+    const request = latest;
+    return () => {
+      request.current++;
+    };
   }, [loadUsers]);
   /* eslint-enable react-hooks/set-state-in-effect */
 

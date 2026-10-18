@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { confirmQuit, createQuitGate, describeRunningWork, type RunningWork } from '../../electron/quitGuard';
+import { confirmQuit, createQuitGate, describeRunningWork, runTeardown, type RunningWork } from '../../electron/quitGuard';
 
 describe('describeRunningWork', () => {
   it('is null when nothing is running', () => {
@@ -165,5 +165,44 @@ describe('createQuitGate', () => {
     await expect(g.ask()).rejects.toThrow('no dialog');
     fail = false;
     await expect(g.ask()).resolves.toBe(true);
+  });
+});
+
+describe('runTeardown', () => {
+  it('runs every step in order even when earlier ones throw or reject, naming each failure', async () => {
+    const order: string[] = [];
+    const onError = vi.fn();
+    const boom = new Error('sync boom');
+    const nope = new Error('async nope');
+    await runTeardown(
+      [
+        ['a', () => { order.push('a'); }],
+        ['b', () => { order.push('b'); throw boom; }],
+        ['c', async () => { order.push('c'); throw nope; }],
+        ['d', async () => { order.push('d'); }],
+        ['e', () => { order.push('e'); }],
+      ],
+      onError,
+    );
+    expect(order).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(onError.mock.calls).toEqual([['b', boom], ['c', nope]]);
+  });
+
+  it('waits for an async step before starting the next', async () => {
+    const order: string[] = [];
+    await runTeardown(
+      [
+        ['slow', async () => { await new Promise((r) => setTimeout(r, 5)); order.push('slow'); }],
+        ['next', () => { order.push('next'); }],
+      ],
+      vi.fn(),
+    );
+    expect(order).toEqual(['slow', 'next']);
+  });
+
+  it('does not call onError when every step succeeds', async () => {
+    const onError = vi.fn();
+    await runTeardown([['a', () => {}]], onError);
+    expect(onError).not.toHaveBeenCalled();
   });
 });

@@ -186,4 +186,6 @@ account that is not a collaborator and confirming nothing runs.
       installing from scratch is the case no local run covers.
 - [ ] Tag a release. Tags do not travel with `git archive`; `CHANGELOG.md`
       carries the history, and the tags themselves start again from whatever
-      the first published version is.
+      the first published version is. The tag must be `v` plus the
+      `package.json` version (`v0.17.1` for `0.17.1`): `release.yml` fails
+      before building otherwise.

@@ -13,10 +13,9 @@ import { createIpcShim } from '../helpers/ipcShim';
 import { expectSchemaReject } from '../helpers/ipcAssert';
 import { testSenderCheck } from '../helpers/ipcSender';
 import {
-  getSharedServer,
+  getSharedMongoUri,
   makeConnection,
   makeReader,
-  stopSharedServer,
   uriToHostPort,
 } from '../helpers/mongo';
 
@@ -42,8 +41,7 @@ describe('index:list via router', () => {
   });
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    const seed = new MongoClient(server.getUri());
+    const seed = new MongoClient(getSharedMongoUri());
     try {
       await seed.connect();
       const people = seed.db(DB).collection(COLL);
@@ -57,12 +55,12 @@ describe('index:list via router', () => {
 
     tmp = createTempDb();
     pool = new MongoPool({
-      repo: makeReader([makeConnection(CONN, uriToHostPort(server.getUri()), { defaultDb: DB })]),
+      repo: makeReader([makeConnection(CONN, uriToHostPort(getSharedMongoUri()), { defaultDb: DB })]),
       vault: new SecretsVault(tmp.db, createSafeStorageMock()),
     });
     svc = new IndexService(pool);
     registerIndexChannels(createRouter(shim.ipcMain, testSenderCheck), svc);
-  }, 60_000);
+  });
 
   afterEach(() => {
     vi.restoreAllMocks();
@@ -71,7 +69,6 @@ describe('index:list via router', () => {
   afterAll(async () => {
     await pool.disconnectAll();
     tmp.cleanup();
-    await stopSharedServer();
   });
 
   it('lists the implicit _id_ index and the seeded ones with their key order and flags', async () => {

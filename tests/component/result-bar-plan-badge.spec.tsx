@@ -26,10 +26,10 @@ const ixscanPlan = {
 };
 const collscanPlan = { queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } };
 
-function makeState(plan: unknown, queryRaw = '{"status":"a"}'): CollectionTabState {
+function makeState(plan: unknown, queryRaw = '{"status":"a"}', sort = ''): CollectionTabState {
   return {
     view: 'Tree',
-    builder: { projection: [], sort: '', limit: '' },
+    builder: { projection: [], sort, limit: '' },
     queryRaw,
     page: 0,
     pageSize: 50,
@@ -38,13 +38,13 @@ function makeState(plan: unknown, queryRaw = '{"status":"a"}'): CollectionTabSta
   };
 }
 
-function renderBar(plan: unknown, queryRaw?: string) {
+function renderBar(plan: unknown, queryRaw?: string, sort?: string) {
   const openCreateIndex = vi.fn();
   const explain = vi.fn(async () => ({ plan: collscanPlan, verbosity: 'queryPlanner' }));
   installAtelierMock({ query: { explain } });
   render(
     <CollectionWorkspaceProvider
-      state={makeState(plan, queryRaw)}
+      state={makeState(plan, queryRaw, sort)}
       actions={emptyWorkspaceActions({ openCreateIndex })}
       meta={emptyWorkspaceMeta()}
     >
@@ -120,5 +120,41 @@ describe('ResultBar plan badge', () => {
 
     await screen.findByRole('dialog', { name: 'Explain plan' });
     await waitFor(() => expect(screen.getByTestId('explain-create-index')).toBeTruthy());
+  });
+
+  // The suggestion reads the sort through the same parser as the table
+  // header, so every direction the driver runs prefills the index.
+  it('prefills the index suggestion from a string sort direction', async () => {
+    const { openCreateIndex } = renderBar(collscanPlan, '{"status":"a"}', '{"age":"asc"}');
+    fireEvent.click(screen.getByTestId('plan-badge'));
+    fireEvent.click(await screen.findByTestId('explain-create-index'));
+
+    expect(openCreateIndex).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keys: [
+          { field: 'status', direction: 1 },
+          { field: 'age', direction: 1 },
+        ],
+      }),
+    );
+  });
+
+  it('still opens the suggestion when the sort holds a $meta key', async () => {
+    const { openCreateIndex } = renderBar(
+      collscanPlan,
+      '{"status":"a"}',
+      '{"score":{"$meta":"textScore"},"age":-1}',
+    );
+    fireEvent.click(screen.getByTestId('plan-badge'));
+    fireEvent.click(await screen.findByTestId('explain-create-index'));
+
+    expect(openCreateIndex).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keys: [
+          { field: 'status', direction: 1 },
+          { field: 'age', direction: -1 },
+        ],
+      }),
+    );
   });
 });

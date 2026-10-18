@@ -1,5 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { Db, MongoClient } from 'mongodb';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { CollectionAdminService } from '../../electron/mongo/CollectionAdminService';
@@ -8,8 +7,7 @@ import { SecretsVault } from '../../electron/secrets/SecretsVault';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import {
-  getSharedServer,
-  stopSharedServer,
+  getSharedMongoUri,
   uriToHostPort,
   makeConnection,
   makeReader,
@@ -18,7 +16,6 @@ import {
 const DB = 'coll_admin_test';
 
 describe('CollectionAdminService', () => {
-  let server: MongoMemoryServer;
   let hp: { host: string; port: number };
   let tmp: TempDb;
   let pool: MongoPool;
@@ -26,12 +23,7 @@ describe('CollectionAdminService', () => {
   const connId = 'conn-coll-admin';
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
-  }, 60_000);
-
-  afterAll(async () => {
-    await stopSharedServer();
+    hp = uriToHostPort(getSharedMongoUri());
   });
 
   afterEach(async () => {
@@ -48,7 +40,7 @@ describe('CollectionAdminService', () => {
   }
 
   async function listNames(dbName: string): Promise<string[]> {
-    const client = new MongoClient(server.getUri());
+    const client = new MongoClient(getSharedMongoUri());
     try {
       await client.connect();
       const specs = await client.db(dbName).listCollections({}, { nameOnly: true }).toArray();
@@ -78,7 +70,7 @@ describe('CollectionAdminService', () => {
       collection: 'capped_coll',
       options: { capped: true, size: 100_000, max: 10 },
     });
-    const client = new MongoClient(server.getUri());
+    const client = new MongoClient(getSharedMongoUri());
     try {
       await client.connect();
       const specs = await client.db(DB).listCollections({ name: 'capped_coll' }).toArray();
@@ -100,7 +92,7 @@ describe('CollectionAdminService', () => {
       collection: 'ts_coll',
       options: { timeseries: { timeField: 'ts' } },
     });
-    const client = new MongoClient(server.getUri());
+    const client = new MongoClient(getSharedMongoUri());
     try {
       await client.connect();
       const specs = await client.db(DB).listCollections({ name: 'ts_coll' }).toArray();
@@ -120,7 +112,7 @@ describe('CollectionAdminService', () => {
         validator: JSON.stringify({ $jsonSchema: { bsonType: 'object', required: ['name'] } }),
       },
     });
-    const client = new MongoClient(server.getUri());
+    const client = new MongoClient(getSharedMongoUri());
     try {
       await client.connect();
       const specs = await client.db(DB).listCollections({ name: 'validated_coll' }).toArray();
@@ -146,7 +138,7 @@ describe('CollectionAdminService', () => {
     expect(await listNames(freshDb)).toContain('first_coll');
 
     // Clean up the implicitly-created DB so it doesn't leak into other tests.
-    const client = new MongoClient(server.getUri());
+    const client = new MongoClient(getSharedMongoUri());
     try {
       await client.connect();
       await client.db(freshDb).dropDatabase();
@@ -301,7 +293,7 @@ describe('CollectionAdminService', () => {
     const res = await svc.dropDatabase({ connectionId: connId, dbName: dropDbName });
     expect(res.dropped).toBe(true);
 
-    const client = new MongoClient(server.getUri());
+    const client = new MongoClient(getSharedMongoUri());
     try {
       await client.connect();
       const dbs = await client.db('admin').admin().listDatabases();
@@ -454,7 +446,7 @@ describe('CollectionAdminService', () => {
   // view's definition or a collection's validation rules in place.
   describe('views and collMod', () => {
     async function direct<T>(fn: (db: Db) => Promise<T>): Promise<T> {
-      const client = new MongoClient(server.getUri());
+      const client = new MongoClient(getSharedMongoUri());
       try {
         await client.connect();
         return await fn(client.db(DB));

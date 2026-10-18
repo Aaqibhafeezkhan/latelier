@@ -26,11 +26,11 @@ const RULE: ReferenceRule = {
 
 describe('ReferenceRulesEditor — delete confirm', () => {
   let listSpy: ReturnType<typeof vi.fn>;
-  let deleteSpy: ReturnType<typeof vi.fn>;
+  let deleteSpy: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<void>>>;
 
   beforeEach(() => {
     listSpy = vi.fn(async () => [RULE]);
-    deleteSpy = vi.fn(async () => undefined);
+    deleteSpy = vi.fn<(...args: unknown[]) => Promise<void>>(async () => undefined);
     installAtelierMock({
       refs: {
         list: listSpy as never,

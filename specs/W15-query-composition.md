@@ -234,7 +234,7 @@ round trip, and `VALIDATION: invalid sort: ...` in a pill.
 
 ### 3.2 A broken sort silently desyncs the table header — P1
 
-`parseSortString` (`builder.ts:147-165`) returns `{}` on any parse failure, by
+`parseSortString` returns `{}` on any parse failure, by
 design, so the quick-sort UI has something to work with. Consequence:
 `TableView`'s header indicator (`TableView.tsx:980-1048`) shows **no** sort
 arrow while `builder.sort` holds text that is about to error, or text using a
@@ -242,6 +242,13 @@ shape the map drops (`{ $meta: 'textScore' }`).
 
 The header is the primary place a user reads "what am I sorted by". It is
 allowed to disagree with the query silently.
+
+A sort direction is valid exactly when the driver accepts it: `1`, `-1`,
+`"asc"`, `"desc"`, `"ascending"` or `"descending"` (case-insensitive, EJSON
+numbers included), or a `{ $meta: "<string>" }` document. `parseSortString`
+draws an arrow only for the first six, `sortProblem` refuses anything outside
+all seven at the Run gate, and the index suggestion reads the sort through
+`parseSortString`.
 
 ### 3.3 Multi-field sort is hand-typed JSON only, and the docs point at a deleted surface — P1
 
@@ -949,8 +956,9 @@ histograms with frequencies, and `SchemaView` already renders them. If the
 sample says `status` is 100% `string` and the user sets `valType: number`, the
 row can say so.
 
-The precedent exists: `isApplicableOp` already drives an advisory for
-op-versus-type. This is the value-versus-schema half, from data already
+The design precedent is the op-versus-type advisory that W04 §2b and X03
+specify from `FIELD_OPS` (the applicability table); no code shows that
+advisory today. This is the value-versus-schema half, from data already
 computed, and it stays advisory — sampling is not a constraint.
 
 Shipped: a condition whose value type disagrees with the sample shows a line

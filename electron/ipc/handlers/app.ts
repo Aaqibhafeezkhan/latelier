@@ -6,6 +6,7 @@ import { IPC_CHANNELS, type PickFilePurpose } from '@shared/ipc';
 import type { Router } from '../router.ts';
 import { zodValidator } from '../validators.ts';
 import { SystemError } from '../../errors.ts';
+import { writePrivateFile } from '../../utils/privateFs.ts';
 import type { DiagnosticService } from '../../services/DiagnosticService.ts';
 import { parseAllowedExternalUrl } from '../../security/externalUrl.ts';
 import type { PickedCredentialPaths } from '../../security/credentialPaths.ts';
@@ -115,7 +116,7 @@ export function registerAppChannels(
       try {
         await fs.mkdir(path.dirname(result.filePath), { recursive: true });
         // Export file contents can include user data; write owner-only (0600).
-        await fs.writeFile(result.filePath, content, { encoding: 'utf8', mode: 0o600 });
+        await writePrivateFile(result.filePath, content);
       } catch (err) {
         throw new SystemError(
           'INTERNAL',
@@ -152,7 +153,7 @@ export function registerAppChannels(
       try {
         await fs.mkdir(path.dirname(result.filePath), { recursive: true });
         // Diagnostic bundle contains connection metadata; write owner-only (0600).
-        await fs.writeFile(result.filePath, content, { encoding: 'utf8', mode: 0o600 });
+        await writePrivateFile(result.filePath, content);
       } catch (err) {
         throw new SystemError(
           'INTERNAL',

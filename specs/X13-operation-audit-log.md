@@ -34,6 +34,7 @@ Also in scope: migration `012`, an `AuditRepo` + `AuditService`, two IPC channel
 - `userCreate` / `userUpdate` / `userDrop` — excluding them is what keeps credentials structurally out of the table.
 - `docInsert` (single), `collectionCreate`, `indexCreate`, `indexDrop`.
 - `scriptRun` / `mshellWrite`. A script that deletes 400 documents is invisible to X13.
+- `agg:run` with a write stage (`$out` / `$merge`, i.e. `allowWrite`) and `agg:runAndSave`. A `$out` replaces a whole collection, so a summary row without a Pre-image gives no Undo, and the pipeline text can hold user data. The user already confirms before the write: A04 §6 for a run, a typed target name in the Save as collection modal (A06). Same blind spot as a script run.
 - The activity log — session-scoped, in-memory, records failures rather than changes. Deliberately uncoupled.
 - Deleting an aggregation stage — editor state and never touches Mongo.
 

@@ -17,10 +17,9 @@ import { createTempDb, insertConnectionRow, type TempDb } from '../helpers/db';
 import { createIpcShim } from '../helpers/ipcShim';
 import { testSenderCheck } from '../helpers/ipcSender';
 import {
-  getSharedServer,
+  getSharedMongoUri,
   makeConnection,
   makeReader,
-  stopSharedServer,
   uriToHostPort,
 } from '../helpers/mongo';
 
@@ -67,8 +66,7 @@ describe('refs:* channels via router', () => {
   }
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    const seed = new MongoClient(server.getUri());
+    const seed = new MongoClient(getSharedMongoUri());
     try {
       await seed.connect();
       await seed
@@ -87,13 +85,13 @@ describe('refs:* channels via router', () => {
     insertConnectionRow(tmp.db, CONN);
     insertConnectionRow(tmp.db, GHOST_CONN);
     const vault = new SecretsVault(tmp.db, createSafeStorageMock());
-    const conn = makeConnection(CONN, uriToHostPort(server.getUri()), { defaultDb: DB });
+    const conn = makeConnection(CONN, uriToHostPort(getSharedMongoUri()), { defaultDb: DB });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
     registerRefsChannels(
       createRouter(shim.ipcMain, testSenderCheck),
       new ReferenceRulesService(new ReferenceRulesRepo(tmp.db), pool),
     );
-  }, 60_000);
+  });
 
   beforeEach(() => {
     tmp.db.prepare('DELETE FROM reference_rules').run();
@@ -102,7 +100,6 @@ describe('refs:* channels via router', () => {
   afterAll(async () => {
     await pool.disconnectAll();
     tmp.cleanup();
-    await stopSharedServer();
   });
 
   describe('refs:create', () => {

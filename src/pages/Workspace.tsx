@@ -970,7 +970,10 @@ function WorkspaceInner() {
   );
 
   const openConnectionScreen = React.useCallback(
-    (id: string) => navigate(`/connections/${id}`),
+    (id: string) => {
+      // The dialogs hook ignores the result; navigate's promise only settles the transition.
+      void navigate(`/connections/${id}`);
+    },
     [navigate],
   );
 
@@ -1023,7 +1026,7 @@ function WorkspaceInner() {
   const openCollectionFromNav = navState?.openCollection ?? null;
   React.useEffect(() => {
     if (!openConnectionId) return;
-    navigate(location.pathname, { replace: true, state: null });
+    void navigate(location.pathname, { replace: true, state: null });
     openConnection(openConnectionId);
     if (!openCollectionFromNav) return;
     void tabsRef.current
@@ -1048,13 +1051,13 @@ function WorkspaceInner() {
   const editConnectionId = navState?.editConnectionId ?? null;
   React.useEffect(() => {
     if (!deleteConnectionId || connectionsLoading) return;
-    navigate(location.pathname, { replace: true, state: null });
+    void navigate(location.pathname, { replace: true, state: null });
     openDeleteConnectionModal(deleteConnectionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deleteConnectionId, connectionsLoading]);
   React.useEffect(() => {
     if (!editConnectionId || connectionsLoading) return;
-    navigate(location.pathname, { replace: true, state: null });
+    void navigate(location.pathname, { replace: true, state: null });
     openEditConnectionModal(editConnectionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editConnectionId, connectionsLoading]);

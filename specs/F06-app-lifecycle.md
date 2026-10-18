@@ -90,23 +90,29 @@ If any of steps 1–6 throws, the app shows an error dialog via `dialog.showErro
 ## 4. Shutdown sequence
 
 ```ts
-app.on('before-quit', async (e) => {
+app.on('before-quit', (e) => {
   e.preventDefault();
   log.info('shutdown', 'begin');
-  await Promise.race([
-    (async () => {
-      await tabsSvc.persistCurrent();      // renderer hands off a final snapshot via IPC if needed
-      await pool.disconnectAll();
-      db.close();
-    })(),
-    new Promise(r => setTimeout(r, 8000)),
-  ]);
-  log.info('shutdown', 'end');
-  app.exit(0);
+  const work = runTeardown(
+    [
+      ['persist bounds', persistBoundsNow],
+      ['dispose documents', () => docSvc.dispose()],
+      ['dispose shells', () => mshellSvc.disposeAll()],
+      ['cancel scripts', () => scriptSvc.cancelAll()],
+      ['disconnect pool', () => pool.disconnectAll()],
+      ['close db', () => closeDatabase(db)],
+    ],
+    (step, err) => log.warn('shutdown', `error during ${step}`, { err: String(err) }),
+  );
+  void Promise.race([work, new Promise(r => setTimeout(r, 8000))]).then(() => {
+    log.info('shutdown', 'end');
+    app.exit(0);
+  });
 });
 ```
 
 - 8-second hard budget. Anything still pending is abandoned.
+- Each step runs in its own try/catch (`runTeardown`, `electron/quitGuard.ts`): a step that throws or rejects is logged by name and the later steps still run, so a failed step never leaves the pool connected or the database open.
 - `db.close()` is last — once it returns, no more writes are possible.
 - On macOS, closing the last window does NOT quit (`window-all-closed` unless `process.platform !== 'darwin'`) — existing behavior. The app and its sessions keep running, so closing the window cuts off no work.
 

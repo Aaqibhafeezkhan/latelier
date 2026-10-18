@@ -1,5 +1,4 @@
 import React from 'react';
-import { notify } from '../../../theme/notifications';
 import {
   List,
   useDynamicRowHeight,
@@ -16,23 +15,25 @@ import { ownGet, ownSet } from '../../../utils/ownProperty';
 import {
   DRAGGED_FIELD_MIME,
   classifySort,
-  condFromDragged,
   parseSortString,
   type DraggedField,
   type SortClass,
 } from '../builder';
 import type { ReferenceRule, TableColumnConfig } from '@shared/types';
 import { ReferenceChip } from '../../../features/references/ReferenceChip';
-import { confirmDestructive } from '../../../utils/confirm';
-import { copyToClipboard } from '../../../utils/clipboard';
 import { useCollectionWorkspace } from '../context';
-import { andAtRoot, parseFilter, printFilter } from '../filterTree';
+import { parseFilter } from '../filterTree';
 import { useResultSelection } from '../resultSelection';
 import { DocFieldTree, type FieldMenuOpenPayload } from './DocFieldTree';
 import { getDocId, getFullDocId, isInlineEditableKind, reviveTableValue } from './docId';
 import { kindOf, parseAs, textOf, type FieldKind } from '../documentFieldTypes';
 import { SelectToggle } from './SelectToggle';
 import { RowActionsMenu } from './RowActionsMenu';
+import { FieldActionsMenu } from './FieldActionsMenu';
+import { useAddToFilter } from './useAddToFilter';
+import { useCopiedFlash } from './useCopiedFlash';
+import { useDeepPaths } from './useDeepPaths';
+import { useDocMenu } from './useDocMenu';
 import {
   deriveColumns,
   resolveColumns,
@@ -73,6 +74,19 @@ const GUTTER_WIDTH = 54;
 const ACTIONS_WIDTH = 92;
 
 const EMPTY_EXPANDED_ROWS: Record<string, boolean> = {};
+
+/**
+ * The cell menu's payload on top of `useDocMenu`'s doc/anchor/focus state.
+ * `field: null` (the "More actions" button, Shift+F10, a right-click on the
+ * row background) hides the field items and keeps Edit/Duplicate/Delete.
+ */
+interface CellMenuExtra {
+  field: string | null;
+  value: unknown;
+  hasValue: boolean;
+}
+
+const ROW_MENU_EXTRA: CellMenuExtra = { field: null, value: undefined, hasValue: false };
 
 /**
  * The table-level sort slot in the gutter header, covering sort states the
@@ -1107,37 +1121,8 @@ export function TableView({
   const onDuplicateDoc = actions.openDuplicate;
   // Falls back to local state when rendered standalone (no provider mounted).
   const selection = useResultSelection(documents);
-  const [contextMenu, setContextMenu] = React.useState<{
-    x: number;
-    y: number;
-    doc: unknown;
-    field: string | null;
-    value: unknown;
-    hasValue: boolean;
-    // #55/#69 — set by both open paths now, so Escape/click-away always has
-    // somewhere to send focus back to instead of stranding it on `<body>`.
-    returnFocusTo?: HTMLElement | null;
-    // #69 — grabbing focus *into* the menu on open stays keyboard-only; see
-    // `useMenuFocus`'s docstring for why `returnFocusTo` alone isn't enough
-    // to decide that.
-    focusMenuOnOpen?: boolean;
-  } | null>(null);
-  const cellMenuRef = React.useRef<HTMLDivElement | null>(null);
-  const [copiedCell, setCopiedCell] = React.useState<string | null>(null);
-
   // Badge, not toast — a toast per cell copy would be noise; a failed copy toasts instead.
-  const copyCell = React.useCallback(
-    (text: string, cellKey: string) => {
-      void copyToClipboard(text).then((ok) => {
-        if (!ok) return;
-        setCopiedCell(cellKey);
-        window.setTimeout(() => {
-          setCopiedCell((prev) => (prev === cellKey ? null : prev));
-        }, 600);
-      });
-    },
-    [],
-  );
+  const { copied: copiedCell, flash: copyCell } = useCopiedFlash<string>();
 
   const expandedRows = React.useMemo(
     () => expandedRowsProp ?? EMPTY_EXPANDED_ROWS,
@@ -1151,32 +1136,14 @@ export function TableView({
   );
 
   // Ephemeral, Table-local, reset when the document set changes (mirrors TreeView).
-  const [deepPaths, setDeepPaths] = React.useState<Set<string>>(new Set());
-  const [prevDocuments, setPrevDocuments] = React.useState<unknown[]>(documents);
-  if (prevDocuments !== documents) {
-    setPrevDocuments(documents);
-    setDeepPaths(new Set());
-  }
-  const toggleDeepPath = React.useCallback((p: string) => {
-    setDeepPaths((prev) => {
-      const next = new Set(prev);
-      if (next.has(p)) next.delete(p);
-      else next.add(p);
-      return next;
-    });
-  }, []);
+  const { deepPaths, toggleDeepPath } = useDeepPaths(documents);
 
-  const [fieldCopiedPath, setFieldCopiedPath] = React.useState<string | null>(null);
-  const handleCopyField = React.useCallback((path: string, value: unknown) => {
-    // Badge, not toast — same ruling as `copyCell` above.
-    void copyToClipboard(valueToClipboardText(value)).then((ok) => {
-      if (!ok) return;
-      setFieldCopiedPath(path);
-      window.setTimeout(() => {
-        setFieldCopiedPath((prev) => (prev === path ? null : prev));
-      }, 600);
-    });
-  }, []);
+  // Badge, not toast — same ruling as `copyCell` above.
+  const { copied: fieldCopiedPath, flash: flashField } = useCopiedFlash<string>();
+  const handleCopyField = React.useCallback(
+    (path: string, value: unknown) => flashField(valueToClipboardText(value), path),
+    [flashField],
+  );
 
   const [fieldContextMenu, setFieldContextMenu] = React.useState<{
     x: number;
@@ -1201,34 +1168,9 @@ export function TableView({
   // than showing a toast on click.
   const filterBarValid = React.useMemo(() => parseFilter(state.queryRaw).ok, [state.queryRaw]);
 
-  // Mirrors TreeView's handler. Confirms whenever the Filter drawer is open
+  // Shared with TreeView. Confirms whenever the Filter drawer is open
   // (deliberate over-warn — it may hold newer local input this can't see).
-  const handleAddToFilter = React.useCallback(
-    async (fieldPath: string, value: unknown) => {
-      if (state.activeBuilderTab === 'Builder') {
-        const proceed = await confirmDestructive({
-          title: 'Add to filter?',
-          body: 'The filter drawer is open and may hold edits that haven\'t been applied yet. Adding this field will replace the drawer\'s content.',
-          confirmLabel: 'Add',
-        });
-        if (!proceed) return;
-      }
-      const parsed = parseFilter(state.queryRaw);
-      if (!parsed.ok) {
-        notify.error("Nothing added — the filter bar's text isn't valid JSON.");
-        return;
-      }
-      const nextRoot = andAtRoot(parsed.root, condFromDragged({ field: fieldPath, value }));
-      const printed = printFilter(nextRoot);
-      if (!printed.ok) {
-        notify.error('Nothing added — the filter could not be updated.');
-        return;
-      }
-      actions.expandBuilder?.();
-      actions.patch({ queryRaw: printed.json });
-    },
-    [state.queryRaw, state.activeBuilderTab, actions],
-  );
+  const handleAddToFilter = useAddToFilter({ state, actions });
   const closeFieldContextMenu = React.useCallback(() => setFieldContextMenu(null), []);
   useMenuFocus(fieldMenuRef, fieldContextMenu, closeFieldContextMenu);
 
@@ -1381,8 +1323,17 @@ export function TableView({
     window.addEventListener('mouseup', onUp);
   };
 
-  const closeContextMenu = React.useCallback(() => setContextMenu(null), []);
-  useMenuFocus(cellMenuRef, contextMenu, closeContextMenu);
+  // The cell menu, doc-level (Edit/Delete included) plus the clicked cell's
+  // field items. #55/#69 — every open path sets `returnFocusTo`, so
+  // Escape/click-away always has somewhere to send focus back to instead of
+  // stranding it on `<body>`; `focusMenuOnOpen` (grabbing focus *into* the
+  // menu) stays keyboard-only — see `useMenuFocus`'s docstring.
+  const {
+    docMenu: contextMenu,
+    docMenuRef: cellMenuRef,
+    openDocMenu,
+    closeDocMenu: closeContextMenu,
+  } = useDocMenu<CellMenuExtra>();
 
   // #20 — the grid is the widget's single tab stop; `useRovingHighlight`
   // (via `useRovingFocus`) owns which row is "active" and this wires it to
@@ -1468,14 +1419,10 @@ export function TableView({
       // right-click. `focusMenuOnOpen` stays unset: a mouse open still
       // doesn't grab focus into the menu, only Escape now has somewhere to
       // send it back to.
-      setContextMenu({
-        x: e.clientX,
-        y: e.clientY,
-        ...payload,
-        returnFocusTo: listRef.current?.element ?? null,
-      });
+      const { doc, ...extra } = payload;
+      openDocMenu(doc, { x: e.clientX, y: e.clientY }, { returnFocusTo: listRef.current?.element ?? null }, extra);
     },
-    [listRef],
+    [listRef, openDocMenu],
   );
 
   // The "More actions" button's own open path — anchored to the button
@@ -1487,17 +1434,17 @@ export function TableView({
       anchor: { x: number; y: number },
       focus?: { returnFocusTo?: HTMLElement | null; focusMenuOnOpen?: boolean },
     ) => {
-      setContextMenu({
-        ...anchor,
+      openDocMenu(
         doc,
-        field: null,
-        value: undefined,
-        hasValue: false,
-        returnFocusTo: focus?.returnFocusTo ?? listRef.current?.element ?? null,
-        focusMenuOnOpen: focus?.focusMenuOnOpen,
-      });
+        anchor,
+        {
+          returnFocusTo: focus?.returnFocusTo ?? listRef.current?.element ?? null,
+          focusMenuOnOpen: focus?.focusMenuOnOpen,
+        },
+        ROW_MENU_EXTRA,
+      );
     },
-    [listRef],
+    [listRef, openDocMenu],
   );
 
   // Row-expand makes rows variable-height; measure each rendered row rather
@@ -1529,15 +1476,12 @@ export function TableView({
         const anchor = anchorForRow(rowEl, listRef.current?.element ?? null);
         if (!anchor) return;
         if (!rowEl) listRef.current?.scrollToRow({ index: roving.activeIndex, align: 'auto' });
-        setContextMenu({
-          ...anchor,
-          doc: documents[roving.activeIndex],
-          field: null,
-          value: undefined,
-          hasValue: false,
-          returnFocusTo: listRef.current?.element ?? null,
-          focusMenuOnOpen: true,
-        });
+        openDocMenu(
+          documents[roving.activeIndex],
+          anchor,
+          { returnFocusTo: listRef.current?.element ?? null, focusMenuOnOpen: true },
+          ROW_MENU_EXTRA,
+        );
         return;
       }
       if (isEditKey(e)) {
@@ -1556,7 +1500,7 @@ export function TableView({
     // `roving` itself is a fresh object every render (see `handleSelect`
     // above) — depend on the members this actually reads instead.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [roving.onKeyDown, roving.activeIndex, roving.rowId, documents, handleSelect, listRef, onEditDoc],
+    [roving.onKeyDown, roving.activeIndex, roving.rowId, documents, handleSelect, listRef, onEditDoc, openDocMenu],
   );
 
   const rowProps = React.useMemo<TableRowProps>(
@@ -1917,7 +1861,7 @@ export function TableView({
         // whether or not this div happens to hold focus right now. A mouse
         // open still never focuses it; a keyboard open does, via
         // `useMenuFocus` (#55/#87) — which is also what returns focus to the
-        // grid once the window listener calls `setContextMenu(null)`, unless
+        // grid once the window listener calls `closeContextMenu()`, unless
         // the click that dismissed it landed on another focusable control.
         <div
           ref={cellMenuRef}
@@ -1938,81 +1882,20 @@ export function TableView({
             padding: '4px 0',
           }}
         >
-          {contextMenu.hasValue && contextMenu.field && (
-            <button
-              onClick={() => {
-                void copyToClipboard(
-                  valueToClipboardText(contextMenu.value),
-                  'Value copied to the clipboard.',
-                );
-                setContextMenu(null);
-              }}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '6px 12px',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: 12,
-                color: 'var(--atelier-text)',
-              }}
-            >
-              Copy value
-            </button>
-          )}
+          {/* Same items and gates as the field-level menu below (`hasValue`
+              is its `value !== undefined`, computed alongside `draggable`).
+              This menu has no expand-first step, so it's arguably the more
+              discoverable of the two surfaces for Add to filter. */}
           {contextMenu.field && (
-            <button
-              onClick={() => {
-                void copyToClipboard(
-                  contextMenu.field ?? '',
-                  'Field name copied to the clipboard.',
-                );
-                setContextMenu(null);
-              }}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '6px 12px',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: 12,
-                color: 'var(--atelier-text)',
-              }}
-            >
-              Copy field path
-            </button>
-          )}
-          {/* Parity with the field-level menu below: same
-              `!meta.isReadOnly && value !== undefined` gate (`hasValue` is
-              exactly that check, computed alongside `draggable`). This menu
-              has no expand-first step, so it's arguably the more
-              discoverable of the two surfaces for the same action. */}
-          {!meta.isReadOnly && contextMenu.hasValue && contextMenu.field && (
-            <button
-              disabled={!filterBarValid}
-              onClick={() => {
-                void handleAddToFilter(contextMenu.field!, contextMenu.value);
-                setContextMenu(null);
-              }}
-              title={filterBarValid ? undefined : "The filter bar's text isn't valid JSON"}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '6px 12px',
-                background: 'none',
-                border: 'none',
-                cursor: filterBarValid ? 'pointer' : 'not-allowed',
-                fontSize: 12,
-                color: filterBarValid ? 'var(--atelier-text)' : 'var(--atelier-text-muted)',
-              }}
-            >
-              Add to filter
-            </button>
+            <FieldActionsMenu
+              fieldPath={contextMenu.field}
+              value={contextMenu.value}
+              hasValue={contextMenu.hasValue ?? false}
+              isReadOnly={meta.isReadOnly}
+              filterBarValid={filterBarValid}
+              onAddToFilter={handleAddToFilter}
+              onClose={closeContextMenu}
+            />
           )}
           {contextMenu.field && (
             <div
@@ -2034,7 +1917,7 @@ export function TableView({
             onDuplicate={onDuplicateDoc}
             onDelete={onDeleteDoc}
             isReadOnly={meta.isReadOnly}
-            onClose={() => setContextMenu(null)}
+            onClose={closeContextMenu}
           />
         </div>
       )}
@@ -2065,75 +1948,15 @@ export function TableView({
             padding: '4px 0',
           }}
         >
-          {fieldContextMenu.value !== undefined && (
-            <button
-              onClick={() => {
-                void copyToClipboard(
-                  valueToClipboardText(fieldContextMenu.value),
-                  'Value copied to the clipboard.',
-                );
-                setFieldContextMenu(null);
-              }}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '6px 12px',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: 12,
-                color: 'var(--atelier-text)',
-              }}
-            >
-              Copy value
-            </button>
-          )}
-          <button
-            onClick={() => {
-              void copyToClipboard(
-                fieldContextMenu.fieldPath,
-                'Field name copied to the clipboard.',
-              );
-              setFieldContextMenu(null);
-            }}
-            style={{
-              display: 'block',
-              width: '100%',
-              textAlign: 'left',
-              padding: '6px 12px',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 12,
-              color: 'var(--atelier-text)',
-            }}
-          >
-            Copy field path
-          </button>
-          {!meta.isReadOnly && fieldContextMenu.value !== undefined && (
-            <button
-              disabled={!filterBarValid}
-              onClick={() => {
-                void handleAddToFilter(fieldContextMenu.fieldPath, fieldContextMenu.value);
-                setFieldContextMenu(null);
-              }}
-              title={filterBarValid ? undefined : "The filter bar's text isn't valid JSON"}
-              style={{
-                display: 'block',
-                width: '100%',
-                textAlign: 'left',
-                padding: '6px 12px',
-                background: 'none',
-                border: 'none',
-                cursor: filterBarValid ? 'pointer' : 'not-allowed',
-                fontSize: 12,
-                color: filterBarValid ? 'var(--atelier-text)' : 'var(--atelier-text-muted)',
-              }}
-            >
-              Add to filter
-            </button>
-          )}
+          <FieldActionsMenu
+            fieldPath={fieldContextMenu.fieldPath}
+            value={fieldContextMenu.value}
+            hasValue={fieldContextMenu.value !== undefined}
+            isReadOnly={meta.isReadOnly}
+            filterBarValid={filterBarValid}
+            onAddToFilter={handleAddToFilter}
+            onClose={closeFieldContextMenu}
+          />
         </div>
       )}
     </div>

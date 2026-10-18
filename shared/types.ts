@@ -324,9 +324,9 @@ export type BuilderTab = 'Builder' | 'Saved' | 'Recent';
  * Operators with a value-shape-compatible encoder. Other operator strings
  * are allowed on `CondNode.op` (the user can type any op via autocomplete)
  * but are advisory-flagged as "doesn't apply" or "not encodable" outside
- * this set — see `builder.ts`'s `isCompilableOp`/`isApplicableOp` and
- * `filterTree.ts`'s printer (the live encoder, post-W13) for the shape
- * buckets.
+ * this set — see `filterTree.ts`'s `isCompilableOp` and printer (the live
+ * encoder, post-W13) for the shape buckets, and `builder.ts`'s `FIELD_OPS`
+ * for the per-valType applicability table.
  */
 export type MqlOp =
   | '$eq' | '$ne' | '$gt' | '$gte' | '$lt' | '$lte'

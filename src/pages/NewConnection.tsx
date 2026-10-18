@@ -50,7 +50,7 @@ export default function NewConnection() {
     onSaved: (id: string) => {
       // A saved form is not unsaved work, even if the form still reads dirty.
       bypassRef.current = true;
-      navigate(backTarget, {
+      void navigate(backTarget, {
         replace: true,
         state: isEdit ? undefined : { openConnectionId: id },
       });

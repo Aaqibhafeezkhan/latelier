@@ -21,6 +21,12 @@ describe('operatorSource', () => {
     expect(arr.every((s) => s.kind === 'operator')).toBe(true);
   });
 
+  it('has no duplicate (class, name) pair', () => {
+    const keys = OPERATORS.map((o) => `${o.class}:${o.name}`);
+    const dupes = keys.filter((k, i) => keys.indexOf(k) !== i);
+    expect(dupes).toEqual([]);
+  });
+
   it('every operator name starts with $', () => {
     for (const op of OPERATORS) {
       expect(op.name.startsWith('$')).toBe(true);

@@ -12,13 +12,7 @@ import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { createIpcShim } from '../helpers/ipcShim';
 import { testSenderCheck } from '../helpers/ipcSender';
-import {
-  getSharedServer,
-  makeConnection,
-  makeReader,
-  stopSharedServer,
-  uriToHostPort,
-} from '../helpers/mongo';
+import { getSharedMongoUri, makeConnection, makeReader, uriToHostPort } from '../helpers/mongo';
 
 /**
  * Drives `meta:*` through the real router, zod validators, `MetaService`,
@@ -35,8 +29,7 @@ describe('meta:* channels via router', () => {
   const shim = createIpcShim();
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    const seed = new MongoClient(server.getUri());
+    const seed = new MongoClient(getSharedMongoUri());
     try {
       await seed.connect();
       await seed
@@ -50,15 +43,14 @@ describe('meta:* channels via router', () => {
 
     tmp = createTempDb();
     const vault = new SecretsVault(tmp.db, createSafeStorageMock());
-    const conn = makeConnection(CONN, uriToHostPort(server.getUri()), { defaultDb: DB });
+    const conn = makeConnection(CONN, uriToHostPort(getSharedMongoUri()), { defaultDb: DB });
     pool = new MongoPool({ repo: makeReader([conn]), vault });
     registerMetaChannels(createRouter(shim.ipcMain, testSenderCheck), new MetaService(pool));
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await pool.disconnectAll();
     tmp.cleanup();
-    await stopSharedServer();
   });
 
   describe('meta:listDatabases', () => {

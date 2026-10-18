@@ -22,11 +22,11 @@ function ctx(
 }
 
 describe('recentValuesSource', () => {
-  let valuesForFieldSpy: ReturnType<typeof vi.fn>;
+  let valuesForFieldSpy: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>;
 
   beforeEach(() => {
     vi.resetModules();
-    valuesForFieldSpy = vi.fn(async () => ({
+    valuesForFieldSpy = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({
       values: [{ value: 'shipped', valType: 'string', frequency: 3, lastUsedAt: '2026-01-01T00:00:00.000Z' }],
     }));
     installAtelierMock({

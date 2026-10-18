@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { MongoClient, type RunCommandOptions } from 'mongodb';
 import { makeDbProxy, type DbProxyCtx } from '../../electron/mongo/dbProxy';
 import { ReadOnlyConnectionError } from '../../electron/errors';
-import { getSharedServer, stopSharedServer, uriToHostPort } from '../helpers/mongo';
+import { getSharedMongoUri, uriToHostPort } from '../helpers/mongo';
 
 interface CursorLike {
   toArray(): Promise<unknown[]>;
@@ -36,23 +35,20 @@ interface TestDbProxy {
 const DB = 'dbproxy_test';
 
 describe('makeDbProxy — db.collection(name) routing', () => {
-  let server: MongoMemoryServer;
   let client: MongoClient;
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    const { host, port } = uriToHostPort(server.getUri());
+    const { host, port } = uriToHostPort(getSharedMongoUri());
     client = new MongoClient(`mongodb://${host}:${port}`);
     await client.connect();
     await client
       .db(DB)
       .collection<{ _id: number }>('things')
       .insertMany([{ _id: 1 }, { _id: 2 }]);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await client.close();
-    await stopSharedServer();
   });
 
   function makeCtx(signal?: AbortSignal): DbProxyCtx {
@@ -165,23 +161,20 @@ describe('makeDbProxy — db.collection(name) routing', () => {
 });
 
 describe('makeDbProxy — read-only connection (ADR 0005 Bucket C)', () => {
-  let server: MongoMemoryServer;
   let client: MongoClient;
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    const { host, port } = uriToHostPort(server.getUri());
+    const { host, port } = uriToHostPort(getSharedMongoUri());
     client = new MongoClient(`mongodb://${host}:${port}`);
     await client.connect();
     await client
       .db(DB)
       .collection<{ _id: number }>('ro_things')
       .insertMany([{ _id: 1 }, { _id: 2 }]);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await client.close();
-    await stopSharedServer();
   });
 
   function roCtx(): DbProxyCtx {
@@ -438,21 +431,18 @@ describe('makeDbProxy — read-only connection (ADR 0005 Bucket C)', () => {
  * refused, so a test written that way passes against the bug.
  */
 describe('makeDbProxy — a mid-run flip reaches references already handed out', () => {
-  let server: MongoMemoryServer;
   let client: MongoClient;
   let readOnly = false;
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    const { host, port } = uriToHostPort(server.getUri());
+    const { host, port } = uriToHostPort(getSharedMongoUri());
     client = new MongoClient(`mongodb://${host}:${port}`);
     await client.connect();
     await client.db(DB).collection('flip_things').deleteMany({});
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await client.close();
-    await stopSharedServer();
   });
 
   // The live flag the Connection's read-only state stands in for.

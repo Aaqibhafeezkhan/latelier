@@ -114,7 +114,9 @@ describe('the sort and projection gates inherit the rule', () => {
     });
   }
 
+  // The nested sentinel must be a direction the driver runs: a `$date` value
+  // parses but makes the driver throw "Invalid sort direction".
   it('still accepts a sort whose value is a nested sentinel', () => {
-    expect(sortProblem('{"createdAt":{"$date":"2026-01-01T00:00:00Z"}}')).toBeNull();
+    expect(sortProblem('{"createdAt":{"$numberInt":"-1"}}')).toBeNull();
   });
 });

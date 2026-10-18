@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { MongoClient } from 'mongodb';
 import { Binary, Long } from 'bson';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryServer } from 'mongodb-memory-server';
 import { ScriptService } from '../../electron/services/ScriptService';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { SecretsVault } from '../../electron/secrets/SecretsVault';
@@ -9,13 +9,7 @@ import type { Connection } from '../../shared/types';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { createTestSpawner, type TestSpawner } from '../helpers/runnerSpawner';
-import {
-  getSharedServer,
-  stopSharedServer,
-  uriToHostPort,
-  makeConnection,
-  makeReader,
-} from '../helpers/mongo';
+import { uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
 
 /**
  * The script bridge end to end: a real runner process, a real mongod, and a
@@ -39,13 +33,16 @@ let svc: ScriptService | undefined;
 let conns: Connection[];
 let direct: MongoClient | undefined;
 
+// A dedicated server, not the shared one: the cursor tests count open cursors
+// through `serverStatus`, which is server-wide, so another file's cursors on a
+// shared mongod would shift the count.
 beforeAll(async () => {
-  server = await getSharedServer();
+  server = await MongoMemoryServer.create();
   hp = uriToHostPort(server.getUri());
 }, 60_000);
 
 afterAll(async () => {
-  await stopSharedServer();
+  await server.stop();
 });
 
 afterEach(async () => {

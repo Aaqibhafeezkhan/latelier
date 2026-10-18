@@ -200,12 +200,12 @@ export default function ConnectionManager() {
       setDeleteTarget(null);
       // No sibling row to fall back to — this screen only ever shows one
       // Connection, so a delete always sends the user back to the Data View.
-      navigate('/workspace', { replace: true });
+      void navigate('/workspace', { replace: true });
     } catch (err) {
       setDeleteTarget(null);
       if (isIpcError(err) && err.code === 'NOT_FOUND') {
         // Out-of-band removal — the Connection is already gone.
-        navigate('/workspace', { replace: true });
+        void navigate('/workspace', { replace: true });
       } else {
         notify.error(isIpcError(err) ? err.message : String(err), { title: 'Delete failed' });
       }

@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { Binary, Collection, Decimal128, Double, Int32, Long, MongoClient, ObjectId, BSONRegExp } from 'mongodb';
 import { randomUUID } from 'node:crypto';
 import { createRouter } from '../../electron/ipc/router';
@@ -32,7 +31,7 @@ import type { AuditEntry, UndoResult } from '../../shared/types';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
-import { getSharedServer, stopSharedServer, uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
+import { getSharedMongoUri, uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
 
 type Handler = (evt: IpcMainInvokeEvent, payload: unknown) => unknown;
 
@@ -72,7 +71,6 @@ function silentLogger() {
 const BODY_MARKER = 'body-only-value-7f3a';
 
 describe('audit log via the router', () => {
-  let server: MongoMemoryServer;
   let hp: { host: string; port: number };
   let client: MongoClient;
   let tmp: TempDb;
@@ -86,14 +84,12 @@ describe('audit log via the router', () => {
   let dbName: string;
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
-    client = await MongoClient.connect(server.getUri());
-  }, 60_000);
+    hp = uriToHostPort(getSharedMongoUri());
+    client = await MongoClient.connect(getSharedMongoUri());
+  });
 
   afterAll(async () => {
     await client.close();
-    await stopSharedServer();
   });
 
   beforeEach(() => {

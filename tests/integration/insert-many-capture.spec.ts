@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from 'vitest';
-import type { MongoMemoryServer } from 'mongodb-memory-server';
 import { Int32, MongoClient } from 'mongodb';
 import { randomUUID } from 'node:crypto';
 import { MongoPool } from '../../electron/mongo/MongoPool';
@@ -9,7 +8,7 @@ import { undoCaptureOf } from '../../electron/mongo/undo';
 import type { Logger } from '../../electron/log';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
-import { getSharedServer, uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
+import { getSharedMongoUri, uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
 
 // Only `asStored` is swapped, and only while `failCapture` is set: the one
 // step of insertMany's Undo capture that runs after the write has landed.
@@ -27,7 +26,6 @@ vi.mock('../../electron/mongo/undo', async (importOriginal) => {
 });
 
 describe('DocumentService.insertMany — the Undo capture never costs the write', () => {
-  let server: MongoMemoryServer;
   let client: MongoClient;
   let tmp: TempDb;
   let pool: MongoPool;
@@ -36,9 +34,8 @@ describe('DocumentService.insertMany — the Undo capture never costs the write'
   let dbName: string;
 
   beforeAll(async () => {
-    server = await getSharedServer();
-    client = await MongoClient.connect(server.getUri());
-  }, 60_000);
+    client = await MongoClient.connect(getSharedMongoUri());
+  });
 
   afterAll(async () => {
     await client.close();
@@ -47,7 +44,7 @@ describe('DocumentService.insertMany — the Undo capture never costs the write'
   beforeEach(() => {
     tmp = createTempDb();
     pool = new MongoPool({
-      repo: makeReader([makeConnection('c1', uriToHostPort(server.getUri()))]),
+      repo: makeReader([makeConnection('c1', uriToHostPort(getSharedMongoUri()))]),
       vault: new SecretsVault(tmp.db, createSafeStorageMock()),
     });
     log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };

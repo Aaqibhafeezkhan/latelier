@@ -4,7 +4,7 @@ import { MongoPool } from '../../electron/mongo/MongoPool';
 import { QueryService } from '../../electron/mongo/QueryService';
 import type { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { insertAt, printFilter, type CondNode, type GroupNode } from '../../src/pages/Workspace/filterTree';
-import { getSharedServer, uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
+import { getSharedMongoUri, uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
 
 // Phase 2A — prove the filter tree's printed filters actually MATCH the typed
 // values they target on a real server. The unit tests (filter-tree.spec.ts)
@@ -31,15 +31,14 @@ describe('filter-tree printed filters match real BSON values (Phase 2A)', () => 
   const recentStub = { recordFind: async () => {} } as unknown as RecentQueryService;
 
   beforeAll(async () => {
-    const server = await getSharedServer();
-    hp = uriToHostPort(server.getUri());
+    hp = uriToHostPort(getSharedMongoUri());
     const conn = makeConnection(connId, hp, { defaultDb: dbName });
     pool = new MongoPool({
       repo: makeReader([conn]),
       vault: { get: () => null } as unknown as import('../../electron/secrets/SecretsVault').SecretsVault,
     });
     svc = new QueryService(pool, recentStub);
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await pool.disconnectAll();
