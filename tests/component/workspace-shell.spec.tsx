@@ -1,6 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent, within } from '../helpers/render';
-import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
@@ -139,7 +138,7 @@ describe('Workspace shell', () => {
     await waitFor(() => expect(closeSpy).toHaveBeenCalledWith('a'));
   });
 
-  it('clicking + opens the new-tab picker, populated from the Focused Tab\'s Connection', async () => {
+  it('⌘T opens the new-tab picker, populated from the Focused Tab\'s Connection', async () => {
     installAtelierMock({
       // A tab open: the picker lists Databases for one Connection, and that
       // is the Focused Tab's (there is no session pin to fall back
@@ -180,8 +179,8 @@ describe('Workspace shell', () => {
         <Workspace />
       </MemoryRouter>,
     );
-    const btn = await screen.findByRole('button', { name: 'New collection tab' });
-    fireEvent.click(btn);
+    await screen.findByRole('button', { name: 'New script tab' });
+    fireEvent.keyDown(document, { key: 't', metaKey: true });
     expect(await screen.findByText(/Open collection/i)).toBeTruthy();
     const dbSelect = screen.getByLabelText('Database') as HTMLSelectElement;
     await waitFor(() => expect(dbSelect.value).toBe('app'));
@@ -242,8 +241,11 @@ async function openPicker(meta: Record<string, unknown>) {
       <Workspace />
     </MemoryRouter>,
   );
-  const trigger = await screen.findByRole('button', { name: 'New collection tab' });
-  await userEvent.click(trigger);
+  // The tab strip has no "+" any more; ⌘T is the shortcut. Focus a real
+  // button first so Mantine has somewhere to return focus to on close.
+  const trigger = await screen.findByRole('button', { name: 'New script tab' });
+  trigger.focus();
+  fireEvent.keyDown(document, { key: 't', metaKey: true });
   return trigger;
 }
 

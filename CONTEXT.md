@@ -43,6 +43,10 @@ _Avoid_: greyed connection, stale connection, cached connection
 The one tab the Data View is showing. Its Connection, Database and Collection are the answer to "where am I" — that identity belongs to the tab, not to the view. A new tab opens against the Connection of the navigator root it was opened from.
 _Avoid_: active tab, selected tab
 
+**Tab Group**:
+The run of tabs in the tab strip that belong to one Connection, under a header filled with that Connection's colour. Clicking the header collapses or expands the group; the header is brighter when the group holds the Focused Tab. Groups are separated by a gap. A Tab Group is not a menu: it carries no Connection actions.
+_Avoid_: chip, connection chip, tab section
+
 **Read-Only Connection**:
 A Connection with a persisted flag that blocks every MongoDB write reachable through it — document writes, collection/database/index/user admin operations, `$out`/`$merge` aggregation stages, and script/shell-pane writes. Enforced in the main process, never only hidden in the renderer, because the shell pane is unsandboxed (see [ADR 0005](docs/adr/0005-read-only-connection-enforcement.md)). A whole-connection property, not scoped to individual Databases within it. Unrelated to the pre-existing `readOnly` prop on components like `ScriptEditor`/`BuilderPane`, which is renderer-only editor/view state and enforces nothing against MongoDB.
 _Avoid_: read-only mode (ambiguous with the unrelated UI-state prop of the same name)

@@ -120,16 +120,17 @@ Tab state lives in the renderer for responsiveness but is mirrored to main on ev
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
-│ ⚡ journalEntry │ ⚡ order ×  │ Σ monthlyByAccount × │ +▾             │
+│ journalEntry │ order ×  │ Σ monthlyByAccount ×                   │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Icons**: ⚡ for collection tabs, Σ for aggregation tabs (use SVG from `icons.tsx`).
+- **Icons**: none for collection tabs, Σ for aggregation tabs (use SVG from `icons.tsx`).
 - **Close (×)** on hover; always visible on active tab.
 - **Drag to reorder** — HTML5 drag events, snap into new position on drop. Debounced `tabs:reorder` call.
 - **Overflow**: horizontal scroll with subtle gradient fade. Never wrap.
-- **"+▾" new-tab menu**:
-  - "New collection tab…" → opens a tiny modal (see §8).
+- **No "+" button.** A new collection tab opens from the navigator, ⌘T, the command palette, or the empty state; each opens the tiny modal (see §8).
+- **Tab Groups**: one per Connection, with a header filled in the Connection's colour (brighter when it holds the Focused Tab). Clicking the header collapses or expands the group. Each tab carries a bottom border in that colour, dim until it is the Focused Tab.
+- **Former "+▾" new-tab menu** (superseded):
   - "New aggregation on current collection" → opens an agg tab with the same coll.
   - "New script" (stub) → toast "coming soon".
   - Separator, then recent connections → clicking one runs `tabs:openDefault(connectionId)`.

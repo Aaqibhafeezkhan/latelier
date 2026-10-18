@@ -1136,7 +1136,6 @@ function WorkspaceInner() {
         scratchConnectionId={scratchConnectionId}
         hints={hints}
         openConnection={openConnection}
-        setNewTabOpen={setNewTabOpen}
         panelPrefs={panelPrefs}
         connectionDialogs={connectionDialogs}
         navigatorData={navigatorData}

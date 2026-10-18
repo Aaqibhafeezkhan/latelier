@@ -1304,7 +1304,7 @@ describe('ConnectionSwitcher — manage/disconnect/delete row actions', () => {
 
     // The only Connection is the Focused Tab's — not "Prod — US East", so
     // this can't use the shared `openSwitcher()` helper.
-    await userEvent.click(await screen.findByRole('button', { name: /Solo/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /^Connection: Solo/i }));
     const listbox = await screen.findByRole('listbox', { name: 'Connections' });
     await userEvent.click(within(listbox).getByRole('button', { name: 'Delete Solo' }));
     await screen.findByRole('dialog', { name: 'Delete "Solo"?' });

@@ -183,7 +183,9 @@ describe('W15 §4.2 — limit says it caps the total across all pages', () => {
 describe('W15 §5 — the disclosure trigger carries the focus-ring class', () => {
   it('opts into the :focus-visible rule defined in index.css', async () => {
     mount();
-    const trigger = await screen.findByRole('button', { expanded: true });
+    // The tab strip's Tab Group headers are expandable buttons too.
+    const expanded = await screen.findAllByRole('button', { expanded: true });
+    const trigger = expanded.find((b) => !b.closest('[role="tablist"]'))!;
     // jsdom does not apply the app stylesheet, so this only proves the hook
     // is present. The other two thirds live where they can be checked:
     // `tests/unit/focus-ring-rule.spec.ts` asserts `index.css` still defines

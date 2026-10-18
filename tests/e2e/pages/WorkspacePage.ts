@@ -57,7 +57,11 @@ export class WorkspacePage {
   get queryBarAdvancedToggle() { return this.win.locator('[aria-controls="query-bar-advanced"]'); }
 
   /** The result bar's Fields control trigger; its name gains a badge's text when one shows. */
-  get fieldsButton() { return this.win.getByRole('button', { name: /^Fields/ }); }
+  // `aria-haspopup`: a Tab Group header is named after its Connection, so a
+  // Connection called "Fields …" would otherwise match too.
+  get fieldsButton() {
+    return this.win.getByRole('button', { name: /^Fields/ }).and(this.win.locator('[aria-haspopup="dialog"]'));
+  }
 
   /** Projection input in the Fields control's "fetch" section — only while the control is open. */
   get fieldsProjection() { return this.win.locator('[data-testid="fields-projection"]'); }

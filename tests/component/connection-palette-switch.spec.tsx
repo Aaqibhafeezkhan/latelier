@@ -123,7 +123,7 @@ async function openViaPalette(name: string) {
 }
 
 async function openSwitcher() {
-  const trigger = await screen.findByRole('button', { name: /Prod — US East/i });
+  const trigger = await screen.findByRole('button', { name: /^Connection: Prod — US East/i });
   await userEvent.click(trigger);
   return screen.findByRole('listbox', { name: 'Connections' });
 }
@@ -520,7 +520,7 @@ describe('command palette connection opening', () => {
     });
 
     render(app(['/workspace']));
-    await screen.findByRole('button', { name: /Prod — US East/i });
+    await screen.findByRole('button', { name: /^Connection: Prod — US East/i });
 
     await openViaPalette('Staging');
     await openViaPalette('Prod — EU West');

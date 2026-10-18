@@ -37,7 +37,6 @@ export interface ShellSectionProps {
   scratchConnectionId: string | null;
   hints: ReturnType<typeof useHints>;
   openConnection: (id: string) => void;
-  setNewTabOpen: (open: boolean) => void;
   panelPrefs: ReturnType<typeof useWorkspacePanelPrefs>;
   connectionDialogs: ReturnType<typeof useConnectionDialogs>;
   /** The navigator's tree, owned by Workspace so it survives the sidebar collapsing. */
@@ -62,7 +61,6 @@ export function ShellSection({
   scratchConnectionId,
   hints,
   openConnection,
-  setNewTabOpen,
   panelPrefs,
   connectionDialogs,
   navigatorData,
@@ -188,7 +186,6 @@ export function ShellSection({
             void tabs.close(id);
           }}
           onReorder={(ids) => void tabs.reorder(ids)}
-          onOpenNew={() => setNewTabOpen(true)}
           onTogglePin={(id) => {
             const t = tabs.tabs.find((x) => x.id === id);
             if (t) void tabs.setPinned(id, !t.pinned);

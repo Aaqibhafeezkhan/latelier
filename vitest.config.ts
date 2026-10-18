@@ -43,6 +43,9 @@ export default defineConfig({
           environment: 'jsdom',
           include: ['tests/component/**/*.spec.{ts,tsx}'],
           setupFiles: ['tests/helpers/jsdomSetup.ts'],
+          // jsdom role queries over a large tree run ~8x slower on the CI
+          // runner under --coverage than locally; the 5s default flaked (#550).
+          testTimeout: 20_000,
         },
       },
     ],
