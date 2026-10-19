@@ -7,7 +7,7 @@
 // testing note, a test that only inspects rendered DOM structure can pass
 // against a tree the printer would refuse to run.
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent, within } from '../helpers/render';
+import { act, render, screen, waitFor, fireEvent, within } from '../helpers/render';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { DRAGGED_FIELD_MIME } from '../../src/pages/Workspace/builder';
@@ -1050,6 +1050,9 @@ describe('Filter drawer — type-aware value editors', () => {
       const { updateSpy } = mountWith(makeState({ queryRaw: '{"s":{"$in":["a","b"]}}' }));
 
       const chipBox = await screen.findByRole('combobox', { name: 'Values' });
+      // Mantine drops a change to an unfocused combobox input as autofill, so
+      // the box is focused the way a user's click would focus it.
+      act(() => chipBox.focus());
       expect(screen.getByRole('button', { name: 'Remove a' })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Remove b' })).toBeTruthy();
 
@@ -1069,6 +1072,7 @@ describe('Filter drawer — type-aware value editors', () => {
       const { updateSpy } = mountWith(makeState({ queryRaw: '{"s":{"$in":["a"]}}' }));
 
       const chipBox = await screen.findByRole('combobox', { name: 'Values' });
+      act(() => chipBox.focus());
       fireEvent.change(chipBox, { target: { value: '42' } });
       fireEvent.keyDown(chipBox, { key: 'Enter' });
       fireEvent.change(chipBox, { target: { value: '"42"' } });
@@ -1088,6 +1092,7 @@ describe('Filter drawer — type-aware value editors', () => {
       fireEvent.click(await screen.findByRole('option', { name: 'string' }));
 
       const chipBox = await screen.findByRole('combobox', { name: 'Values' });
+      act(() => chipBox.focus());
       fireEvent.change(chipBox, { target: { value: '007' } });
       fireEvent.keyDown(chipBox, { key: 'Enter' });
 
@@ -1385,6 +1390,7 @@ describe('Filter drawer — an empty $in list is never printed', () => {
     await waitFor(() => expect(descriptionOf(chipBox)).toBe(EMPTY));
     expect(lastWrittenQueryRaw(updateSpy)).toBeUndefined();
 
+    act(() => chipBox.focus());
     fireEvent.change(chipBox, { target: { value: 'a' } });
     fireEvent.keyDown(chipBox, { key: 'Enter' });
     await waitFor(() => expect(lastWrittenQueryRaw(updateSpy)).toBe('{"tags":{"$in":["a"]}}'));
