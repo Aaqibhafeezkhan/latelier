@@ -242,24 +242,33 @@ describe('Group and raw-row controls are named by position', () => {
     );
     await screen.findAllByPlaceholderText('field');
 
+    // A single role query avoids repeatedly walking the full tree to compute
+    // accessible names under coverage. These controls expose their names via
+    // aria-label, so checking those labels on the collected buttons preserves
+    // the positional-name assertions without the repeated jsdom cost.
+    const buttons = screen.getAllByRole('button');
+    const expectNamedButton = (name: string) => {
+      expect(buttons.filter((button) => button.getAttribute('aria-label') === name)).toHaveLength(1);
+    };
+
     for (const g of ['2', '3']) {
-      expect(screen.getByRole('button', { name: `Add condition to group ${g}` })).toBeTruthy();
-      expect(screen.getByRole('button', { name: `Add group to group ${g}` })).toBeTruthy();
-      expect(screen.getByRole('button', { name: `Add raw clause to group ${g}` })).toBeTruthy();
-      expect(screen.getByRole('button', { name: `Remove group ${g}` })).toBeTruthy();
+      expectNamedButton(`Add condition to group ${g}`);
+      expectNamedButton(`Add group to group ${g}`);
+      expectNamedButton(`Add raw clause to group ${g}`);
+      expectNamedButton(`Remove group ${g}`);
     }
     expect(screen.getByRole('checkbox', { name: 'Include raw clause 4' })).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Raw clause 4' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Raw clause options 4' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Remove raw clause 4' })).toBeTruthy();
+    expectNamedButton('Raw clause options 4');
+    expectNamedButton('Remove raw clause 4');
     // Each row's menu, nested rows included.
     for (const row of ['1', '2.1', '2.2', '3.1', '3.2']) {
-      expect(screen.getByRole('button', { name: `Condition options ${row}` })).toBeTruthy();
+      expectNamedButton(`Condition options ${row}`);
     }
     // The root is the only group without a position, so its names stay short.
-    expect(screen.getAllByRole('button', { name: 'Add condition' })).toHaveLength(1);
-    expect(screen.getAllByRole('button', { name: 'Add group' })).toHaveLength(1);
-    expect(screen.getAllByRole('button', { name: 'Add raw clause' })).toHaveLength(1);
+    expectNamedButton('Add condition');
+    expectNamedButton('Add group');
+    expectNamedButton('Add raw clause');
   });
 });
 
