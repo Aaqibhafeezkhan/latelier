@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { Collection } from 'mongodb';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import { Collection, Db, MongoServerError } from 'mongodb';
 import type { Stage } from '@shared/types';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { AggregationService } from '../../electron/mongo/AggregationService';
@@ -499,10 +499,9 @@ describe('AggregationService', () => {
    * 3ms per document, so an uncancelled run takes about 4.5s.
    *
    * A read aggregate is killed server-side once the driver aborts and drops
-   * the socket. A `$out` aggregate is not: the server finishes it and the
-   * write lands anyway. So a write pipeline must never report "cancelled" once
-   * its write can no longer be stopped — it runs to completion and reports
-   * completed.
+   * the socket. A `$out`/`$merge` aggregate is not, so a cancel kills it by
+   * its comment through `currentOp`/`killOp`. When that is refused, the write
+   * runs to completion and reports completed, never "cancelled".
    */
   describe('cancel mid-pipeline', () => {
     const cancelDb = 'aggcancel';
@@ -514,7 +513,9 @@ describe('AggregationService', () => {
       body: JSON.stringify({
         $expr: {
           $function: {
-            body: 'function(){ var t = Date.now(); while (Date.now() - t < 3) {} return true; }',
+            // Padded past currentOp's 1KB limit, so the command shows there as
+            // `$truncated` the way a real long pipeline does.
+            body: `function(){ /*${'x'.repeat(1200)}*/ var t = Date.now(); while (Date.now() - t < 3) {} return true; }`,
             args: [],
             lang: 'js',
           },
@@ -525,14 +526,15 @@ describe('AggregationService', () => {
 
     const db = async () => (await pool.write(connId).client()).db(cancelDb);
 
-    const aggregatesOnSlowColl = async (): Promise<number> => {
+    const aggregatesOnSlowColl = async (coll = slowColl): Promise<number> => {
       const client = await pool.write(connId).client();
-      // Match on namespace only: currentOp shows a long command (the
-      // instrumentation $facet) as `command.$truncated`, so a filter on
-      // `command.aggregate` would never see it.
+      // Match on namespace, not `command.aggregate`: currentOp shows a long
+      // command as `command.$truncated`. A running `$out` reports the temp
+      // collection it writes as its namespace, so a write is matched by the
+      // comment `run()` tags it with instead.
       const res = await client.db('admin').command({
         currentOp: 1,
-        ns: `${cancelDb}.${slowColl}`,
+        $or: [{ ns: `${cancelDb}.${coll}` }, { 'command.comment': /^latelier-agg:/ }],
       });
       return (res.inprog as unknown[]).length;
     };
@@ -549,12 +551,31 @@ describe('AggregationService', () => {
 
     // Poll until the server is running an op on the source collection, so a
     // cancel lands mid-flight however slow setup was on a loaded machine.
-    const untilAggregateRunning = async (budgetMs: number): Promise<void> => {
+    const untilAggregateRunning = async (budgetMs: number, coll = slowColl): Promise<void> => {
       const deadline = Date.now() + budgetMs;
-      while ((await aggregatesOnSlowColl()) === 0) {
+      while ((await aggregatesOnSlowColl(coll)) === 0) {
         if (Date.now() > deadline) throw new Error('aggregate never started on the server');
         await new Promise((r) => setTimeout(r, 25));
       }
+    };
+
+    // Refuses a command the way a server does for a user without the
+    // privilege. Stubbed: the shared server runs without auth, so it has no
+    // user to lack one. Install it only once the run is on the server, since
+    // the probes above use `currentOp` through the same Db.
+    const refuseCommand = (name: 'killOp' | 'currentOp' = 'killOp') => {
+      const command = Db.prototype.command;
+      return vi.spyOn(Db.prototype, 'command').mockImplementation(function (
+        this: Db,
+        ...args: Parameters<Db['command']>
+      ) {
+        if (name in args[0]) {
+          return Promise.reject(
+            new MongoServerError({ ok: 0, code: 13, codeName: 'Unauthorized', errmsg: 'not authorized' }),
+          );
+        }
+        return command.apply(this, args);
+      });
     };
 
     beforeAll(async () => {
@@ -563,6 +584,12 @@ describe('AggregationService', () => {
       await d
         .collection(slowColl)
         .insertMany(Array.from({ length: docCount }, (_, i) => ({ i })));
+    });
+
+    // A failed test can leave its slow op running, and the next test's
+    // `untilAggregateRunning` would then see that op instead of its own.
+    beforeEach(async () => {
+      expect(await untilNoAggregate(15_000)).toBe(0);
     });
 
     afterAll(async () => {
@@ -603,10 +630,138 @@ describe('AggregationService', () => {
       expect(await untilNoAggregate(3000)).toBe(0);
     });
 
-    it('a write pipeline cancelled mid-flight completes and is reported as completed', async () => {
+    it('a cancelled $out is killed on the server and leaves its target unchanged', async () => {
       const target = 'cancel_out_target';
-      const token = 'cancel-write-mid-pipeline';
-      const run = svc.run({
+      const token = 'cancel-out-mid-pipeline';
+      const d = await db();
+      await d.collection(target).insertMany([{ _id: 'old1' }, { _id: 'old2' }] as never[]);
+      const run = svc
+        .run({
+          connectionId: connId,
+          dbName: cancelDb,
+          collection: slowColl,
+          stages: [slowMatch, { id: 2, op: '$out', body: JSON.stringify(target), enabled: true }],
+          allowWrite: true,
+          cancelToken: token,
+        })
+        .catch((e: unknown) => e);
+      await untilAggregateRunning(15_000);
+      const tempOuts = async () =>
+        (await d.listCollections().toArray())
+          .map((c) => c.name)
+          .filter((n) => n.startsWith('tmp.agg_out.'));
+      // The write is under way: `$out` fills a temp collection, created just
+      // after the op appears in currentOp.
+      await expect.poll(tempOuts, { timeout: 5000 }).toHaveLength(1);
+      svc.cancel(token);
+
+      const err = await run;
+      expect(err).toMatchObject({
+        message: 'cancelled',
+        details: { writeStageOp: '$out', partialWrite: false },
+      });
+      // `$out` writes to a temp collection and renames it at the end, so a
+      // kill leaves the target as it was and drops the temp collection.
+      const ids = await d.collection(target).find().map((x) => x._id as unknown).toArray();
+      expect(ids).toEqual(['old1', 'old2']);
+      expect(await tempOuts()).toEqual([]);
+      expect(await untilNoAggregate(3000)).toBe(0);
+    });
+
+    it("a cancelled write is killed even when it holds its pool's only connection", async () => {
+      const target = 'cancel_out_tight_pool_target';
+      const token = 'cancel-out-tight-pool';
+      const tightId = 'agg-conn-pool-of-one';
+      const uri = new URL(getSharedMongoUri());
+      const tight = makeConnection(
+        tightId,
+        { host: uri.hostname, port: Number(uri.port) },
+        { advanced: { ...makeConnection(tightId, { host: '', port: 0 }).advanced, maxPoolSize: 1 } },
+      );
+      const tightPool = new MongoPool({
+        repo: makeReader([tight]),
+        vault: { get: () => null } as unknown as import('../../electron/secrets/SecretsVault').SecretsVault,
+      });
+      const tightSvc = new AggregationService(
+        tightPool,
+        new RecentQueryService(new RecentQueryRepo(tmp.db)),
+      );
+      try {
+        const run = tightSvc
+          .run({
+            connectionId: tightId,
+            dbName: cancelDb,
+            collection: slowColl,
+            stages: [slowMatch, { id: 2, op: '$out', body: JSON.stringify(target), enabled: true }],
+            allowWrite: true,
+            cancelToken: token,
+          })
+          .catch((e: unknown) => e);
+        await untilAggregateRunning(15_000);
+        tightSvc.cancel(token);
+
+        // A `currentOp` on the write's own pool would wait for the write to
+        // finish, and the run would come back completed instead.
+        expect(await run).toMatchObject({
+          message: 'cancelled',
+          details: { writeStageOp: '$out', partialWrite: false },
+        });
+        expect(await (await db()).collection(target).countDocuments()).toBe(0);
+      } finally {
+        await tightPool.disconnectAll();
+      }
+    });
+
+    it('a cancelled $merge is killed on the server and reports the documents it already wrote', async () => {
+      const bigColl = 'slow_big_src';
+      const target = 'cancel_merge_partial_target';
+      const token = 'cancel-merge-mid-pipeline';
+      const d = await db();
+      // `$merge` flushes in batches of up to 16MB, so 20KB documents make it
+      // write part of the source well before the slow stage reaches the end.
+      await d
+        .collection(bigColl)
+        .insertMany(Array.from({ length: docCount }, (_, i) => ({ i, pad: 'y'.repeat(20_000) })));
+      const run = svc
+        .run({
+          connectionId: connId,
+          dbName: cancelDb,
+          collection: bigColl,
+          stages: [slowMatch, { id: 2, op: '$merge', body: JSON.stringify({ into: target }), enabled: true }],
+          allowWrite: true,
+          cancelToken: token,
+        })
+        .catch((e: unknown) => e);
+      await untilAggregateRunning(15_000, bigColl);
+      const deadline = Date.now() + 15_000;
+      while ((await d.collection(target).estimatedDocumentCount()) === 0) {
+        if (Date.now() > deadline) throw new Error('$merge never flushed a batch');
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      svc.cancel(token);
+
+      const err = await run;
+      expect(err).toMatchObject({
+        message: 'cancelled',
+        details: { writeStageOp: '$merge', partialWrite: true },
+      });
+      const written = await d.collection(target).countDocuments();
+      expect(written).toBeGreaterThan(0);
+      expect(written).toBeLessThan(docCount);
+      expect(await untilNoAggregate(3000)).toBe(0);
+      expect(await aggregatesOnSlowColl(bigColl)).toBe(0);
+    });
+
+    it.each(['killOp', 'currentOp'] as const)('a write whose %s is refused runs to completion and is reported as completed', async (refused) => {
+      const target = `cancel_out_refused_${refused}`;
+      const token = `cancel-out-${refused}-refused`;
+      const warn = vi.fn();
+      const logged = new AggregationService(
+        pool,
+        new RecentQueryService(new RecentQueryRepo(tmp.db)),
+        { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
+      );
+      const run = logged.run({
         connectionId: connId,
         dbName: cancelDb,
         collection: slowColl,
@@ -615,11 +770,20 @@ describe('AggregationService', () => {
         cancelToken: token,
       });
       await untilAggregateRunning(15_000);
-      svc.cancel(token);
-
-      const result = await run;
-      expect(result.rowsJson).toBe('[]');
+      const spy = refuseCommand(refused);
+      try {
+        logged.cancel(token);
+        const result = await run;
+        expect(result.rowsJson).toBe('[]');
+      } finally {
+        spy.mockRestore();
+      }
       expect(await (await db()).collection(target).countDocuments()).toBe(docCount);
+      expect(warn).toHaveBeenCalledWith(
+        'agg',
+        'could not stop the write on the server; it runs to completion',
+        { message: 'not authorized' },
+      );
     });
 
     it("a sent write's own failure after a cancel is reported as that failure, not cancelled", async () => {
@@ -649,9 +813,16 @@ describe('AggregationService', () => {
         })
         .catch((e: unknown) => e);
       await untilAggregateRunning(15_000);
-      svc.cancel(token);
-
-      const err = await run;
+      // A kill would stop the write before its one batch flushes; refused, the
+      // write runs on and fails on its own.
+      const spy = refuseCommand();
+      let err: unknown;
+      try {
+        svc.cancel(token);
+        err = await run;
+      } finally {
+        spy.mockRestore();
+      }
       expect(err).toMatchObject({ code: 'CONFLICT', details: { mongoCode: 11000 } });
       expect((err as Error).message).not.toBe('cancelled');
     });

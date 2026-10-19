@@ -1,4 +1,5 @@
-import type { Collection, Document } from 'mongodb';
+import { randomUUID } from 'node:crypto';
+import type { Collection, Document, MongoClient } from 'mongodb';
 import type {
   AggExplainInput,
   AggInput,
@@ -28,6 +29,10 @@ const SAMPLE_PER_STAGE = 5;
 const DEFAULT_LIMIT = 1000;
 const MAX_LIMIT = 10_000;
 const MAX_BYTES = 200 * 1024 * 1024;
+// How often a cancelled write looks for its op in `currentOp` until it shows up.
+const KILL_POLL_MS = 100;
+// The server's code for an op stopped by `killOp`.
+const INTERRUPTED = 11601;
 
 export { isWriteStage };
 
@@ -108,8 +113,8 @@ export class AggregationService {
     }
     const limit = Math.min(input.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
     let t0 = Date.now();
-    // Once a $out/$merge is sent it cannot be stopped, so its own error is
-    // the real outcome and a cancel no longer turns it into "cancelled".
+    // Once a $out/$merge is sent, a cancel can only ask the server to kill it,
+    // so its own error, or its completion, is the real outcome.
     let writeSent = false;
 
     this.running++;
@@ -133,14 +138,25 @@ export class AggregationService {
         // No `signal` here on purpose: aborting makes the driver drop the
         // socket and throw at once, but the server does not stop a $out/$merge
         // when its client disconnects — the write lands seconds later while the
-        // UI would already say "cancelled". So a write, once sent, runs to the end.
+        // UI would already say "cancelled". A cancel instead finds the op by
+        // its comment and kills it, and the socket stays open to hear how the
+        // write ended.
+        const comment = `latelier-agg:${randomUUID()}`;
         const cursor = coll.aggregate(pipeline, {
           allowDiskUse: true,
           maxTimeMS: QUERY_TIMEOUT_MS,
+          comment,
         });
         if (controller.signal.aborted) throw new SystemError('INTERNAL', 'cancelled');
         writeSent = true;
-        await cursor.toArray();
+        const written = cursor.toArray();
+        const stop = () => void this.killWrite(input.connectionId, comment, written);
+        controller.signal.addEventListener('abort', stop, { once: true });
+        try {
+          await written;
+        } finally {
+          controller.signal.removeEventListener('abort', stop);
+        }
         durationMs = Date.now() - t0;
         rowsJson = '[]';
         rowCount = 0;
@@ -202,6 +218,15 @@ export class AggregationService {
     } catch (err) {
       if (controller.signal.aborted && !writeSent) {
         throw new SystemError('INTERNAL', 'cancelled');
+      }
+      // The kill landed: a `$out` writes to a temp collection and renames it at
+      // the end, so its target is untouched; a `$merge` keeps every batch it
+      // already flushed, and nothing rolls them back.
+      if (controller.signal.aborted && (err as { code?: unknown }).code === INTERRUPTED) {
+        throw new SystemError('INTERNAL', 'cancelled', {
+          writeStageOp: writeStage!.op,
+          partialWrite: writeStage!.op === '$merge',
+        });
       }
       const classified = classifyMongoOpError(err);
       // Record failures so the recent-query history stays consistent with
@@ -386,6 +411,65 @@ export class AggregationService {
   }
 
   // ─── internals ─────────────────────────────────────────────────────────
+
+  /**
+   * Kills a sent write on the server. The op is found by the comment `run()`
+   * tagged it with; the comment survives in `currentOp` even when a long
+   * command shows as `command.$truncated`. `$ownOps` lets a user without the
+   * `inprog` privilege see their own ops. The cursor is lazy, so the command
+   * may not have reached the server when Cancel lands: keep looking until the
+   * op shows up or the write settles. `killOp` answers ok for any opid, so
+   * whether the write stopped is read from how `written` settles, not here.
+   *
+   * The commands go over a control client of their own: on the pooled client
+   * they would queue behind the very aggregate they are meant to stop
+   * whenever it holds the pool's last connection.
+   *
+   * A refusal (no `killop` privilege, a hosted tier that disallows these
+   * commands) only costs the stop: the write runs to completion as before.
+   */
+  private async killWrite(
+    connectionId: string,
+    comment: string,
+    written: Promise<unknown>,
+  ): Promise<void> {
+    let settled = false;
+    const markSettled = () => {
+      settled = true;
+    };
+    written.then(markSettled, markSettled);
+    let control: MongoClient | undefined;
+    try {
+      control = await this.pool.openControlClient(connectionId);
+      const admin = control.db('admin');
+      while (!settled) {
+        const { inprog } = (await admin.command({
+          currentOp: 1,
+          $ownOps: true,
+          'command.comment': comment,
+        })) as { inprog: Array<{ opid: unknown }> };
+        if (inprog.length > 0) {
+          // Every match: on a sharded cluster each shard runs its own part of
+          // the pipeline under the same comment. The opid goes back as
+          // `currentOp` gave it, a number on mongod and a "shard:opid" string
+          // on mongos.
+          for (const op of inprog) await admin.command({ killOp: 1, op: op.opid });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, KILL_POLL_MS));
+      }
+    } catch (err) {
+      this.log?.warn('agg', 'could not stop the write on the server; it runs to completion', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      await control?.close().catch((err: unknown) => {
+        this.log?.warn('agg', 'closing the control client failed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+  }
 
   /**
    * Size of a save target, or undefined when it cannot be read. The count only

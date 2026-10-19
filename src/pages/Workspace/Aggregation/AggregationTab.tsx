@@ -75,10 +75,12 @@ export function AggregationTab({
     target?: string;
   } | null>(null);
   const runTokenRef = React.useRef<string | null>(null);
-  // A confirmed write run can't be dropped on Cancel: main lets a write that
-  // was already sent run to completion. `runIsWriteRef` marks the run in
-  // flight as one; `stopping` (state for the button, ref for the settling
-  // run's closure) is the Cancel-was-pressed state while it settles.
+  // A confirmed write run can't be dropped on Cancel: main asks the server to
+  // kill a write that was already sent, and the run settles as stopped, as
+  // completed (the kill was refused or came too late) or as the write's own
+  // error. `runIsWriteRef` marks the run in flight as one; `stopping` (state
+  // for the button, ref for the settling run's closure) is the
+  // Cancel-was-pressed state while it settles.
   const runIsWriteRef = React.useRef(false);
   const stoppingRef = React.useRef(false);
   const [stopping, setStopping] = React.useState(false);
@@ -269,13 +271,24 @@ export function AggregationTab({
         onPatch({ lastRun });
         setLastRunSig(new Map(runStages.map((s) => [s.id, stageSig(s)])));
         if (stoppingRef.current) {
-          notify.info('The write had already started, so it ran to completion.');
+          notify.info("The write couldn't be stopped, so it ran to completion.");
         }
       } catch (e) {
         if (runTokenRef.current !== token) return;
-        // The cancel reached main before the write was sent: nothing ran, and
-        // the tab stops quietly, as it does for a cancelled read-only run.
-        if (stoppingRef.current && isIpcError(e) && e.message === 'cancelled') return;
+        if (stoppingRef.current && isIpcError(e) && e.message === 'cancelled') {
+          // Killed on the server. Without these details the cancel reached main
+          // before the write was sent: nothing ran, and the tab stops quietly,
+          // as it does for a cancelled read-only run.
+          const stopped = (e.details ?? {}) as { writeStageOp?: string; partialWrite?: boolean };
+          if (stopped.partialWrite) {
+            notify.warning(
+              `Write stopped. ${stopped.writeStageOp} may already have written some documents, and they stay in the target.`,
+            );
+          } else if (stopped.writeStageOp) {
+            notify.info(`Write stopped. The ${stopped.writeStageOp} target was left unchanged.`);
+          }
+          return;
+        }
         if (isIpcError(e)) {
           const details = (e.details ?? {}) as {
             kind?: string;
@@ -338,11 +351,11 @@ export function AggregationTab({
     if (!token || stoppingRef.current) return;
     void api.agg.cancel({ token }).catch(() => {});
     if (runIsWriteRef.current) {
-      // Keep the token: the run settles as completed (the write was already
-      // sent) or as cancelled (it was not), and executeRun reports which.
+      // Keep the token: the run settles as stopped, completed or failed, and
+      // executeRun reports which.
       stoppingRef.current = true;
       setStopping(true);
-      notify.info("A write stage can't be interrupted once it has started.", {
+      notify.info('Asking the server to stop the write stage.', {
         title: 'Stopping…',
       });
       return;

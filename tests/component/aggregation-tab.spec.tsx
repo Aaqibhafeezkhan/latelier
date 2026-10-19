@@ -697,13 +697,13 @@ describe('AggregationTab — cancelling a run', () => {
     expect(cancel).toHaveBeenCalledExactlyOnceWith({ token });
     expect((await screen.findByRole('button', { name: /Stopping/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(
-      await screen.findByText("A write stage can't be interrupted once it has started."),
+      await screen.findByText('Asking the server to stop the write stage.'),
     ).toBeTruthy();
 
     await act(async () => pending.resolve(ranOk));
 
     expect(
-      await screen.findByText('The write had already started, so it ran to completion.'),
+      await screen.findByText("The write couldn't be stopped, so it ran to completion."),
     ).toBeTruthy();
     expect(screen.queryByText('· 7ms')).not.toBeNull();
     expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(false);
@@ -719,8 +719,54 @@ describe('AggregationTab — cancelling a run', () => {
 
     expect((await screen.findByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText(/ran to completion/)).toBeNull();
+    expect(screen.queryByText(/Write stopped/)).toBeNull();
     expect(screen.queryByText(/cancelled/)).toBeNull();
     expect(screen.queryByText('· 7ms')).toBeNull();
+  });
+
+  it('a $out write killed on the server says its target was left unchanged', async () => {
+    const pending = deferred<typeof ranOk>();
+    await startWriteRun(pending.promise);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await screen.findByRole('button', { name: /Stopping/ });
+    await act(async () =>
+      pending.reject({
+        code: 'INTERNAL',
+        message: 'cancelled',
+        details: { writeStageOp: '$out', partialWrite: false },
+      }),
+    );
+
+    expect(
+      await screen.findByText('Write stopped. The $out target was left unchanged.'),
+    ).toBeTruthy();
+    expect(screen.queryByText(/ran to completion/)).toBeNull();
+    expect(screen.queryByText('· 7ms')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('a $merge write killed on the server warns that some documents may already be written', async () => {
+    const pending = deferred<typeof ranOk>();
+    await startWriteRun(pending.promise);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await screen.findByRole('button', { name: /Stopping/ });
+    await act(async () =>
+      pending.reject({
+        code: 'INTERNAL',
+        message: 'cancelled',
+        details: { writeStageOp: '$merge', partialWrite: true },
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        'Write stopped. $merge may already have written some documents, and they stay in the target.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/left unchanged/)).toBeNull();
+    expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('a cancelled write run that then fails shows the error, not a completion notice', async () => {
