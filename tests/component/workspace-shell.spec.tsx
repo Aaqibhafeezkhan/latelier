@@ -185,6 +185,36 @@ describe('Workspace shell', () => {
     const dbSelect = screen.getByLabelText('Database') as HTMLSelectElement;
     await waitFor(() => expect(dbSelect.value).toBe('app'));
   });
+
+  it('shows the New script tab tooltip when keyboard focus lands on the + Script button', async () => {
+    installAtelierMock({
+      tabs: { list: async () => [collectionTab({ id: 'a', collection: 'alpha', isActive: true })] },
+      conn: {
+        list: async () => [
+          {
+            id: 'c1',
+            name: 'Prod',
+            color: '#1A6835',
+            host: 'localhost',
+            port: 27017,
+            connectionType: 'standard',
+            readOnly: false,
+            status: 'connected',
+          },
+        ],
+      },
+    });
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/workspace', state: { openConnectionId: 'c1' } }]}>
+        <Workspace />
+      </MemoryRouter>,
+    );
+
+    fireEvent.focus(await screen.findByRole('button', { name: 'New script tab' }));
+
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toBe('New script tab');
+  });
 });
 
 // ─── X15 T5 — NewTabPicker on Mantine ─────────────────────────────────

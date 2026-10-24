@@ -10,6 +10,7 @@ import { writePrivateFile } from '../../utils/privateFs.ts';
 import type { DiagnosticService } from '../../services/DiagnosticService.ts';
 import { parseAllowedExternalUrl } from '../../security/externalUrl.ts';
 import type { PickedCredentialPaths } from '../../security/credentialPaths.ts';
+import type { UnsavedWorkStore } from '../../quitGuard.ts';
 
 const PickFileInput = z.enum(['tls-ca', 'tls-client-cert', 'ssh-key', 'data-import']);
 const OpenExternalInput = z.string().url();
@@ -23,6 +24,10 @@ const SaveFileInput = z.object({
   content: z.string(),
 });
 const NoInput = z.undefined().or(z.null()).or(z.object({}));
+const SetUnsavedWorkInput = z.object({
+  source: z.enum(['connectionForm', 'pipelines']),
+  count: z.number().int().min(0).max(1000),
+});
 
 const PURPOSE_FILTERS: Record<PickFilePurpose, Electron.FileFilter[]> = {
   'tls-ca': [
@@ -65,6 +70,9 @@ export function saveFilters(defaultName: string): FileFilter[] {
  * key dialogs; the connection channels accept such a path only if it is in
  * there. Both are required, not optional, for the same reason the router's
  * sender check is.
+ *
+ * `unsaved` is the store the quit gate reads; the renderer's reports land in
+ * it. Optional like `diagnostic`, and the channel fails the same way without it.
  */
 export function registerAppChannels(
   router: Router,
@@ -72,6 +80,7 @@ export function registerAppChannels(
   pickedImports: Set<string>,
   pickedCredentialPaths: PickedCredentialPaths,
   diagnostic?: DiagnosticService,
+  unsaved?: UnsavedWorkStore,
 ): void {
   router.register(
     IPC_CHANNELS.appPickFile,
@@ -161,6 +170,15 @@ export function registerAppChannels(
         );
       }
       return { path: result.filePath };
+    },
+  );
+
+  router.register(
+    IPC_CHANNELS.appSetUnsavedWork,
+    zodValidator(SetUnsavedWorkInput),
+    async ({ source, count }) => {
+      if (!unsaved) throw new SystemError('INTERNAL', 'unsaved-work store not available');
+      unsaved[source] = count;
     },
   );
 }

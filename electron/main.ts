@@ -38,6 +38,7 @@ import { registerMetaChannels } from './ipc/handlers/meta.ts';
 import { registerIndexChannels } from './ipc/handlers/indexes.ts';
 import { registerCollectionAdminChannels } from './ipc/handlers/collectionAdmin.ts';
 import { registerUserChannels } from './ipc/handlers/users.ts';
+import { registerAdminChannels } from './ipc/handlers/admin.ts';
 import { registerPrefsChannels } from './ipc/handlers/prefs.ts';
 import { registerUpdatesChannels } from './ipc/handlers/updates.ts';
 import { UpdateService, shouldCheckForUpdates } from './services/UpdateService.ts';
@@ -66,6 +67,7 @@ import { MetaService } from './mongo/MetaService.ts';
 import { IndexService } from './mongo/IndexService.ts';
 import { CollectionAdminService } from './mongo/CollectionAdminService.ts';
 import { UserService } from './mongo/UserService.ts';
+import { MonitorService } from './mongo/MonitorService.ts';
 import { WorkspaceTabRepo } from './db/repositories/WorkspaceTabRepo.ts';
 import { WorkspaceStateService, applyRestoreTabsPref } from './services/WorkspaceStateService.ts';
 import { SavedQueryRepo } from './db/repositories/SavedQueryRepo.ts';
@@ -84,7 +86,7 @@ import { ImportService } from './mongo/ImportService.ts';
 import { DEFAULT_EXPORT_CAP, QueryService } from './mongo/QueryService.ts';
 import { DocumentService } from './mongo/DocumentService.ts';
 import { createLogger, type Logger } from './log.ts';
-import { createQuitGate, runTeardown, type RunningWork } from './quitGuard.ts';
+import { createQuitGate, describeQuitDetail, runTeardown, type RunningWork, type UnsavedWorkStore } from './quitGuard.ts';
 import { PrivateModeError } from './utils/privateFs.ts';
 import { createRouter } from './ipc/router.ts';
 import { senderCheck } from './ipc/senderGuard.ts';
@@ -180,6 +182,14 @@ let log: Logger | null = null;
 let connExportSvc: ConnectionExportService | null = null;
 let importWizardSvc: ImportWizardService | null = null;
 let renderCrashesInWindow = 0;
+// What the renderer last reported as unsaved (`app:setUnsavedWork`). Zeroed
+// whenever the page that reported it goes (reload, crash, window closed), so
+// a stale report cannot make every later quit ask.
+const unsaved: UnsavedWorkStore = { connectionForm: 0, pipelines: 0 };
+function clearUnsavedWork(): void {
+  unsaved.connectionForm = 0;
+  unsaved.pipelines = 0;
+}
 let firstCrashAt = 0;
 
 function resolveUserDataDir(): string {
@@ -383,6 +393,8 @@ function createWindow(): void {
   // became an uncaughtException, an error dialog, and `app.exit(1)`.
   win.on('closed', () => {
     win = null;
+    // On macOS the app outlives its window, and the page that reported is gone.
+    clearUnsavedWork();
     // An import token does not outlive the window that asked for it.
     importWizardSvc?.clearPending();
   });
@@ -411,7 +423,14 @@ function createWindow(): void {
   win.on('maximize', persistBoundsNow);
   win.on('unmaximize', persistBoundsNow);
 
+  // A reload (or any full page load) starts a fresh renderer state. The app's
+  // own route changes are hash navigations, which are same-document and keep
+  // their reports.
+  win.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) clearUnsavedWork();
+  });
   win.webContents.on('render-process-gone', (_evt, details) => {
+    clearUnsavedWork();
     const now = Date.now();
     log?.error('window', 'render-process-gone', { reason: details.reason });
     if (firstCrashAt === 0 || now - firstCrashAt > 10_000) {
@@ -461,6 +480,10 @@ function runningWork(): RunningWork {
     shellCommands: mshellSvc?.busyCount() ?? 0,
     imports: importSvc?.runningCount() ?? 0,
     aggregations: aggSvc?.runningCount() ?? 0,
+    unsavedForms: unsaved.connectionForm,
+    // With "Reopen tabs on launch" on, tabs persist and nothing is lost; only
+    // an explicit `false` clears them at the next launch (`applyRestoreTabsPref`).
+    unsavedPipelines: appState?.get<boolean>('ui.workspace.restoreTabs') === false ? unsaved.pipelines : 0,
   };
 }
 
@@ -472,7 +495,7 @@ async function askToQuit(message: string): Promise<boolean> {
     cancelId: 0,
     title: "Quit L'Atelier?",
     message,
-    detail: 'Work in progress is cancelled and its results are lost.',
+    detail: describeQuitDetail(runningWork()),
   };
   const result = await (win && !win.isDestroyed()
     ? dialog.showMessageBox(win, options)
@@ -731,6 +754,7 @@ app.whenReady().then(() => {
   const indexSvc = new IndexService(pool);
   const collectionAdminSvc = new CollectionAdminService(pool);
   const userSvc = new UserService(pool);
+  const monitorSvc = new MonitorService(pool, log);
   const checkpointDb = db;
   const checkpointLog = log;
   const maintenance = new MaintenanceService({
@@ -759,12 +783,13 @@ app.whenReady().then(() => {
   // Filled by the open dialog, read by the data channels: the only files an
   // import may read are ones the user picked in main's own dialog.
   const pickedImports = new Set<string>();
-  registerAppChannels(router, () => win, pickedImports, pickedCredentialPaths, diagnostic);
+  registerAppChannels(router, () => win, pickedImports, pickedCredentialPaths, diagnostic, unsaved);
   registerMongoChannels(router, pool, () => win?.webContents ?? null);
   registerMetaChannels(router, metaSvc);
   registerIndexChannels(router, indexSvc);
   registerCollectionAdminChannels(router, collectionAdminSvc);
   registerUserChannels(router, userSvc);
+  registerAdminChannels(router, monitorSvc);
   registerPrefsChannels(router, appState, () => win?.webContents ?? null);
   // The renderer cannot write this switch through prefs:set; this dialog is
   // the only way to turn it on, and a compromised renderer cannot answer it.

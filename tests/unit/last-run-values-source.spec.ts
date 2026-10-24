@@ -97,4 +97,33 @@ describe('lastRunValuesSource', () => {
     expect(out).toHaveLength(50);
     expect(out.map((s) => s.display)).not.toContain('s59');
   });
+
+  it('tags each value with its source, display type and count', () => {
+    const out = sync(
+      lastRunValuesSource(ctx(' n ', { recentDocs: [{ n: 1 }, { n: 1 }, { n: 'a' }] })),
+    );
+    expect(out).toEqual([
+      { kind: 'value', value: '1', display: '1', type: 'number', source: 'lastRun', frequency: 2 },
+      { kind: 'value', value: 'a', display: 'a', type: 'string', source: 'lastRun', frequency: 1 },
+    ]);
+  });
+
+  it.each(['constructor', 'toString', '__proto__', 'a.constructor'])(
+    'never reads the inherited property %s',
+    (field) => {
+      const out = sync(lastRunValuesSource(ctx(field, { recentDocs: [{ a: { b: 1 } }] })));
+      expect(out).toEqual([]);
+    },
+  );
+
+  it('reads an own property literally named constructor', () => {
+    const doc = JSON.parse('{"constructor":"own"}') as unknown;
+    const out = sync(lastRunValuesSource(ctx('constructor', { recentDocs: [doc] })));
+    expect(out.map((s) => s.display)).toEqual(['own']);
+  });
+
+  it.each(['token', 'auth.Secret'])('never offers values of the secret-named field %s', (field) => {
+    const docs = [{ token: 't1', auth: { Secret: 's1' } }];
+    expect(sync(lastRunValuesSource(ctx(field, { recentDocs: docs })))).toEqual([]);
+  });
 });

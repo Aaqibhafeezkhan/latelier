@@ -58,10 +58,18 @@ export function TitleBar({
         wrap="nowrap"
         style={{
           minWidth: 0,
-          WebkitAppRegion: 'no-drag',
+          WebkitAppRegion: 'drag',
         } as React.CSSProperties}
       >
-        {connectionSlot ?? (
+        {connectionSlot ? (
+          // Only the interactive switcher opts out of dragging; the plain
+          // breadcrumb text below stays part of the window's drag area.
+          <div
+            style={{ display: 'flex', flex: 1, minWidth: 0, WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          >
+            {connectionSlot}
+          </div>
+        ) : (
           <span style={{ fontSize: 12, color: T.textMuted }}>
             {connectionName ?? '—'}
           </span>

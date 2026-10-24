@@ -1,5 +1,6 @@
 import React from 'react';
 import { themeVars } from '../theme/themeVars';
+import { UnstyledButton } from '@mantine/core';
 import { I } from '../icons';
 
 /**
@@ -27,7 +28,7 @@ export function DisclosureToggle({
 }) {
   const T = themeVars;
   return (
-    <button
+    <UnstyledButton
       type="button"
       aria-expanded={open}
       style={{
@@ -36,19 +37,14 @@ export function DisclosureToggle({
         gap: 6,
         minWidth: 0,
         maxWidth: '100%',
-        background: 'none',
-        border: 'none',
-        padding: 0,
-        margin: 0,
         font: 'inherit',
         color: 'inherit',
-        cursor: 'pointer',
       }}
     >
       <span style={{ color: T.textGhost, display: 'flex', flexShrink: 0 }}>
         {open ? I.chevD : I.chevR}
       </span>
       {children}
-    </button>
+    </UnstyledButton>
   );
 }

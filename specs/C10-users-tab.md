@@ -6,13 +6,13 @@
 
 Replace the C08 `StubTab` for the Users tab in `DetailPanel.tsx` with a real database-user manager. Lists users defined on the server (per database, plus `admin`), shows their roles, and supports create / update / delete with the same safety posture as C03 connections — passwords go through `safeStorage`-encrypted *transport* (the same `SECRET_INPUT` allowlist mechanism used by `conn:create`) and never persist on disk client-side.
 
-This is intentionally limited: MongoDB exposes a rich auth model (custom roles, role inheritance, X.509 user mapping, awsiam, OIDC, Kerberos). Iteration 1 covers the common case — SCRAM users with built-in roles — and surfaces the rest as read-only when present.
+This is intentionally limited: MongoDB exposes a rich auth model (custom roles, role inheritance, X.509 user mapping, awsiam, OIDC, Kerberos). Iteration 1 covered the common case — SCRAM users with built-in roles — and surfaces the rest as read-only when present. Custom roles have since moved in scope: the Roles tab (§4a) creates, edits and drops them.
 
 ## Scope
 
 - **In**: `user:list`, `user:get`, `user:create`, `user:update`, `user:drop`, `role:list`, the `UsersTab` component, create/edit drawer, two-step delete confirm.
+- **In**: custom role creation / editing — `role:create`, `role:update`, `role:drop`, the `RolesTab` component (§4a), and the role-name picker in the user drawer that lists both built-in and custom roles.
 - **Out**:
-  - Custom role creation / editing. Role pickers list both built-in and custom roles, but creating a new role requires its own UX. Surface as a future spec when there's a real ask.
   - X.509 / awsiam / OIDC / Kerberos user creation. The list view shows mechanism badges for these so the user knows they exist; editing them is read-only with an explanatory hint.
   - Per-cluster user (Atlas Database User). Atlas-managed users live in the Atlas API, not in `system.users`. Out of scope.
   - Password rotation reminders / audit log.
@@ -66,8 +66,36 @@ export interface RoleInfo {
   role: string;
   db: string;
   isBuiltin: boolean;
-  /** Inherited roles, as listed by the server. */
+  /** Direct parents only — what `createRole`/`updateRole` take as `roles`. */
+  roles: UserRoleRef[];
+  /** Transitive closure of `roles`, as listed by the server. Display only. */
   inheritedRoles: UserRoleRef[];
+  /** EJSON canonical array of the role's own (non-inherited) privileges. */
+  privileges?: string;
+}
+
+export interface RoleCreateInput {
+  connectionId: string;
+  dbName: string;
+  role: string;
+  /** EJSON canonical array of privilege documents; may be `[]`. */
+  privileges: string;
+  /** Inherited roles; may be empty, unlike a user's roles. */
+  roles: UserRoleRef[];
+}
+
+export interface RoleUpdateInput {
+  connectionId: string;
+  dbName: string;
+  role: string;
+  /** Each present field replaces the server's list; an empty patch is VALIDATION. */
+  patch: { privileges?: string; roles?: UserRoleRef[] };
+}
+
+export interface RoleDropInput {
+  connectionId: string;
+  dbName: string;
+  role: string;
 }
 
 export interface UserCreateInput {
@@ -116,7 +144,10 @@ export interface UserDropInput {
 | `user:create`  | `UserCreateInput`  | `{ ok: true }`        | **`SECRET_INPUT`** — accepts plaintext password. |
 | `user:update`  | `UserUpdateInput`  | `{ ok: true }`        | **`SECRET_INPUT`** — accepts plaintext password. |
 | `user:drop`    | `UserDropInput`    | `{ dropped: true }`   |                                                |
-| `role:list`    | `{ connectionId, dbName }` | `RoleInfo[]` | Powers the role picker. Pulls built-in + custom from the given db.  |
+| `role:list`    | `{ connectionId, dbName }` | `RoleInfo[]` | Powers the role picker and the Roles tab. Pulls built-in + custom from the given db, with `showPrivileges: true`.  |
+| `role:create`  | `RoleCreateInput`  | `{ ok: true }`        | Write grant (read-only connections refuse). Not `SECRET_INPUT`. |
+| `role:update`  | `RoleUpdateInput`  | `{ ok: true }`        | Write grant. Not `SECRET_INPUT`.               |
+| `role:drop`    | `RoleDropInput`    | `{ dropped: true }`   | Write grant. Not `SECRET_INPUT`.               |
 
 Channel name registry additions in `shared/ipc.ts`:
 
@@ -127,7 +158,12 @@ userCreate: 'user:create', // SECRET_INPUT
 userUpdate: 'user:update', // SECRET_INPUT
 userDrop:   'user:drop',
 roleList:   'role:list',
+roleCreate: 'role:create',
+roleUpdate: 'role:update',
+roleDrop:   'role:drop',
 ```
+
+The three role write channels register in the same `registerUserChannels` as the user channels. Like the `user:*` writes they are not audited (ADR 0002).
 
 `scripts/ipc-secret-allowlist.txt` additions:
 
@@ -343,7 +379,9 @@ Right-side drawer (400 px), reuses W08 drawer styling.
 └────────────────────────────────────────────────┘
 ```
 
-- The `+ Add role` action opens an inline picker fetched from `role:list({ connectionId, dbName })` for whichever DB the role applies to. The user can switch the role's db in a small inline DB dropdown next to the role name.
+- Each role row is a role-name `Autocomplete` and a db field. The suggestions come from `role:list({ connectionId, dbName })` for that row's db: fetched once per distinct db (the drawer's own db at open, a db typed into a row after a 300 ms debounce) and cached for the drawer's lifetime.
+- A role name the loaded list lacks shows "Unknown role on {db}" under the row. It warns and never blocks the save. When `role:list` fails (usually a missing privilege) no warning is shown for that db.
+- Password and Confirm are Mantine `PasswordInput`s. Each reveal toggle is in the tab order (`visibilityToggleFocusable`) and is a toggle button with a fixed name ("Show password", "Show confirm password") whose state is carried by `aria-pressed`.
 - Edit mode: drawer reads "Edit user — `{username}` (auth db `{db}`)". Username and auth db are immutable. Password fields read "Leave blank to keep current password."
 - External (X.509 / awsiam / OIDC) users → drawer reads "External users are managed via your auth provider. MongoLab only supports editing roles." Password fields hidden; mechanism toggles disabled.
 - Validation:
@@ -373,6 +411,16 @@ Type the username to confirm:
 
 - The DetailPanel knows the active connection's `auth_username` and `auth_database`. The `UsersTab` reads them and hides Edit/Drop buttons on the row that matches. A subtle inline pill reads "← this connection".
 - This is UI-only; main does not refuse self-drop because in environments where a single shared user is expected to clean up after itself, that's a legitimate workflow. The UI nudge is enough.
+
+## 4a. Roles tab
+
+`DetailPanel` gains a fourth tab, **Roles**, rendering `RolesTab`.
+
+- **Database picker.** Same `<select>` as the Users tab, sharing the `ui.users.lastDb` pref so both tabs follow the last database picked in either. `rolesInfo` has no all-databases form, so the Users tab's "All databases" value opens Roles on `admin`, and Roles offers no such option.
+- **List.** One row per role: name, direct inherited roles (`role@db`), privilege count. Built-in roles are hidden behind a "Show built-in" checkbox (default off), carry a "built-in" badge, and are read-only — no Edit or Drop.
+- **Create / Edit drawer.** Name (create only); inherited roles through the same role-row editor and Autocomplete as the user drawer (an empty list is allowed); privileges in a plain `Textarea` holding an EJSON array. The client refuses invalid EJSON or a non-array before calling. Edit seeds the inherited roles from `roles` (direct parents), never `inheritedRoles`, so a save does not flatten the hierarchy, and the `role:update` patch carries only the fields that differ from the seed. Role names and dbs are trimmed before sending, in both drawers. The drawer carries the X15 §2 unsaved-changes guard.
+- **Drop** is type-to-confirm, the same tier as dropping a user (ADR 0013): the role name must be typed back before Drop enables. On success `role:drop`, refetch, and focus returns to the list region (the dropped row's button is gone).
+- **Main.** `createRole` / `updateRole` / `dropRole` take `pool.write(connectionId)` before anything else (ADR 0005), send `maxTimeMS: STATS_TIMEOUT_MS`, parse `privileges` as EJSON and refuse a non-array with `VALIDATION`, and classify errors through `classifyMongoOpError`.
 
 ## 5. State & persistence
 
@@ -406,6 +454,13 @@ Type the username to confirm:
 - `external: true` users open the drawer in role-only edit mode; password fields hidden.
 - `npm run audit:ipc` passes with the two new entries (`user:create`, `user:update`) in `scripts/ipc-secret-allowlist.txt`.
 - No log entry produced by a `createUser` / `updateUser` flow contains the plaintext password (verified by snapshot).
+- The user drawer's role-name field suggests the roles `role:list` returns for the row's db; an unknown name warns inline without blocking the save; a failed list shows no warning.
+- The password reveal toggles are reachable by Tab and toggle with Enter.
+- The Roles tab lists a database's custom roles; built-ins appear only with "Show built-in" and have no Edit / Drop.
+- Creating a role with privileges and inherited roles succeeds and the new row appears after refetch.
+- Editing a role replaces its privileges and direct inherited roles; inherited-only (transitive) roles are never written back.
+- Dropping a role happens only after its name is typed back; focus then lands on the list.
+- `role:create`, `role:update` and `role:drop` are refused on a read-only connection with the ADR 0005 error, and non-array privileges give `VALIDATION`.
 
 ## 8. Test cases
 
@@ -420,6 +475,8 @@ Type the username to confirm:
 - **conflict.spec.ts** — duplicate create returns `CONFLICT`.
 - **unauthorized.spec.ts** — connect as a user without `userAdminAnyDatabase` → `user:list` returns `UNAUTHORIZED`.
 - **role-list.spec.ts** — `role:list` against `admin` returns `> 0` built-in roles plus any custom roles seeded.
+- **user-service.spec.ts (custom roles)** — create / update / drop round-trip with privileges; `roles` is the direct parents while `inheritedRoles` is the closure; bad privileges give `VALIDATION`; a read-only connection refuses all three writes.
+- **user-handlers.spec.ts** — zod for `role:create` / `role:update` / `role:drop` (empty inherited roles accepted, empty names rejected).
 
 ### Component
 - **users-tab-render.spec.tsx** — mock `api.user` → component renders DB picker, table, and "this connection" pill on the matching row.
@@ -428,10 +485,13 @@ Type the username to confirm:
 - **users-self-protection.spec.tsx** — for the row matching `auth_username + auth_database`, Edit and Drop buttons absent.
 - **users-external.spec.tsx** — for an `$external` user, password fields hidden, mechanism toggles disabled.
 - **users-drop-confirm.spec.tsx** — Drop button opens dialog; typing the wrong username keeps Drop disabled; typing the right one + Drop → `api.user.drop` called.
+- **users-tab-role-picker.spec.tsx** — the Autocomplete lists roles from a mocked `role.list`; the unknown-role warning; the db-typed fetch is debounced; a failed list shows no warning; the password reveal toggle works by keyboard.
+- **roles-tab.spec.tsx** — list with the built-in toggle; create; non-array privileges refused; edit seeded from direct parents; type-to-confirm drop and focus return.
 
 ### E2E
 - **users-create-and-drop.e2e.ts** — open Users tab → All databases → New user → fill (`ci`, password, `read@app`) → Create → row appears → Drop → confirm → row gone.
 - **users-unauthorized.e2e.ts** — connect as a user without privilege → Users tab renders the "lacks the privilege" banner and no rows.
+- **conn-detail-roles.e2e.ts** — open the Roles tab → New role → fill name and privileges → Create → the role lists.
 
 ## 9. Implementation order
 
@@ -446,11 +506,10 @@ Three commits, each independently mergeable:
 - **Plaintext password crossing IPC.** Mitigated by (a) `SECRET_INPUT` allowlist + audit script, (b) redacted logging, (c) error envelopes that strip `pwd` before serialisation. Same posture as `conn:create`. Reviewed by tests.
 - **User drops themselves.** Mitigated by UI hiding the action on the matching row. Power users who want to anyway can open another connection authenticated as a sufficiently privileged user — that's a feature, not a bug.
 - **Atlas managed users.** `usersInfo` against an Atlas cluster only returns server-side users, not Atlas-API-managed users. The empty-state copy nudges the user toward the Atlas console; we deliberately do not try to detect Atlas (out of scope per F05).
-- **Custom-role inheritance display.** Custom roles can inherit from other custom roles arbitrarily deep. v1 displays only the immediate role array on a user; the role picker shows `inheritedRoles` as a tooltip. Not perfect, but sufficient for the common case.
+- **Custom-role inheritance display.** Custom roles can inherit from other custom roles arbitrarily deep. The Users tab displays only the immediate role array on a user, and the Roles tab shows each role's direct parents; the transitive `inheritedRoles` is carried on `RoleInfo` but not displayed. Not perfect, but sufficient for the common case.
 - **`$external` mechanism mix.** A user can be configured for both SCRAM and X.509. `external: true` only when *all* mechanisms are non-password. This is a deliberate, documented heuristic; the alternative (allowing password edits when at least one SCRAM mech is present) is correct but harder to explain in copy. Re-evaluate after first user feedback.
 
 ## 11. Future work — call-outs
 
-- **Custom-role editor**: own spec, gates on user demand.
 - **Per-cluster (Atlas) user view**: requires Atlas Admin API integration; large enough to be its own connection-type feature.
 - **OIDC / Kerberos** create flows: blocked on us having a plausible test environment.

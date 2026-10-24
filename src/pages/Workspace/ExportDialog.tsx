@@ -79,7 +79,7 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
   };
 
   const exportAll = async () => {
-    const { sort, projection, limit } = compileFindOptions(state.builder);
+    const { sort, projection, limit, collation, hint, readPreference } = compileFindOptions(state.builder);
     const defaultName = `${meta.collection}.${exportFileExtension(format)}`;
     const { path, written, truncated } = await api.query.export({
       connectionId: meta.connectionId,
@@ -88,6 +88,9 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
       filter: state.queryRaw,
       sort,
       projection,
+      collation,
+      hint,
+      readPreference,
       limit: limit ?? undefined,
       format,
       relaxed,

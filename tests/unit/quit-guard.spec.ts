@@ -1,74 +1,133 @@
 import { describe, it, expect, vi } from 'vitest';
-import { confirmQuit, createQuitGate, describeRunningWork, runTeardown, type RunningWork } from '../../electron/quitGuard';
+import { confirmQuit, createQuitGate, describeQuitDetail, describeRunningWork, runTeardown, type RunningWork } from '../../electron/quitGuard';
 
 describe('describeRunningWork', () => {
   it('is null when nothing is running', () => {
-    expect(describeRunningWork({ scripts: 0, shellCommands: 0, imports: 0, aggregations: 0 })).toBeNull();
+    expect(describeRunningWork({ scripts: 0, shellCommands: 0, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 })).toBeNull();
   });
 
   it('names one running script', () => {
-    expect(describeRunningWork({ scripts: 1, shellCommands: 0, imports: 0, aggregations: 0 })).toBe('This will stop 1 running script.');
+    expect(describeRunningWork({ scripts: 1, shellCommands: 0, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 })).toBe('This will stop 1 running script.');
   });
 
   it('pluralises scripts', () => {
-    expect(describeRunningWork({ scripts: 3, shellCommands: 0, imports: 0, aggregations: 0 })).toBe('This will stop 3 running scripts.');
+    expect(describeRunningWork({ scripts: 3, shellCommands: 0, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 })).toBe('This will stop 3 running scripts.');
   });
 
   it('names one shell command and pluralises several', () => {
-    expect(describeRunningWork({ scripts: 0, shellCommands: 1, imports: 0, aggregations: 0 })).toBe('This will stop 1 running shell command.');
-    expect(describeRunningWork({ scripts: 0, shellCommands: 2, imports: 0, aggregations: 0 })).toBe('This will stop 2 running shell commands.');
+    expect(describeRunningWork({ scripts: 0, shellCommands: 1, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 })).toBe('This will stop 1 running shell command.');
+    expect(describeRunningWork({ scripts: 0, shellCommands: 2, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 })).toBe('This will stop 2 running shell commands.');
   });
 
   it('lists both kinds when both are running', () => {
-    expect(describeRunningWork({ scripts: 1, shellCommands: 2, imports: 0, aggregations: 0 })).toBe(
+    expect(describeRunningWork({ scripts: 1, shellCommands: 2, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 })).toBe(
       'This will stop 1 running script and 2 running shell commands.',
     );
   });
 });
 
 describe('describeRunningWork imports and aggregations', () => {
-  const none: RunningWork = { scripts: 0, shellCommands: 0, imports: 0, aggregations: 0 };
+  const none: RunningWork = { scripts: 0, shellCommands: 0, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 };
 
   it('names a running import and an aggregation, singular and plural', () => {
     expect(describeRunningWork({ ...none, imports: 1 })).toBe('This will stop 1 running import.');
     expect(describeRunningWork({ ...none, imports: 2 })).toBe('This will stop 2 running imports.');
-    expect(describeRunningWork({ ...none, aggregations: 1 })).toBe('This will stop 1 running aggregation.');
-    expect(describeRunningWork({ ...none, aggregations: 3 })).toBe('This will stop 3 running aggregations.');
+    expect(describeRunningWork({ ...none, aggregations: 1, unsavedForms: 0, unsavedPipelines: 0 })).toBe('This will stop 1 running aggregation.');
+    expect(describeRunningWork({ ...none, aggregations: 3, unsavedForms: 0, unsavedPipelines: 0 })).toBe('This will stop 3 running aggregations.');
   });
 
   it('lists every kind that is running, in a readable list', () => {
-    expect(describeRunningWork({ ...none, imports: 1, aggregations: 2 })).toBe(
+    expect(describeRunningWork({ ...none, imports: 1, aggregations: 2, unsavedForms: 0, unsavedPipelines: 0 })).toBe(
       'This will stop 1 running import and 2 running aggregations.',
     );
-    expect(describeRunningWork({ scripts: 1, shellCommands: 2, imports: 1, aggregations: 2 })).toBe(
+    expect(describeRunningWork({ scripts: 1, shellCommands: 2, imports: 1, aggregations: 2, unsavedForms: 0, unsavedPipelines: 0 })).toBe(
       'This will stop 1 running script, 2 running shell commands, 1 running import, and 2 running aggregations.',
     );
+  });
+});
+
+describe('describeRunningWork unsaved work', () => {
+  const none: RunningWork = { scripts: 0, shellCommands: 0, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 };
+
+  it('names an unsaved connection form alone, with no running-work sentence', () => {
+    expect(describeRunningWork({ ...none, unsavedForms: 1 })).toBe(
+      'Unsaved changes in the connection form will be lost.',
+    );
+  });
+
+  it('counts several connection forms', () => {
+    expect(describeRunningWork({ ...none, unsavedForms: 2 })).toBe(
+      'Unsaved changes in 2 connection forms will be lost.',
+    );
+  });
+
+  it('names one pipeline and pluralises several', () => {
+    expect(describeRunningWork({ ...none, unsavedPipelines: 1 })).toBe('Unsaved changes in 1 pipeline will be lost.');
+    expect(describeRunningWork({ ...none, unsavedPipelines: 3 })).toBe('Unsaved changes in 3 pipelines will be lost.');
+  });
+
+  it('lists the form and the pipelines together', () => {
+    expect(describeRunningWork({ ...none, unsavedForms: 1, unsavedPipelines: 2 })).toBe(
+      'Unsaved changes in the connection form and 2 pipelines will be lost.',
+    );
+  });
+
+  it('puts the unsaved sentence after the running-work sentence', () => {
+    expect(describeRunningWork({ ...none, scripts: 1, unsavedForms: 1, unsavedPipelines: 2 })).toBe(
+      'This will stop 1 running script. Unsaved changes in the connection form and 2 pipelines will be lost.',
+    );
+  });
+});
+
+describe('describeQuitDetail', () => {
+  const none: RunningWork = { scripts: 0, shellCommands: 0, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 };
+  const RUNNING = 'Work in progress is cancelled and its results are lost.';
+  const UNSAVED = 'Changes you have not saved cannot be recovered.';
+  const BOTH = 'Work in progress is cancelled, and its results and your unsaved changes are lost.';
+
+  it.each([
+    ['a script', { scripts: 1 }],
+    ['a shell command', { shellCommands: 1 }],
+    ['an import', { imports: 1 }],
+    ['an aggregation', { aggregations: 1 }],
+  ])('speaks of cancelled work when only %s is running', (_label, work) => {
+    expect(describeQuitDetail({ ...none, ...work })).toBe(RUNNING);
+  });
+
+  it('speaks only of unsaved changes when nothing is running', () => {
+    expect(describeQuitDetail({ ...none, unsavedForms: 1 })).toBe(UNSAVED);
+    expect(describeQuitDetail({ ...none, unsavedPipelines: 2 })).toBe(UNSAVED);
+  });
+
+  it('names both when work runs and changes are unsaved', () => {
+    expect(describeQuitDetail({ ...none, scripts: 1, unsavedForms: 1 })).toBe(BOTH);
+    expect(describeQuitDetail({ ...none, aggregations: 2, unsavedPipelines: 1 })).toBe(BOTH);
   });
 });
 
 describe('confirmQuit', () => {
   it('quits without asking when nothing is running', async () => {
     const confirm = vi.fn(async () => false);
-    await expect(confirmQuit({ counts: () => ({ scripts: 0, shellCommands: 0, imports: 0, aggregations: 0 }), confirm })).resolves.toBe(true);
+    await expect(confirmQuit({ counts: () => ({ scripts: 0, shellCommands: 0, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 }), confirm })).resolves.toBe(true);
     expect(confirm).not.toHaveBeenCalled();
   });
 
   it('asks with the description of what stops, and quits on a yes', async () => {
     const confirm = vi.fn(async () => true);
-    await expect(confirmQuit({ counts: () => ({ scripts: 1, shellCommands: 2, imports: 0, aggregations: 0 }), confirm })).resolves.toBe(true);
+    await expect(confirmQuit({ counts: () => ({ scripts: 1, shellCommands: 2, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 }), confirm })).resolves.toBe(true);
     expect(confirm).toHaveBeenCalledExactlyOnceWith('This will stop 1 running script and 2 running shell commands.');
   });
 
   it('stays open on a no', async () => {
     const confirm = vi.fn(async () => false);
-    await expect(confirmQuit({ counts: () => ({ scripts: 2, shellCommands: 0, imports: 0, aggregations: 0 }), confirm })).resolves.toBe(false);
+    await expect(confirmQuit({ counts: () => ({ scripts: 2, shellCommands: 0, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 }), confirm })).resolves.toBe(false);
     expect(confirm).toHaveBeenCalledOnce();
   });
 });
 
 describe('createQuitGate', () => {
-  const idle: RunningWork = { scripts: 0, shellCommands: 0, imports: 0, aggregations: 0 };
-  const busy: RunningWork = { scripts: 1, shellCommands: 0, imports: 0, aggregations: 0 };
+  const idle: RunningWork = { scripts: 0, shellCommands: 0, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 };
+  const busy: RunningWork = { scripts: 1, shellCommands: 0, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 };
 
   function gate(initial: RunningWork, answer: () => Promise<boolean> = async () => true) {
     const state = { work: initial };
@@ -83,10 +142,17 @@ describe('createQuitGate', () => {
   });
 
   it('holds a quit while work runs, and says what would stop when asked', async () => {
-    const { gate: g, confirm } = gate({ scripts: 2, shellCommands: 1, imports: 0, aggregations: 0 });
+    const { gate: g, confirm } = gate({ scripts: 2, shellCommands: 1, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 });
     expect(g.check()).toBe('hold');
     await g.ask();
     expect(confirm).toHaveBeenCalledExactlyOnceWith('This will stop 2 running scripts and 1 running shell command.');
+  });
+
+  it('holds a quit over unsaved work alone, and names it when asked', async () => {
+    const { gate: g, confirm } = gate({ ...idle, unsavedForms: 1 });
+    expect(g.check()).toBe('hold');
+    await g.ask();
+    expect(confirm).toHaveBeenCalledExactlyOnceWith('Unsaved changes in the connection form will be lost.');
   });
 
   it('lets the follow-up through after a yes, so one close asks once', async () => {

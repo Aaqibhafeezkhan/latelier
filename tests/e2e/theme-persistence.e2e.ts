@@ -75,3 +75,47 @@ test('theme persists across relaunch + onThemeChanged fires on set', async () =>
     fs.rmSync(userDataDir, { recursive: true, force: true });
   }
 });
+
+/**
+ * Settings → Theme offers System, and the choice survives a relaunch. Starts
+ * from 'dark' so System is a real change, not the first-run default.
+ */
+test('System picked in Settings persists across relaunch', async () => {
+  const userDataDir = freshUserData();
+  try {
+    await withAppOnUserData(userDataDir, async (app) => {
+      const win = await app.firstWindow();
+      await win.waitForLoadState('domcontentloaded');
+      await win.evaluate(() =>
+        (window as unknown as { atelier: { prefs: { setTheme: (m: string) => Promise<void> } } })
+          .atelier.prefs.setTheme('dark'),
+      );
+
+      await win.getByRole('button', { name: 'Open settings' }).click();
+      const theme = win.getByRole('radiogroup', { name: 'Theme' });
+      await expect(theme.getByRole('radio', { name: 'Dark' })).toBeChecked();
+      // The Mantine radio input is visually hidden; its label is what a user clicks.
+      await theme.getByText('System', { exact: true }).click();
+      await expect(theme.getByRole('radio', { name: 'System' })).toBeChecked();
+      await expect
+        .poll(() =>
+          win.evaluate(() =>
+            (window as unknown as { atelier: { prefs: { getTheme: () => Promise<string> } } })
+              .atelier.prefs.getTheme(),
+          ),
+        )
+        .toBe('system');
+    });
+
+    await withAppOnUserData(userDataDir, async (app) => {
+      const win = await app.firstWindow();
+      await win.waitForLoadState('domcontentloaded');
+      await win.getByRole('button', { name: 'Open settings' }).click();
+      await expect(
+        win.getByRole('radiogroup', { name: 'Theme' }).getByRole('radio', { name: 'System' }),
+      ).toBeChecked();
+    });
+  } finally {
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  }
+});

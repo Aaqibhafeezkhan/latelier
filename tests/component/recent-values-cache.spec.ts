@@ -42,9 +42,18 @@ describe('recentValuesSource', () => {
     const { recentValuesSource } = await loadModule();
     const out = await recentValuesSource(ctx('status'));
     expect(out).toEqual([
-      { kind: 'value', value: 'shipped', display: 'shipped', source: 'recent', frequency: 3 },
+      { kind: 'value', value: 'shipped', display: 'shipped', type: 'string', source: 'recent', frequency: 3 },
     ]);
   });
+
+  it.each(['token', 'auth.Password'])(
+    'never offers recorded values of the secret-named field %s, without a call',
+    async (field) => {
+      const { recentValuesSource } = await loadModule();
+      expect(await recentValuesSource(ctx(field))).toEqual([]);
+      expect(valuesForFieldSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it('caches per (connection, db, collection, field) so a second call within TTL is a no-op', async () => {
     const { recentValuesSource } = await loadModule();

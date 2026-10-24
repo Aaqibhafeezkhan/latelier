@@ -108,6 +108,38 @@ describe('W15 §13.1 — Reset confirms before wiping the tree', () => {
   });
 });
 
+describe('Reset names the find options it clears', () => {
+  const withOptions = () =>
+    makeState({
+      builder: { projection: [], sort: '', limit: '', collation: '{"locale":"fr"}', hint: 'status_1' },
+    });
+
+  it('lists the options that are set, and Reset clears them', async () => {
+    mountWith(withOptions());
+    const collation = (await screen.findByTestId('query-bar-collation')) as HTMLInputElement;
+    expect(collation.value).toBe('{"locale":"fr"}');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).toContain('the collation, hint you set');
+    expect(dialog.textContent).not.toContain('maxTimeMS');
+
+    fireEvent.click(within(dialog).getAllByRole('button', { name: 'Reset' })[0]);
+    await waitFor(() => expect(collation.value).toBe(''));
+    expect((screen.getByTestId('query-bar-hint') as HTMLInputElement).value).toBe('');
+  });
+
+  it('says nothing about options when none is set', async () => {
+    mountWith(makeState());
+    await screen.findByTestId('query-bar-input');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).toContain('the sort, limit and projection.');
+    expect(dialog.textContent).not.toContain('you set');
+  });
+});
+
 describe('W15 §13.7 — Copy code reports success', () => {
   it('says the command was copied', async () => {
     const writeText = vi.fn(async () => {});
@@ -115,6 +147,7 @@ describe('W15 §13.7 — Copy code reports success', () => {
     mountWith(makeState());
 
     fireEvent.click(await screen.findByRole('button', { name: /Copy code/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Node.js' }));
 
     await waitFor(() => expect(writeText).toHaveBeenCalled());
     await screen.findByText(/Command copied to the clipboard/);

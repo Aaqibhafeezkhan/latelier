@@ -2,7 +2,7 @@ import React from 'react';
 import { api } from '../../api/atelier';
 import { ejsonParse, isEjsonDocument, isPlainDocument } from '../../utils/ejson';
 import { suggestIndex } from '../../utils/indexSuggestion';
-import { compileFindOptions, parseSortString } from './builder';
+import { compileFindOptions, optionsProblem, parseSortString } from './builder';
 import { useCollectionWorkspace } from './context';
 import type { ExplainRunResult } from './Aggregation/ExplainDrawer';
 import type { ExplainVerbosity } from '@shared/types';
@@ -32,6 +32,7 @@ export function useFindExplain(readFilterText: () => string): {
 } {
   const { state, actions, meta } = useCollectionWorkspace();
   const findOptions = React.useMemo(() => compileFindOptions(state.builder), [state.builder]);
+  const optionError = React.useMemo(() => optionsProblem(state.builder), [state.builder]);
   const { connectionId, dbName, collection } = meta;
 
   const runExplain = React.useCallback(
@@ -40,6 +41,8 @@ export function useFindExplain(readFilterText: () => string): {
       // read-only path like Explain.
       const text = readFilterText();
       if (!isEjsonDocument(text)) return Promise.reject(new Error('No runnable filter'));
+      // Same for the options: the builder's message, not the server's refusal.
+      if (optionError !== null) return Promise.reject(new Error(optionError));
       return api.query.explain({
         connectionId,
         dbName,
@@ -47,10 +50,13 @@ export function useFindExplain(readFilterText: () => string): {
         filter: text,
         sort: findOptions.sort,
         projection: findOptions.projection,
+        collation: findOptions.collation,
+        hint: findOptions.hint,
+        readPreference: findOptions.readPreference,
         verbosity,
       });
     },
-    [connectionId, dbName, collection, findOptions.sort, findOptions.projection, readFilterText],
+    [connectionId, dbName, collection, findOptions, optionError, readFilterText],
   );
 
   // Same inputs `runExplain` reads — the button only appears on the explain

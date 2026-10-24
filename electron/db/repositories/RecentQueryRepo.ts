@@ -52,6 +52,10 @@ export class RecentQueryRepo {
   private deleteOldestStmt: Statement<[string, string, number]>;
   private deleteOlderThanStmt: Statement<[number]>;
 
+  // Every `ORDER BY ran_at DESC` here ends in `rowid DESC`: runs recorded in
+  // the same millisecond share `ran_at`, and without a tiebreaker their
+  // order (and which of them eviction keeps) depends on the query plan. The
+  // later insert, with the higher rowid, counts as newer.
   constructor(db: Database) {
     this.db = db;
     this.insertStmt = db.prepare(`
@@ -70,7 +74,7 @@ export class RecentQueryRepo {
         AND id NOT IN (
           SELECT id FROM recent_queries
           WHERE connection_id = ?
-          ORDER BY ran_at DESC
+          ORDER BY ran_at DESC, rowid DESC
           LIMIT ?
         )
     `);
@@ -127,7 +131,7 @@ export class RecentQueryRepo {
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limitClause = filter.limit !== undefined ? `LIMIT ${filter.limit}` : '';
     return this.db.prepare(
-      `SELECT * FROM recent_queries ${where} ORDER BY ran_at DESC ${limitClause}`
+      `SELECT * FROM recent_queries ${where} ORDER BY ran_at DESC, rowid DESC ${limitClause}`
     ).all(...params) as RecentQueryRow[];
   }
 

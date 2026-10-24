@@ -13,6 +13,14 @@ interface DeleteConfirmProps {
   collection: string;
   docs: unknown[];
   filter?: string;
+  /** The tab's collation (W14 §9), for a delete by the tab's filter.
+   *  `confirmDeleteMany`/`deleteMany` send only the filter, so with a
+   *  collation set they would delete a different set of documents than the
+   *  one on screen: a filter-wide delete is refused instead. */
+  collation?: string;
+  /** The tab's hint (W14 §9), refused the same way: a hinted sparse index
+   *  can show fewer documents than the filter matches. */
+  hint?: string;
   /** Disables the confirm button outright rather than letting the
    * user complete the confirmation flow only to hit a server-side rejection. */
   readOnly?: boolean;
@@ -42,6 +50,8 @@ export function DeleteConfirm({
   collection,
   docs,
   filter,
+  collation,
+  hint,
   readOnly = false,
   onClose,
   onDeleted,
@@ -67,6 +77,12 @@ export function DeleteConfirm({
   }, []);
 
   const isMulti = docs.length > 1 || !!filter;
+  const collationBlocks = isMulti && !!collation?.trim();
+  const hintBlocks = isMulti && !!hint?.trim();
+  // A refused delete asks for no count either: the count is by the filter
+  // alone, so a title saying "Delete 3 matching documents?" would name a set
+  // that is not the one on screen.
+  const optionBlocks = collationBlocks || hintBlocks;
   const matchesCollectionName = confirm === collection;
   // The filter this delete is scoped to — same string for the count fetch
   // and the eventual `deleteMany` so the token (bound server-side to this
@@ -87,7 +103,7 @@ export function DeleteConfirm({
   // component is always remounted with a fresh `key` rather than patched in
   // place, so this only matters as a defensive guarantee.
   React.useEffect(() => {
-    if (!isMulti) return;
+    if (!isMulti || optionBlocks) return;
     let ignore = false;
     void (async () => {
       try {
@@ -110,7 +126,7 @@ export function DeleteConfirm({
     return () => {
       ignore = true;
     };
-  }, [isMulti, connectionId, dbName, collection, matchFilterJson]);
+  }, [isMulti, optionBlocks, connectionId, dbName, collection, matchFilterJson]);
 
   const handleDelete = async () => {
     if (loading) return; // #91 — see SubmitButton.tsx
@@ -167,7 +183,7 @@ export function DeleteConfirm({
     }
   };
 
-  const isCounting = isMulti && countState.status === 'pending';
+  const isCounting = isMulti && !optionBlocks && countState.status === 'pending';
   const countErr = countState.status === 'error' ? countState.message : null;
 
   const title = isMulti
@@ -178,6 +194,7 @@ export function DeleteConfirm({
 
   const deleteDisabled =
     readOnly ||
+    optionBlocks ||
     (isMulti &&
       (!matchesCollectionName ||
         countState.status !== 'ready' ||
@@ -213,6 +230,18 @@ export function DeleteConfirm({
           </Alert>
         )}
 
+        {collationBlocks && (
+          <Alert color="yellow" variant="light" role="alert">
+            Clear the collation to delete by filter: it would change which documents match.
+          </Alert>
+        )}
+
+        {hintBlocks && (
+          <Alert color="yellow" variant="light" role="alert">
+            Clear the hint to delete by filter: a hinted sparse index can show fewer documents than the filter matches.
+          </Alert>
+        )}
+
         {isCounting && (
           <Text size="xs" c="dimmed">
             Counting matching documents…
@@ -228,6 +257,7 @@ export function DeleteConfirm({
               value={confirm}
               onChange={(e) => setConfirm(e.currentTarget.value)}
               placeholder={collection}
+              aria-label={`Type ${collection} to confirm`}
               size="xs"
             />
           </Stack>

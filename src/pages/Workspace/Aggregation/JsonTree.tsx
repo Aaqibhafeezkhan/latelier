@@ -1,4 +1,5 @@
 import React from 'react';
+import { ActionIcon } from '@mantine/core';
 import { I } from '../../../icons';
 import { isRecord, toDisplayValue, type DisplayType, type DisplayValue } from '../../../utils/displayValue';
 import { childKey, escapeKeySegment } from '../views/fieldPathKey';
@@ -91,27 +92,22 @@ function JsonNodeImpl({ name, value, depth, path, expandedPaths, onToggle, highl
         }}
       >
         {isExpandable ? (
-          <button
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size={14}
             onClick={() => onToggle(path)}
             aria-label={isExpanded ? 'Collapse' : 'Expand'}
+            aria-expanded={isExpanded}
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 14,
-              height: 14,
-              padding: 0,
-              background: 'none',
-              border: 'none',
               color: 'var(--atelier-text-ghost)',
-              cursor: 'pointer',
               flexShrink: 0,
               transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
               transition: 'transform 120ms',
             }}
           >
             {I.chevD}
-          </button>
+          </ActionIcon>
         ) : (
           <span style={{ width: 14, flexShrink: 0 }} />
         )}
@@ -134,6 +130,7 @@ function JsonNodeImpl({ name, value, depth, path, expandedPaths, onToggle, highl
             whiteSpace: 'nowrap',
             minWidth: 0,
           }}
+          title={formatLeaf(dv)}
         >
           {formatLeaf(dv)}
         </span>

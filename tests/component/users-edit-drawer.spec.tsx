@@ -101,7 +101,7 @@ describe('UsersTab — edit drawer', () => {
     await waitFor(() => expect(screen.getByText(/Edit user — reader/)).toBeTruthy());
 
     // Modify the existing role's role-name from 'read' to 'readWrite'.
-    const roleInput = screen.getByLabelText('Role name 1');
+    const roleInput = screen.getByLabelText('Role name 1', { selector: 'input' });
     await userEvent.clear(roleInput);
     await userEvent.type(roleInput, 'readWrite');
 

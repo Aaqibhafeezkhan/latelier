@@ -1,6 +1,7 @@
 import React from 'react';
 import { Alert, Button, Group, Modal, Stack, Text, TextInput } from '@mantine/core';
 import { api, getErrorMessage } from '../../api/atelier';
+import { invalidateSchemaEnumCache } from '../../features/fieldSuggestions/sources/schemaEnumSource';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
 import { SubmitButton } from '../../components/SubmitButton';
 
@@ -45,6 +46,9 @@ export function DropDatabaseConfirm({
     setError(null);
     try {
       await api.database.drop({ connectionId, dbName });
+      // The cache has no per-database scope, so the whole Connection's enum
+      // suggestions go with the database's collections.
+      invalidateSchemaEnumCache(connectionId);
       finish();
     } catch (err) {
       setError(getErrorMessage(err, 'Drop failed'));

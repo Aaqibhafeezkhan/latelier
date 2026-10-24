@@ -1,7 +1,7 @@
 import React from 'react';
 import { themeVars } from '../../../theme/themeVars';
 import { I } from '../../../icons';
-import { Button, Group, Modal, Tooltip } from '@mantine/core';
+import { Button, Group, Menu, Modal, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { api, getErrorMessage, isIpcError } from '../../../api/atelier';
 import { notify } from '../../../theme/notifications';
@@ -35,12 +35,18 @@ import { useLatest } from '../../../commands/useLatest';
 import { useDialogFocusReturn } from '../../../hooks/useDialogFocusReturn';
 import type { SuggestionContext } from '../../../features/fieldSuggestions/types';
 import { invalidateSampleSchemaCache } from '../../../features/fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../../../features/fieldSuggestions/sources/schemaEnumSource';
+import { invalidateRecentValuesCache } from '../../../features/fieldSuggestions/sources/recentValuesSource';
+import { fieldValueEntriesFromStages } from '../../../features/fieldSuggestions/fieldValueEntries';
 import { ExplainDrawer } from './ExplainDrawer';
 import { SaveAsCollectionModal } from './SaveAsCollectionModal';
 import { notifyCollectionChanged } from '../../../state/collectionChanges';
 import { SaveAsViewModal } from './SaveAsViewModal';
 import { saveResultMessage } from './saveResultMessage';
 import { SavePipelineModal } from './SavePipelineModal';
+import { pipelineJsonForCopy } from '../builderToPipeline';
+import { aggregateCode, CODE_LANGS, type CodeLang } from '../../../utils/driverCode';
+import { copyToClipboard } from '../../../utils/clipboard';
 
 interface Props {
   connectionId: string;
@@ -270,6 +276,16 @@ export function AggregationTab({
         };
         onPatch({ lastRun });
         setLastRunSig(new Map(runStages.map((s) => [s.id, stageSig(s)])));
+        // Fire-and-forget, as after a find: the values the leading `$match`
+        // stages carried feed the value-suggestion popover. Never blocks or
+        // fails the run; main re-filters by op and secret field path.
+        const entries = fieldValueEntriesFromStages(runStages);
+        if (entries.length > 0) {
+          api.recent
+            .recordFieldValues({ connectionId, dbName, collection, entries })
+            .then(() => invalidateRecentValuesCache(connectionId, dbName, collection))
+            .catch((err: unknown) => console.warn('[recent] recordFieldValues failed', err));
+        }
         if (stoppingRef.current) {
           notify.info("The write couldn't be stopped, so it ran to completion.");
         }
@@ -329,7 +345,11 @@ export function AggregationTab({
         // main parses out of the stage body, so the renderer can't name the
         // collection it wrote: drop the connection's samples, even when the
         // run threw part-way through a `$merge`.
-        if (allowWrite) invalidateSampleSchemaCache(connectionId);
+        if (allowWrite) {
+          invalidateSampleSchemaCache(connectionId);
+          // A `$out` / `$merge` can create or replace its target collection.
+          invalidateSchemaEnumCache(connectionId);
+        }
         if (runTokenRef.current === token) {
           runTokenRef.current = null;
           stoppingRef.current = false;
@@ -480,6 +500,20 @@ export function AggregationTab({
   const onCancelExplainToken = React.useCallback((cancelToken: string) => {
     void api.agg.cancel({ token: cancelToken }).catch(() => {});
   }, []);
+
+  // ── Copy ─────────────────────────────────────────────────────────
+
+  // Repairs a copy of the bodies, not the tab's: copying changes nothing.
+  // `lang` null copies the bare EJSON array.
+  const onCopy = (lang: CodeLang | null) => {
+    const result = pipelineJsonForCopy(stages);
+    if (!result.ok) {
+      notify.error(`Nothing copied — ${result.problem}`);
+      return;
+    }
+    const text = lang ? aggregateCode(lang, { collection, pipelineJson: result.json }) : result.json;
+    void copyToClipboard(text, lang ? 'Command copied to the clipboard' : 'Pipeline copied to the clipboard');
+  };
 
   // ── Save as collection ───────────────────────────────────────────
 
@@ -645,6 +679,28 @@ export function AggregationTab({
         <Button size="compact-xs" variant="default" leftSection={I.eye} disabled={running || !validation.ok} onClick={onExplain}>
           Explain
         </Button>
+        <Menu position="bottom-end" shadow="md">
+          <Menu.Target>
+            {/* The output panel has its own "Copy"; the name says which. */}
+            <Button
+              size="compact-xs"
+              variant="default"
+              leftSection={I.copy}
+              disabled={!validation.ok}
+              aria-label="Copy pipeline"
+            >
+              Copy
+            </Button>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item onClick={() => onCopy(null)}>Pipeline (EJSON array)</Menu.Item>
+            {CODE_LANGS.map(({ lang, label }) => (
+              <Menu.Item key={lang} onClick={() => onCopy(lang)}>
+                {label}
+              </Menu.Item>
+            ))}
+          </Menu.Dropdown>
+        </Menu>
       </Group>
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -806,35 +862,12 @@ export function WriteStageConfirm({
           <code style={{ color: T.text }}>{op}</code>. Proceed?
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button
-            onClick={cancel}
-            style={{
-              padding: '6px 14px',
-              fontSize: 12,
-              border: `1px solid ${T.border}`,
-              borderRadius: T.rs,
-              background: 'none',
-              color: T.textMuted,
-              cursor: 'pointer',
-            }}
-          >
+          <Button variant="default" size="xs" c={T.textMuted} onClick={cancel}>
             Cancel
-          </button>
-          <button
-            onClick={onProceed}
-            style={{
-              padding: '6px 14px',
-              fontSize: 12,
-              fontWeight: 600,
-              border: 'none',
-              borderRadius: T.rs,
-              background: T.red,
-              color: '#fff',
-              cursor: 'pointer',
-            }}
-          >
+          </Button>
+          <Button color="red" size="xs" onClick={onProceed}>
             Proceed
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>

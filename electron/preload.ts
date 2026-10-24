@@ -61,6 +61,7 @@ const api: IpcApi = {
     openExternal: (url) => call(IPC_CHANNELS.appOpenExternal, url),
     saveFile: (input) => call(IPC_CHANNELS.appSaveFile, input),
     diagnosticBundle: () => call(IPC_CHANNELS.appDiagnosticBundle, {}),
+    setUnsavedWork: (input) => call(IPC_CHANNELS.appSetUnsavedWork, input),
     onMenuCommand: (cb) => {
       const listener = (_evt: unknown, command: unknown) => cb(command as MenuCommand);
       ipcRenderer.on(IPC_CHANNELS.appMenuCommandEvent, listener);
@@ -130,6 +131,17 @@ const api: IpcApi = {
 
   role: {
     list: (input) => call(IPC_CHANNELS.roleList, input),
+    create: (input) => call(IPC_CHANNELS.roleCreate, input),
+    update: (input) => call(IPC_CHANNELS.roleUpdate, input),
+    drop: (input) => call(IPC_CHANNELS.roleDrop, input),
+  },
+
+  admin: {
+    currentOp: (input) => call(IPC_CHANNELS.adminCurrentOp, input),
+    killOp: (input) => call(IPC_CHANNELS.adminKillOp, input),
+    profileStatus: (input) => call(IPC_CHANNELS.adminProfileStatus, input),
+    setProfileLevel: (input) => call(IPC_CHANNELS.adminSetProfileLevel, input),
+    profileTail: (input) => call(IPC_CHANNELS.adminProfileTail, input),
   },
 
   prefs: {

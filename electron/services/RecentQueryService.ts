@@ -56,16 +56,33 @@ export class RecentQueryService {
    * page limit from `effectivePageLimit`, not the user's cap, so storing it
    * would make a rerun silently inherit the page size of whichever page the
    * original run happened to be on.
+   *
+   * The find options (W14 §9) are recorded for the same reason as the
+   * projection: a collation changes which documents match, so a rerun that
+   * dropped it would silently not be the run in the list. `maxTimeMS` is the
+   * user's own value, so it is kept too.
    */
   async recordFind(
     input: Pick<
       FindInput,
-      'connectionId' | 'dbName' | 'collection' | 'filter' | 'projection' | 'sort'
+      | 'connectionId'
+      | 'dbName'
+      | 'collection'
+      | 'filter'
+      | 'projection'
+      | 'sort'
+      | 'collation'
+      | 'hint'
+      | 'maxTimeMS'
+      | 'readPreference'
     >,
     durationMs: number,
     resultCount: number,
     errorCode?: string,
   ): Promise<void> {
+    // Trimmed as QueryService.matchOptions sends them, so the rerun is the run.
+    const collation = input.collation?.trim();
+    const hint = input.hint?.trim();
     const payload: SavedFindPayload = {
       kind: 'find',
       builder: {
@@ -73,6 +90,10 @@ export class RecentQueryService {
         ...(input.projection ? { projectionRaw: input.projection } : {}),
         sort: input.sort ?? '',
         limit: '',
+        ...(collation ? { collation } : {}),
+        ...(hint ? { hint } : {}),
+        ...(input.maxTimeMS !== undefined ? { maxTimeMS: String(input.maxTimeMS) } : {}),
+        ...(input.readPreference ? { readPreference: input.readPreference } : {}),
       },
       queryRaw: input.filter,
     };

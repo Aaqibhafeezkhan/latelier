@@ -36,7 +36,7 @@ describe('<FeatureHint>', () => {
       ),
     );
     await waitFor(() => {
-      expect(screen.getByText('Link this field to another doc?')).toBeTruthy();
+      expect(screen.getByRole('dialog', { name: 'Link this field to another doc?' })).toBeTruthy();
     });
     expect(screen.getByText(/Got it/)).toBeTruthy();
   });
@@ -73,6 +73,202 @@ describe('<FeatureHint>', () => {
       ),
     );
     expect(container.querySelector('[data-feature-hint]')).toBeNull();
+  });
+});
+
+describe('<FeatureHint> focus', () => {
+  beforeEach(() => {
+    installAtelierMock({ prefs: { get: async () => null, set: async (_k, v) => v } });
+  });
+  afterEach(() => {
+    uninstallAtelierMock();
+  });
+
+  function Harness({
+    onDismiss,
+    onCta,
+    parentKeyDown,
+    visible = true,
+  }: {
+    onDismiss: () => void;
+    onCta?: () => void;
+    parentKeyDown?: (e: React.KeyboardEvent) => void;
+    visible?: boolean;
+  }) {
+    return (
+      <div onKeyDown={parentKeyDown}>
+        <input aria-label="Filter" />
+        <button data-hint-anchor="refs.configure" type="button">
+          References
+        </button>
+        <FeatureHint id="refs.configure" visible={visible} onDismiss={onDismiss} onCta={onCta} />
+      </div>
+    );
+  }
+
+  // fireEvent returns false when the event was default-prevented.
+  const pressF6 = () => fireEvent.keyDown(window, { key: 'F6' });
+
+  it('leaves focus where it is when the hint appears, and announces the title', async () => {
+    render(<Harness onDismiss={() => {}} />);
+    const input = screen.getByLabelText('Filter');
+    input.focus();
+    const dialog = await screen.findByRole('dialog', { name: 'Link this field to another doc?' });
+    expect(document.activeElement).toBe(input);
+    expect(dialog.getAttribute('aria-modal')).toBe('false');
+    const live = document.querySelector('[aria-live="polite"]');
+    expect(live?.textContent).toBe('Link this field to another doc?');
+    const describedBy = dialog.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toMatch(/\S/);
+  });
+
+  it('F6 moves focus to Got it', async () => {
+    render(<Harness onDismiss={() => {}} />);
+    await screen.findByRole('dialog');
+    screen.getByLabelText('Filter').focus();
+    expect(pressF6()).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Got it' }));
+  });
+
+  it('F6 is ignored while a modal dialog is open', async () => {
+    render(
+      <>
+        <Harness onDismiss={() => {}} />
+        <div role="dialog" aria-modal="true" aria-label="Some modal" />
+      </>,
+    );
+    await screen.findByRole('dialog', { name: 'Link this field to another doc?' });
+    const input = screen.getByLabelText('Filter');
+    input.focus();
+    expect(pressF6()).toBe(true);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('F6 does nothing once the hint is hidden', async () => {
+    const { rerender } = render(<Harness onDismiss={() => {}} />);
+    await screen.findByRole('dialog');
+    const input = screen.getByLabelText('Filter');
+    input.focus();
+    rerender(<Harness onDismiss={() => {}} visible={false} />);
+    pressF6();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('Escape inside dismisses, gives focus back, and stays out of the parent', async () => {
+    const onDismiss = vi.fn();
+    const parentKeyDown = vi.fn();
+    render(<Harness onDismiss={onDismiss} parentKeyDown={parentKeyDown} />);
+    await screen.findByRole('dialog');
+    const input = screen.getByLabelText('Filter');
+    input.focus();
+    pressF6();
+    const gotIt = screen.getByRole('button', { name: 'Got it' });
+    expect(document.activeElement).toBe(gotIt);
+    fireEvent.keyDown(gotIt, { key: 'Escape' });
+    expect(onDismiss).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(input);
+    expect(parentKeyDown).not.toHaveBeenCalled();
+  });
+
+  it('Got it restores focus to where F6 found it', async () => {
+    const input = () => screen.getByLabelText('Filter');
+    render(<Harness onDismiss={() => {}} />);
+    await screen.findByRole('dialog');
+    input().focus();
+    pressF6();
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    expect(document.activeElement).toBe(input());
+  });
+
+  it('dismissing a hint that never took focus leaves focus alone', async () => {
+    render(<Harness onDismiss={() => {}} />);
+    const dialog = await screen.findByRole('dialog');
+    const input = screen.getByLabelText('Filter');
+    input.focus();
+    expect(dialog.contains(document.activeElement)).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('does not steal focus back after focus left the hint on its own', async () => {
+    render(<Harness onDismiss={() => {}} />);
+    await screen.findByRole('dialog');
+    const input = screen.getByLabelText('Filter');
+    input.focus();
+    pressF6();
+    const refs = screen.getByRole('button', { name: 'References' });
+    act(() => refs.focus());
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }));
+    expect(document.activeElement).toBe(refs);
+  });
+
+  it('Tab from the last control wraps inside the hint once focus is in it', async () => {
+    render(<Harness onDismiss={() => {}} onCta={() => {}} />);
+    await screen.findByRole('dialog');
+    screen.getByLabelText('Filter').focus();
+    pressF6();
+    const gotIt = screen.getByRole('button', { name: 'Got it' });
+    fireEvent.keyDown(gotIt, { key: 'Tab' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Dismiss hint' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Dismiss hint' }), { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(gotIt);
+  });
+
+  it('a later visit that did not start with F6 does not jump back to the earlier spot', async () => {
+    render(<Harness onDismiss={() => {}} />);
+    await screen.findByRole('dialog');
+    const input = screen.getByLabelText('Filter');
+    input.focus();
+    pressF6();
+    const gotIt = screen.getByRole('button', { name: 'Got it' });
+    fireEvent.click(gotIt);
+    expect(document.activeElement).toBe(input);
+    // Tabbed in this time: the hint (still mounted, as the parent ignores onDismiss) has no spot to go back to.
+    act(() => gotIt.focus());
+    fireEvent.click(gotIt);
+    expect(document.activeElement).toBe(gotIt);
+  });
+
+  it('a hint that hid without a blur and comes back does not steal focus', async () => {
+    const { rerender } = render(<Harness onDismiss={() => {}} />);
+    await screen.findByRole('dialog');
+    const input = screen.getByLabelText('Filter');
+    input.focus();
+    pressF6();
+    // The parent hides it (a mouse "Got it", a trigger flipping) with focus still inside.
+    rerender(<Harness onDismiss={() => {}} visible={false} />);
+    act(() => screen.getByLabelText('Filter').focus());
+    rerender(<Harness onDismiss={() => {}} />);
+    await screen.findByRole('dialog');
+    expect(document.activeElement).toBe(screen.getByLabelText('Filter'));
+  });
+
+  it('keeps its live region mounted while hidden and fills it when shown', async () => {
+    const { rerender } = render(<Harness onDismiss={() => {}} visible={false} />);
+    const region = document.querySelector('[aria-live="polite"]');
+    expect(region).not.toBeNull();
+    expect(region?.textContent).toBe('');
+    rerender(<Harness onDismiss={() => {}} />);
+    await screen.findByRole('dialog');
+    expect(document.querySelector('[aria-live="polite"]')).toBe(region);
+    expect(region?.textContent).toBe('Link this field to another doc?');
+    // Every hint call site mounts a region; none may claim the page's status role.
+    expect(screen.queryAllByRole('status')).toHaveLength(0);
+  });
+
+  it('the call to action also hands focus back', async () => {
+    const onCta = vi.fn();
+    render(<Harness onDismiss={() => {}} onCta={onCta} />);
+    await screen.findByRole('dialog');
+    const input = screen.getByLabelText('Filter');
+    input.focus();
+    pressF6();
+    const cta = screen.getByRole('button', { name: 'Configure references' });
+    act(() => cta.focus());
+    fireEvent.click(cta);
+    expect(onCta).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(input);
   });
 });
 

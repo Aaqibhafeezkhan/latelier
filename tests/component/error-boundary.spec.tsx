@@ -40,6 +40,20 @@ describe('<ErrorBoundary>', () => {
     expect(screen.queryByText('thrower ok')).toBeNull();
   });
 
+  it('announces the fallback as an alert and moves focus to its heading', () => {
+    render(
+      <ErrorBoundary>
+        <Thrower shouldThrow />
+      </ErrorBoundary>,
+    );
+
+    const alert = screen.getByRole('alert');
+    const heading = screen.getByRole('heading', { name: 'Something went wrong' });
+    expect(alert.contains(heading)).toBe(true);
+    expect(heading.getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(heading);
+  });
+
   it('logs the caught error via console.error with the boundary tag', () => {
     render(
       <ErrorBoundary>

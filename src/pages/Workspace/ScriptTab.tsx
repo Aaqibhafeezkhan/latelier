@@ -8,6 +8,7 @@ import type {
 } from '@shared/types';
 import { api, isIpcError } from '../../api/atelier';
 import { invalidateSampleSchemaCache } from '../../features/fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../../features/fieldSuggestions/sources/schemaEnumSource';
 import { themeVars } from '../../theme/themeVars';
 import { Button, Group, Select, TextInput, Tooltip } from '@mantine/core';
 import { ScriptEditor } from '../../components/ScriptEditor';
@@ -109,6 +110,7 @@ function ScriptTabInner({ tab, defaultDb, onPatch }: ScriptTabProps) {
       // field-suggestion samples — also when the run threw, since it may have
       // written before that.
       invalidateSampleSchemaCache(tab.connectionId);
+      invalidateSchemaEnumCache(tab.connectionId);
       cancelTokenRef.current = null;
       runningRef.current = false;
       setRunning(false);
@@ -245,6 +247,7 @@ function ScriptTabInner({ tab, defaultDb, onPatch }: ScriptTabProps) {
           onRun={runScript}
           readOnly={running}
           testId="script-editor"
+          ariaLabel="Script editor"
           collections={collections}
           connectionId={tab.connectionId}
           dbName={effectiveDb}

@@ -45,7 +45,7 @@ test('the Document Editor stays inside a short window and scrolls its fields', a
     await app.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()[0].setSize(1280, 420);
     });
-    await win.locator('button[title="Edit document"]').first().click();
+    await win.getByRole('button', { name: /^Edit document/ }).first().click();
     const editor = win.getByRole('dialog', { name: 'Edit document' });
     await expect(editor).toBeVisible({ timeout: 5000 });
 

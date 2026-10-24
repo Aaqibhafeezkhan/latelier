@@ -74,3 +74,14 @@ describe('SchemaView — a failed sample is an error, not an empty collection', 
     expect(screen.getByText('No fields found in the sample.')).toBeTruthy();
   });
 });
+
+describe('SchemaView — table semantics', () => {
+  it('marks every header cell as a column header (scope="col")', async () => {
+    installAtelierMock({ meta: { sampleSchema: async () => ({ docs: [{ a: 1 }] }) } });
+    render(<Stateful />);
+
+    const headers = await screen.findAllByRole('columnheader');
+    expect(headers).toHaveLength(5);
+    for (const th of headers) expect(th.getAttribute('scope')).toBe('col');
+  });
+});

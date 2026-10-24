@@ -4,7 +4,7 @@ import { createRouter } from '../../electron/ipc/router';
 import { registerTabsChannels } from '../../electron/ipc/handlers/tabs';
 import { IPC_CHANNELS } from '../../shared/ipc';
 import type { WorkspaceStateService } from '../../electron/services/WorkspaceStateService';
-import type { Envelope } from '../../shared/ipc';
+import type { AggregationSeed, Envelope } from '../../shared/ipc';
 import type { CollectionTab } from '../../shared/types';
 import { WorkspaceStateService as RealWorkspaceStateService } from '../../electron/services/WorkspaceStateService';
 import { WorkspaceTabRepo } from '../../electron/db/repositories/WorkspaceTabRepo';
@@ -283,5 +283,76 @@ describe('tabs:update — the filter draft, via router and SQLite', () => {
       if (!env.ok) expect(env.error.code).toBe('VALIDATION');
     }
     expect(storedState().filterDraft).toEqual(DRAFT);
+  });
+});
+
+/**
+ * "Open as pipeline" (#156) seeds the Aggregation view with the builder's
+ * stages. `z.object` strips keys it does not name, so without `initialState`
+ * in the channel's schema the stages never reach the service and the tab
+ * opens on the default empty pipeline.
+ */
+describe('tabs:openAggregation — initialState, via router and SQLite', () => {
+  const CONN = 'pipe-conn';
+  const STAGES = [
+    { id: 1, op: '$match', body: '{"n":{"$numberLong":"9007199254740993"}}', enabled: true },
+    { id: 2, op: '$limit', body: '25', enabled: true },
+  ];
+  let tmp: TempDb;
+  let shim: ReturnType<typeof createIpcShim>;
+
+  beforeEach(() => {
+    tmp = createTempDb();
+    insertConnectionRow(tmp.db, CONN);
+    shim = createIpcShim();
+    const router = createRouter(shim.ipcMain, testSenderCheck);
+    registerTabsChannels(
+      router,
+      new RealWorkspaceStateService(new WorkspaceTabRepo(tmp.db), new SavedQueryService(new SavedQueryRepo(tmp.db))),
+    );
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  const open = (initialState: unknown) =>
+    shim.invoke<CollectionTab>(IPC_CHANNELS.tabsOpenAggregation, {
+      connectionId: CONN,
+      dbName: 'shop',
+      collection: 'orders',
+      initialState,
+    });
+
+  it('lands the stages on a new tab', async () => {
+    const env = await open({ stages: STAGES, activeStageId: null, dirty: true });
+    expect(env.ok).toBe(true);
+    if (!env.ok) return;
+    expect(env.data.state.activeView).toBe('aggregation');
+    expect(env.data.state.aggregation).toMatchObject({ stages: STAGES, activeStageId: null, dirty: true });
+  });
+
+  it('replaces the pipeline on the collection tab already open', async () => {
+    const first = await open({ stages: [{ id: 1, op: '$count', body: '"n"', enabled: true }] });
+    const second = await open({ stages: STAGES, activeStageId: null, dirty: true });
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.data.id).toBe(first.data.id);
+    expect(second.data.state.aggregation?.stages).toEqual(STAGES);
+  });
+
+  it('types the seed exactly as the schema takes it', () => {
+    const ok: AggregationSeed = { stages: STAGES, activeStageId: null, dirty: true };
+    // @ts-expect-error -- `stages` is required: main refuses a seed without it.
+    const missing: AggregationSeed = { dirty: true };
+    // @ts-expect-error -- the schema takes no other AggregationTabState key.
+    const extra: AggregationSeed = { stages: [], name: 'x' };
+    expect([ok, missing, extra]).toHaveLength(3);
+  });
+
+  it('refuses a malformed stage list', async () => {
+    const env = await open({ stages: [{ id: 'x', op: '$match', body: '{}', enabled: true }] });
+    expect(env.ok).toBe(false);
+    if (!env.ok) expect(env.error.code).toBe('VALIDATION');
   });
 });

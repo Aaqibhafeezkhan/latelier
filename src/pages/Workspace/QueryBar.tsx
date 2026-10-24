@@ -6,11 +6,19 @@ import { isEjsonDocument } from '../../utils/ejson';
 import { useShellSyntaxField } from './useShellSyntaxField';
 import { useFindExplain } from './useFindExplain';
 import {
+  DRAGGED_FIELD_MIME,
   filterProblem,
+  findOptionProblems,
   findProblem,
   limitWarning,
+  MAX_TIME_MS_CAP,
+  maxTimeMSWarning,
+  optionsProblem,
   projectionProblem,
+  READ_PREFERENCE_MODES,
   sortProblem,
+  type DraggedField,
+  type FindOptionKey,
 } from './builder';
 import type { SuggestionContext } from '../../features/fieldSuggestions/types';
 import { FieldAutocompleteInput } from '../../features/fieldSuggestions/FieldAutocompleteInput';
@@ -19,7 +27,9 @@ import { useCollectionWorkspace } from './context';
 import { ExplainDrawer } from './Aggregation/ExplainDrawer';
 import { QueryExpandModal } from './QueryExpandModal';
 import { LIMIT_EXPLANATION } from './queryCaps';
-import type { CollectionTabState, ExplainVerbosity } from '@shared/types';
+import type { BuilderState, CollectionTabState, ExplainVerbosity } from '@shared/types';
+import { FeatureHint } from '../../hints/FeatureHint';
+import { useFeatureHint } from '../../hints/useFeatureHint';
 
 interface QueryBarProps {
   suggestionContext: SuggestionContext | null;
@@ -40,8 +50,12 @@ function runBlockReason(s: CollectionTabState): string | null {
   if (filterProblem(s.queryRaw) !== null) return 'Invalid MQL';
   if (sortProblem(s.builder.sort) !== null) return 'Invalid sort';
   if (projectionProblem(s.builder) !== null) return 'Invalid projection';
+  if (optionsProblem(s.builder) !== null) return 'Invalid find option';
   return null;
 }
+
+/** The options row's inputs, in row order (W14 §9). */
+const FIND_OPTION_KEYS: readonly FindOptionKey[] = ['collation', 'hint', 'maxTimeMS', 'readPreference'];
 
 // W15 §4.4 — one copy, referenced by both the Tooltip (mouse, and now
 // keyboard focus) and the visually-hidden element `skip` is described by. Two
@@ -240,9 +254,41 @@ function QueryBarInner({
   const handleSortBlur = () => {
     sortField.onBlur();
   };
+
+  // A field dropped on the sort cell (ADR 0007 item 4) always sorts it
+  // ascending and replaces any sort there: ascending is the first step of the
+  // header's cycle, and a drop that flipped or cleared would let re-dropping
+  // the same field silently remove the sort.
+  const [sortDropActive, setSortDropActive] = React.useState(false);
+  const acceptsField = (e: React.DragEvent) => e.dataTransfer.types.includes(DRAGGED_FIELD_MIME);
+  const handleSortDragOver = (e: React.DragEvent) => {
+    if (!acceptsField(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    if (!sortDropActive) setSortDropActive(true);
+  };
+  const handleSortDrop = (e: React.DragEvent) => {
+    if (!acceptsField(e)) return;
+    e.preventDefault();
+    setSortDropActive(false);
+    // `null` and bare scalars parse too; the field check below refuses them.
+    let dragged: DraggedField | null;
+    try {
+      dragged = JSON.parse(e.dataTransfer.getData(DRAGGED_FIELD_MIME)) as DraggedField;
+    } catch {
+      return;
+    }
+    if (typeof dragged?.field !== 'string' || !dragged.field) return;
+    handleSortChange(JSON.stringify({ [dragged.field]: 1 }));
+  };
   const handleLimitChange = (v: string) => {
     onPatch({ builder: { ...state.builder, limit: v } });
   };
+  const handleOptionChange = (key: FindOptionKey, v: string) => {
+    onPatch({ builder: { ...state.builder, [key]: v } as BuilderState });
+  };
+  const optionErrors = React.useMemo(() => findOptionProblems(state.builder), [state.builder]);
+  const maxTimeWarning = maxTimeMSWarning(state.builder.maxTimeMS);
 
   // The Documents view's ⌘/Ctrl+Enter. No blur has run when a key
   // is pressed, so every draft is repaired before the gate, never after it:
@@ -304,14 +350,18 @@ function QueryBarInner({
   // control, which carries its own badge (W14 §4).
   const advancedCount =
     (state.builder.sort.trim() !== '' ? 1 : 0) +
-    (state.builder.limit.trim() !== '' ? 1 : 0);
+    (state.builder.limit.trim() !== '' ? 1 : 0) +
+    FIND_OPTION_KEYS.filter((k) => state.builder[k]?.trim()).length;
   const hasAdvanced = advancedCount > 0;
   // The sort and limit notices render inside the advanced region, so a
   // collapsed row would hide the reason Run is disabled (a sort that cannot
   // parse) or that the limit is coerced. The same two conditions the notices
   // use are counted here so the collapsed badge can say so (W14 §2).
   const advancedProblems =
-    ((sortField.refusal ?? sortError) !== null ? 1 : 0) + (limitError !== null ? 1 : 0);
+    ((sortField.refusal ?? sortError) !== null ? 1 : 0) +
+    (limitError !== null ? 1 : 0) +
+    Object.keys(optionErrors).length +
+    (maxTimeWarning !== null ? 1 : 0);
 
   // W14 §1 — `useState(hasAdvanced)` alone froze the row at whatever
   // the first tab looked like: QueryBar has no `key` at its mount site and
@@ -345,6 +395,11 @@ function QueryBarInner({
     if (hasAdvanced) setAdvancedOpen(true);
   }
   const toggleAdvanced = () => setAdvancedOpen((o) => !o);
+  // Needs the options row open: that row holds the hint's anchor.
+  const findOptionsHint = useFeatureHint(
+    'find.options',
+    advancedOpen && (!!state.builder.collation?.trim() || !!state.builder.hint?.trim()),
+  );
 
   // Shared cell styles for the 4-column grid below the toolbar. The label
   // cells are a slightly raised background to read as "row headers" the way
@@ -601,6 +656,8 @@ function QueryBarInner({
             onFocus={autocomplete.probe}
             onBlur={handleBlur}
             spellCheck={false}
+            // No visible label cell names this one, unlike sort and limit.
+            aria-label="Query filter"
             data-testid="query-bar-input"
             // X14 §5 — the textarea had neither, so the one control that
             // most often refuses input was the only one whose complaint never
@@ -659,7 +716,16 @@ function QueryBarInner({
             screen; an `aria-label` duplicate would be a second copy to keep
             in sync. */}
         <div id="query-bar-sort-label" style={labelCellStyle}>sort</div>
-        <div style={valueCellLast}>
+        <div
+          data-testid="query-bar-sort-drop"
+          onDragOver={handleSortDragOver}
+          onDragLeave={() => setSortDropActive(false)}
+          onDrop={handleSortDrop}
+          style={{
+            ...valueCellLast,
+            ...(sortDropActive ? { background: T.accentSoft, outline: `1.5px dashed ${T.accent}` } : null),
+          }}
+        >
           <FieldAutocompleteInput
             value={state.builder.sort}
             onChange={handleSortChange}
@@ -748,6 +814,107 @@ function QueryBarInner({
       </div>
 
       {limitError && <Notice id="query-bar-limit-error">{limitError}</Notice>}
+
+      {/* OPTIONS rows (W14 §9): what the find carries besides its clauses.
+          Labelled off the visible cells like sort and limit (W15 §5). */}
+      <div
+        data-hint-anchor="find.options"
+        style={{ ...gridStyle, gridTemplateColumns: '120px 1fr 120px 1fr' }}
+      >
+        <div id="query-bar-collation-label" style={labelCellStyle}>collation</div>
+        <div style={valueCellStyle}>
+          <input
+            type="text"
+            value={state.builder.collation ?? ''}
+            onChange={(e) => handleOptionChange('collation', e.target.value)}
+            placeholder='{"locale":"en","strength":2}'
+            spellCheck={false}
+            data-testid="query-bar-collation"
+            aria-labelledby="query-bar-collation-label"
+            aria-invalid={optionErrors.collation !== undefined}
+            aria-describedby={optionErrors.collation ? 'query-bar-collation-error' : undefined}
+            style={{
+              ...cellInputStyle,
+              borderBottom: `1px solid ${optionErrors.collation ? T.warn : 'transparent'}`,
+            }}
+          />
+        </div>
+        <div id="query-bar-hint-label" style={labelCellStyle}>hint</div>
+        <div style={valueCellLast}>
+          <input
+            type="text"
+            value={state.builder.hint ?? ''}
+            onChange={(e) => handleOptionChange('hint', e.target.value)}
+            placeholder='_id_ or {"a":1}'
+            spellCheck={false}
+            data-testid="query-bar-hint"
+            aria-labelledby="query-bar-hint-label"
+            aria-invalid={optionErrors.hint !== undefined}
+            aria-describedby={optionErrors.hint ? 'query-bar-hint-error' : undefined}
+            style={{
+              ...cellInputStyle,
+              borderBottom: `1px solid ${optionErrors.hint ? T.warn : 'transparent'}`,
+            }}
+          />
+        </div>
+      </div>
+      {optionErrors.collation && <Notice id="query-bar-collation-error">{optionErrors.collation}</Notice>}
+      {optionErrors.hint && <Notice id="query-bar-hint-error">{optionErrors.hint}</Notice>}
+
+      <div style={{ ...gridStyle, gridTemplateColumns: '120px 1fr 120px 1fr' }}>
+        <div id="query-bar-maxtime-label" style={labelCellStyle}>maxTimeMS</div>
+        <div style={valueCellStyle}>
+          <input
+            type="number"
+            min={1}
+            value={state.builder.maxTimeMS ?? ''}
+            onChange={(e) => handleOptionChange('maxTimeMS', e.target.value)}
+            placeholder={`max ${MAX_TIME_MS_CAP}`}
+            data-testid="query-bar-maxtime"
+            aria-labelledby="query-bar-maxtime-label"
+            aria-invalid={optionErrors.maxTimeMS !== undefined}
+            aria-describedby={
+              optionErrors.maxTimeMS || maxTimeWarning ? 'query-bar-maxtime-error' : undefined
+            }
+            style={{
+              ...cellInputStyle,
+              borderBottom: `1px solid ${optionErrors.maxTimeMS ? T.warn : 'transparent'}`,
+            }}
+          />
+        </div>
+        <div id="query-bar-readpref-label" style={labelCellStyle}>read pref</div>
+        <div style={valueCellLast}>
+          <select
+            value={state.builder.readPreference ?? ''}
+            onChange={(e) => handleOptionChange('readPreference', e.target.value)}
+            data-testid="query-bar-readpref"
+            aria-labelledby="query-bar-readpref-label"
+            aria-invalid={optionErrors.readPreference !== undefined}
+            aria-describedby={optionErrors.readPreference ? 'query-bar-readpref-error' : undefined}
+            // Opaque, like the app's other native selects: Chromium paints the
+            // option list from the select's own background.
+            style={{ ...cellInputStyle, background: T.surface, cursor: 'pointer' }}
+          >
+            <option value="">connection default</option>
+            {READ_PREFERENCE_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {mode}
+              </option>
+            ))}
+            {/* A restored value the list does not have stays visible, so the
+                problem it raises names what is selected. */}
+            {optionErrors.readPreference && (
+              <option value={state.builder.readPreference}>{state.builder.readPreference}</option>
+            )}
+          </select>
+        </div>
+      </div>
+      {(optionErrors.maxTimeMS ?? maxTimeWarning) && (
+        <Notice id="query-bar-maxtime-error">{optionErrors.maxTimeMS ?? maxTimeWarning}</Notice>
+      )}
+      {optionErrors.readPreference && (
+        <Notice id="query-bar-readpref-error">{optionErrors.readPreference}</Notice>
+      )}
       </div>
       )}
 
@@ -801,6 +968,12 @@ function QueryBarInner({
           onCreateIndex={onCreateIndex}
         />
       )}
+
+      <FeatureHint
+        id="find.options"
+        visible={findOptionsHint.visible}
+        onDismiss={findOptionsHint.dismiss}
+      />
     </div>
   );
 }

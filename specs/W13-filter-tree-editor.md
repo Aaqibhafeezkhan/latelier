@@ -21,7 +21,8 @@ Phase 1 shipped previously.
   single owner for sort/limit/projection, the saved-query compatibility
   shim.
 - **Out**: `FindInput` additions — `collation` / `hint` / `maxTimeMS` /
-  `readPreference` (Phase 3, independent, needs the 5-file IPC contract). The
+  `readPreference` (Phase 3, independent, needs the 5-file IPC contract;
+  since specified and shipped as W14 §9). The
   drawer being dimmed dead weight on the Aggregation and Schema sub-views
   (layout, separate ticket). Merging Documents into the aggregation pipeline
   ("redesign C") — W13 is a precondition for it, not a step of it.

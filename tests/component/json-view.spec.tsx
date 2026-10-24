@@ -87,6 +87,15 @@ describe('JsonView — rendering', () => {
     expect(container.textContent).toContain('$date');
   });
 
+  it('shows the Copy JSON tooltip when keyboard focus lands on the icon button', async () => {
+    renderJson([{ _id: 1, sku: 'a' }]);
+
+    fireEvent.focus(screen.getByRole('button', { name: /^Copy JSON for document/ }));
+
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toBe('Copy JSON');
+  });
+
   it('the Select button carries no nested interactive controls (nested-interactive / S6852)', () => {
     const docs = [{ _id: 1, name: 'alpha' }];
     renderJson(docs);
@@ -129,25 +138,25 @@ describe('JsonView — hidden fields', () => {
     const { actions } = renderJson(docs, {
       state: { columnConfig: { hidden: ['secret'] } },
     });
-    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Edit document/ }));
     expect(actions.openEdit).toHaveBeenCalledWith(docs[0]);
   });
 
   it('E with focus inside a card opens the editor on that card', () => {
     const docs = [{ _id: 1, name: 'alpha' }, { _id: 2, name: 'beta' }];
     const { actions } = renderJson(docs);
-    const card = screen.getByRole('group', { name: 'Document 2' });
+    const card = screen.getByRole('treeitem', { name: 'Document 2' });
 
-    fireEvent.keyDown(within(card).getByRole('button', { name: 'Copy JSON' }), { key: 'e', ctrlKey: true });
+    fireEvent.keyDown(within(card).getByRole('button', { name: /^Copy JSON/ }), { key: 'e', ctrlKey: true });
     expect(actions.openEdit).not.toHaveBeenCalled();
-    fireEvent.keyDown(within(card).getByRole('button', { name: 'Copy JSON' }), { key: 'e' });
+    fireEvent.keyDown(within(card).getByRole('button', { name: /^Copy JSON/ }), { key: 'e' });
     expect(actions.openEdit).toHaveBeenCalledWith(docs[1]);
   });
 
   it('still copies the FULL document (including hidden fields)', async () => {
     const docs = [{ _id: 1, name: 'alpha', secret: 'shh' }];
     renderJson(docs, { state: { columnConfig: { hidden: ['secret'] } } });
-    await userEvent.click(screen.getByRole('button', { name: 'Copy JSON' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Copy JSON/ }));
     const written = (navigator.clipboard.writeText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
     expect(written).toContain('secret');
     expect(written).toContain('shh');

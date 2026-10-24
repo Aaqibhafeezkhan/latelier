@@ -16,6 +16,13 @@ import type { ScriptTab as ScriptTabModel, ScriptTabState } from '@shared/types'
 import { ScriptTab } from '../../src/pages/Workspace/ScriptTab';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { invalidateSampleSchemaCache } from '../../src/features/fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
+
+// Spied so each write path can be checked for dropping the cached enum suggestions.
+vi.mock('../../src/features/fieldSuggestions/sources/schemaEnumSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/features/fieldSuggestions/sources/schemaEnumSource')>()),
+  invalidateSchemaEnumCache: vi.fn(),
+}));
 
 // Mocked at the exact module ScriptTab imports; the rest stays real because
 // the editor reaches the suggestion sources through their barrel.
@@ -28,6 +35,7 @@ afterEach(() => {
   uninstallAtelierMock();
   vi.restoreAllMocks();
   vi.mocked(invalidateSampleSchemaCache).mockClear();
+  vi.mocked(invalidateSchemaEnumCache).mockClear();
 });
 
 function tab(over: Partial<ScriptTabModel> = {}): ScriptTabModel {
@@ -58,6 +66,24 @@ describe('ScriptTab', () => {
     render(<ScriptTab tab={tab()} onPatch={() => {}} />);
     expect(screen.getByDisplayValue('My script')).toBeTruthy();
     expect(screen.getByText(/No output yet/i)).toBeTruthy();
+  });
+
+  it('names the editor region for screen readers', () => {
+    installAtelierMock();
+    render(<ScriptTab tab={tab()} onPatch={() => {}} />);
+    const content = screen.getByTestId('script-editor').querySelector('.cm-content');
+    expect(content?.getAttribute('aria-label')).toBe('Script editor');
+  });
+
+  it('sizes the editor text from the --atelier-editor-font-size variable, 13px when unset', () => {
+    installAtelierMock();
+    render(<ScriptTab tab={tab()} onPatch={() => {}} />);
+    const rules = Array.from(document.styleSheets).flatMap((sheet) =>
+      Array.from(sheet.cssRules).map((r) => r.cssText),
+    );
+    expect(rules.some((r) => r.includes('font-size: var(--atelier-editor-font-size, 13px)'))).toBe(
+      true,
+    );
   });
 
   it('Run button calls api.script.run with the tab source and patches lastResult', async () => {
@@ -313,10 +339,12 @@ describe('ScriptTab — field-suggestion sample', () => {
     fireEvent.click(screen.getByText('▶ Run'));
     await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
     expect(invalidate).not.toHaveBeenCalled();
+    expect(invalidateSchemaEnumCache).not.toHaveBeenCalled();
 
     finish();
 
     await waitFor(() => expect(invalidate).toHaveBeenCalledExactlyOnceWith('c1'));
+    await waitFor(() => expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('c1'));
   });
 
   it('drops them when the run fails too, since it may have written before throwing', async () => {
@@ -331,6 +359,7 @@ describe('ScriptTab — field-suggestion sample', () => {
 
     await waitFor(() => expect(onPatch).toHaveBeenCalledWith(expect.objectContaining({ lastError: expect.anything() })));
     expect(invalidate).toHaveBeenCalledExactlyOnceWith('c1');
+    expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('c1');
   });
 
   it('leaves them alone while no run has happened', () => {
@@ -338,6 +367,7 @@ describe('ScriptTab — field-suggestion sample', () => {
     render(<ScriptTab tab={tab()} onPatch={() => {}} />);
 
     expect(invalidate).not.toHaveBeenCalled();
+    expect(invalidateSchemaEnumCache).not.toHaveBeenCalled();
   });
 });
 

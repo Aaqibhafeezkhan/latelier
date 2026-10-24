@@ -86,6 +86,88 @@ function renderSaved(overrides: { onRunHere?: () => void; onOpenInTab?: (s: Save
   );
 }
 
+describe('Recent rows — icon buttons carry a tooltip', () => {
+  it('shows the Delete tooltip when keyboard focus lands on a Recent row delete button', async () => {
+    installAtelierMock({ recent: { list: async () => [recent()] } });
+    renderRecent();
+
+    fireEvent.focus(await screen.findByRole('button', { name: /^Delete .* from recent history$/ }));
+
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toBe('Delete');
+  });
+});
+
+describe('W10 — consecutive identical runs show as one row with a run count', () => {
+  const PREVIEW = '{"status":{"$eq":"paid"}}';
+  const threeRuns = () => [recent({ id: 'a' }), recent({ id: 'b' }), recent({ id: 'c' })];
+
+  it('collapses three adjacent identical runs into one row badged ×3', async () => {
+    installAtelierMock({ recent: { list: async () => threeRuns() } });
+    renderRecent();
+
+    // The visible "×3" is hidden from assistive tech; the spoken form is text.
+    const spoken = await screen.findByText('Ran 3 times');
+    const visible = screen.getByText('×3');
+    expect(visible.getAttribute('aria-hidden')).toBe('true');
+    expect(spoken.closest('[aria-hidden="true"]')).toBeNull();
+    expect(screen.getAllByText(PREVIEW)).toHaveLength(1);
+  });
+
+  it('shows no badge on a run that happened once', async () => {
+    installAtelierMock({ recent: { list: async () => [recent()] } });
+    renderRecent();
+
+    await screen.findByText(PREVIEW);
+    expect(screen.queryByText(/^Ran \d+ times$/)).toBeNull();
+    expect(screen.queryByText(/^×\d+$/)).toBeNull();
+  });
+
+  it('deleting a merged row deletes every run in it, and the confirm says how many', async () => {
+    const clear = vi.fn(async () => ({ deleted: 1 }));
+    installAtelierMock({ recent: { list: async () => threeRuns(), clear } });
+    renderRecent();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: `Delete ${PREVIEW} from recent history` }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).toContain('Delete these 3 runs?');
+    expect(dialog.textContent).toContain('(3 runs)');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(clear).toHaveBeenCalledTimes(3));
+    const scope = { connectionId: 'c1', dbName: 'shop', collection: 'orders', kind: 'find' };
+    expect(clear.mock.calls.map((c) => (c as unknown[])[0])).toEqual([
+      { id: 'a', ...scope },
+      { id: 'b', ...scope },
+      { id: 'c', ...scope },
+    ]);
+  });
+});
+
+describe('a failed delete of a merged row still reloads the list', () => {
+  it('reloads after the second clear rejects and shows the error', async () => {
+    const clear = vi
+      .fn()
+      .mockResolvedValueOnce({ deleted: 1 })
+      .mockRejectedValueOnce(new Error('disk full'));
+    const list = vi.fn(async () => [recent({ id: 'a' }), recent({ id: 'b' }), recent({ id: 'c' })]);
+    installAtelierMock({ recent: { list, clear } });
+    renderRecent();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Delete {"status":{"$eq":"paid"}} from recent history' }),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(clear).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText(/disk full/)).toBeTruthy();
+  });
+});
+
 // ─── §13.4 Recent rows ───────────────────────────────────────────────────────
 
 describe('W15 §13.4 — a Recent row shows what was queried', () => {
@@ -158,6 +240,19 @@ describe('W15 §13.7 — Recent\'s Copy MQL reports, and never silently no-ops',
     const copy = await screen.findByRole('button', { name: /Copy MQL — this run has no stored query/ });
     expect(copy).toHaveProperty('disabled', true);
   });
+
+  it('states the reason in its tooltip on a row with no stored query, even though the button is disabled', async () => {
+    installAtelierMock({ recent: { list: async () => [recent({ payload: LEGACY_PAYLOAD })] } });
+    renderRecent();
+
+    const copy = await screen.findByRole('button', { name: /Copy MQL — this run has no stored query/ });
+    // The disabled button receives no pointer events; its wrapper is the tooltip target.
+    fireEvent.mouseEnter(copy.parentElement!);
+
+    expect((await screen.findByRole('tooltip')).textContent).toBe(
+      'This run has no stored query to copy',
+    );
+  });
 });
 
 // ─── §13.5 chrome survives loading / error, and icon buttons have names ──────
@@ -206,8 +301,9 @@ describe('W15 §13.5 — Saved and Recent keep their chrome through loading and 
     renderSaved();
 
     const del = await screen.findByRole('button', { name: 'Delete "Unpaid orders"' });
-    // `title` is kept for the hover tooltip; it is not what names the button.
-    expect(del.getAttribute('title')).toBe('Delete');
+    // The tooltip is the hover/focus hint; it is not what names the button.
+    fireEvent.focus(del);
+    expect((await screen.findByRole('tooltip')).textContent).toBe('Delete');
     // Row actions are distinguishable from one another, per row.
     expect(screen.getByRole('button', { name: 'Run "Unpaid orders" in this tab' })).toBeTruthy();
   });

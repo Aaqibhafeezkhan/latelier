@@ -16,6 +16,9 @@ function stubSvc(overrides: Partial<UserService> = {}): UserService {
     update: async () => ({ ok: true as const }),
     drop: async () => ({ dropped: true as const }),
     listRoles: async () => [] as RoleInfo[],
+    createRole: async () => ({ ok: true as const }),
+    updateRole: async () => ({ ok: true as const }),
+    dropRole: async () => ({ dropped: true as const }),
   };
   return { ...base, ...overrides } as UserService;
 }
@@ -206,7 +209,7 @@ describe('user:* handlers via router', () => {
 
     it('passes exactly the validated object to the service and returns its roles', async () => {
       const roles: RoleInfo[] = [
-        { role: 'read', db: 'myapp', isBuiltin: true, inheritedRoles: [] },
+        { role: 'read', db: 'myapp', isBuiltin: true, roles: [], inheritedRoles: [] },
       ];
       const spy = vi.fn<UserService['listRoles']>(async () => roles);
       setupWith({ listRoles: spy });
@@ -246,5 +249,77 @@ describe('user:* handlers via router', () => {
         expect(spy).not.toHaveBeenCalled();
       },
     );
+  });
+
+  describe('role:create / role:update / role:drop', () => {
+    const create = {
+      connectionId: 'c1',
+      dbName: 'myapp',
+      role: 'app_role',
+      privileges: '[]',
+      roles: [],
+    };
+
+    it('role:create accepts an empty inherited-role list and forwards exactly the payload', async () => {
+      const spy = vi.fn<UserService['createRole']>(async () => ({ ok: true as const }));
+      setupWith({ createRole: spy });
+      const env = await shim.invoke(IPC_CHANNELS.roleCreate, create);
+      expect(env).toEqual({ ok: true, data: { ok: true } });
+      expect(spy).toHaveBeenCalledWith(create);
+    });
+
+    it.each([
+      ['an empty role name', { ...create, role: '' }],
+      ['a missing privileges string', { ...create, privileges: undefined }],
+      ['a role ref with an empty db', { ...create, roles: [{ role: 'read', db: '' }] }],
+    ])('role:create rejects %s with VALIDATION', async (_label, payload) => {
+      const spy = vi.fn<UserService['createRole']>(async () => ({ ok: true as const }));
+      setupWith({ createRole: spy });
+      const env = await shim.invoke(IPC_CHANNELS.roleCreate, payload);
+      expect(env.ok).toBe(false);
+      if (!env.ok) expect(env.error.code).toBe('VALIDATION');
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('role:update forwards a partial patch', async () => {
+      const payload = {
+        connectionId: 'c1',
+        dbName: 'myapp',
+        role: 'app_role',
+        patch: { roles: [{ role: 'read', db: 'myapp' }] },
+      };
+      const spy = vi.fn<UserService['updateRole']>(async () => ({ ok: true as const }));
+      setupWith({ updateRole: spy });
+      const env = await shim.invoke(IPC_CHANNELS.roleUpdate, payload);
+      expect(env.ok).toBe(true);
+      expect(spy).toHaveBeenCalledWith(payload);
+    });
+
+    it('role:update rejects a missing patch with VALIDATION', async () => {
+      const spy = vi.fn<UserService['updateRole']>(async () => ({ ok: true as const }));
+      setupWith({ updateRole: spy });
+      const env = await shim.invoke(IPC_CHANNELS.roleUpdate, {
+        connectionId: 'c1',
+        dbName: 'myapp',
+        role: 'app_role',
+      });
+      expect(env.ok).toBe(false);
+      if (!env.ok) expect(env.error.code).toBe('VALIDATION');
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('role:drop forwards the payload; an empty role is rejected', async () => {
+      const spy = vi.fn<UserService['dropRole']>(async () => ({ dropped: true as const }));
+      setupWith({ dropRole: spy });
+      const payload = { connectionId: 'c1', dbName: 'myapp', role: 'app_role' };
+      const ok = await shim.invoke(IPC_CHANNELS.roleDrop, payload);
+      expect(ok).toEqual({ ok: true, data: { dropped: true } });
+      expect(spy).toHaveBeenCalledWith(payload);
+
+      const bad = await shim.invoke(IPC_CHANNELS.roleDrop, { ...payload, role: '' });
+      expect(bad.ok).toBe(false);
+      if (!bad.ok) expect(bad.error.code).toBe('VALIDATION');
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
   });
 });

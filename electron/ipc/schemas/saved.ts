@@ -12,7 +12,7 @@ import type { SavedAggregationPayload, SavedFindPayload, SavedKind } from '@shar
  * the legacy filter shim compiles a pre-`queryRaw` filter from. `queryRaw` is
  * optional because W09 §1 types it so and rows saved before it existed lack it.
  */
-const StageSchema = z.looseObject({
+export const StageSchema = z.looseObject({
   id: z.number().int(),
   op: z.string(),
   body: z.string(),
@@ -27,6 +27,12 @@ export const SavedFindPayloadSchema = z.looseObject({
     projectionRaw: z.string().optional(),
     sort: z.string(),
     limit: z.string(),
+    // Text as the query bar holds it, not the wire enum/number, so a row
+    // saved with an option the builder flags as a problem still loads.
+    collation: z.string().optional(),
+    hint: z.string().optional(),
+    maxTimeMS: z.string().optional(),
+    readPreference: z.string().optional(),
   }),
   queryRaw: z.string().optional(),
   description: z.string().optional(),

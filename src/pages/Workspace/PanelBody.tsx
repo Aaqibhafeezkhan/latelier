@@ -527,6 +527,20 @@ export function PanelBody({
                               void tabs.openScript({ connectionId: saved.connectionId });
                             }
                           }}
+                          onOpenAsPipeline={(stages) => {
+                            tabs
+                              .openAggregation({
+                                connectionId: collection.tab.connectionId,
+                                dbName: collection.tab.dbName,
+                                collection: collection.tab.collection,
+                                initialState: { stages, activeStageId: null, dirty: true },
+                              })
+                              .catch((e: unknown) =>
+                                notify.error(getErrorMessage(e, String(e)), {
+                                  title: 'Could not open the pipeline',
+                                }),
+                              );
+                          }}
                         />
                       </div>
                       <DividerNotch

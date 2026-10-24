@@ -1,4 +1,5 @@
 import { api } from '../../../api/atelier';
+import { isSecretFieldPath } from '../../../utils/secretFieldPath';
 import type { ValueSource, ValueSuggestion } from '../types';
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
@@ -61,6 +62,8 @@ async function loadEntry(
           kind: 'value',
           value: v.value,
           display: v.value,
+          // Every ValType is also a DisplayType name.
+          type: v.valType,
           source: 'recent',
           frequency: v.frequency,
         })),
@@ -80,8 +83,12 @@ async function loadEntry(
   return self.promise;
 }
 
-export const recentValuesSource: ValueSource = async (ctx) =>
-  (await loadEntry(ctx.connectionId, ctx.dbName, ctx.collection, ctx.target.field)).suggestions;
+export const recentValuesSource: ValueSource = async (ctx) => {
+  // Main never records a secret-named field; this keeps the read side to
+  // the same rule, whatever the store holds.
+  if (isSecretFieldPath(ctx.target.field)) return [];
+  return (await loadEntry(ctx.connectionId, ctx.dbName, ctx.collection, ctx.target.field)).suggestions;
+};
 
 /** Exposed for tests and for the invalidation after a successful find records new values. */
 export function invalidateRecentValuesCache(

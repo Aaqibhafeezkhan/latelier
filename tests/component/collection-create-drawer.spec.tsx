@@ -101,6 +101,83 @@ describe('CreateCollectionDrawer — fixed dbName (navigator mode)', () => {
     });
   });
 
+  it('clustered and capped/time series exclude each other, and clustered posts its options', async () => {
+    const calls: unknown[] = [];
+    installAtelierMock({
+      collection: {
+        create: async (input) => {
+          calls.push(input);
+          return { name: 'x' };
+        },
+      },
+    });
+    render(
+      <CreateCollectionDrawer connectionId="c1" dbName="shop" onCancel={() => {}} onCreated={() => {}} />,
+    );
+    await userEvent.type(screen.getByLabelText('Collection name'), 'orders');
+
+    await userEvent.click(screen.getByLabelText('Capped'));
+    expect((screen.getByLabelText('Clustered') as HTMLInputElement).disabled).toBe(true);
+    await userEvent.click(screen.getByLabelText('Capped'));
+    await userEvent.click(screen.getByLabelText('Time series'));
+    expect((screen.getByLabelText('Clustered') as HTMLInputElement).disabled).toBe(true);
+    await userEvent.click(screen.getByLabelText('Time series'));
+
+    await userEvent.click(screen.getByLabelText('Clustered'));
+    expect((screen.getByLabelText('Capped') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Time series') as HTMLInputElement).disabled).toBe(true);
+    await userEvent.type(screen.getByLabelText('Clustered index name'), 'by_id');
+    await userEvent.click(screen.getByText('Create collection'));
+
+    await waitFor(() => expect(calls.length).toBe(1));
+    expect(calls[0]).toMatchObject({ options: { clustered: true, clusteredIndexName: 'by_id' } });
+  });
+
+  it('omits a blank clustered index name from the submitted options', async () => {
+    const calls: unknown[] = [];
+    installAtelierMock({
+      collection: {
+        create: async (input) => {
+          calls.push(input);
+          return { name: 'x' };
+        },
+      },
+    });
+    render(
+      <CreateCollectionDrawer connectionId="c1" dbName="shop" onCancel={() => {}} onCreated={() => {}} />,
+    );
+    await userEvent.type(screen.getByLabelText('Collection name'), 'orders');
+    await userEvent.click(screen.getByLabelText('Clustered'));
+    await userEvent.type(screen.getByLabelText('Clustered index name'), '   ');
+    await userEvent.click(screen.getByText('Create collection'));
+
+    await waitFor(() => expect(calls.length).toBe(1));
+    expect((calls[0] as { options: object }).options).toEqual({ clustered: true });
+  });
+
+  it('focuses and flags the capped size field on a validation error', async () => {
+    installAtelierMock({});
+    render(
+      <CreateCollectionDrawer connectionId="c1" dbName="shop" onCancel={() => {}} onCreated={() => {}} />,
+    );
+    await userEvent.type(screen.getByLabelText('Collection name'), 'logs');
+    await userEvent.click(screen.getByLabelText('Capped'));
+    const size = screen.getByLabelText('Capped size (bytes)') as HTMLInputElement;
+    expect(size.type).toBe('number');
+    expect(size.getAttribute('inputmode')).toBe('numeric');
+    await userEvent.type(size, '100.5');
+    await userEvent.click(screen.getByText('Create collection'));
+
+    await waitFor(() => expect(document.activeElement).toBe(size));
+    expect(size.getAttribute('aria-invalid')).toBe('true');
+    const describedBy = size.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toMatch(/positive integer/);
+    // announced once: the field error, not also the bottom alert
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getAllByText(/positive integer/)).toHaveLength(1);
+  });
+
   it('rejects a non-integer capped size before calling the API', async () => {
     const calls: unknown[] = [];
     installAtelierMock({
@@ -128,7 +205,7 @@ describe('CreateCollectionDrawer — fixed dbName (navigator mode)', () => {
     await userEvent.click(screen.getByText('Create collection'));
 
     await waitFor(() => {
-      expect(screen.getByRole('alert').textContent).toMatch(/positive integer/);
+      expect(screen.getByText(/positive integer/)).toBeTruthy();
     });
     expect(calls.length).toBe(0);
   });

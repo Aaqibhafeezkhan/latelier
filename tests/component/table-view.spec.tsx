@@ -237,6 +237,13 @@ describe('TableView — rendering and interaction', () => {
     expect(getByText(`"${longValue}"`)).toBeTruthy();
   });
 
+  it('a cell with a value advertises both drag-to-filter and double-click-to-copy in its title', () => {
+    const { getByTitle } = renderTable([{ _id: 1, note: 'hello' }]);
+    expect(getByTitle(/Drag to add "note/).getAttribute('title')).toBe(
+      'Drag to add "note $eq …" to builder · double-click to copy',
+    );
+  });
+
   // AC6 regressions — behaviour that must survive the memo/gutter/dynamic-
   // height refactor.
   describe('AC6 regressions', () => {
@@ -927,6 +934,8 @@ describe('TableView — rendering and interaction', () => {
       // but leaves it unflushed, which is a false negative, not proof the
       // fix is missing (confirmed against a real probe: logging inside the
       // handler shows it firing either way; only the flushed DOM differs).
+      // A Table cell's trigger stays a Tab stop; only the Tree leaf's opts out.
+      expect(expandBtn.hasAttribute('tabindex')).toBe(false);
       fireEvent.focus(expandBtn);
 
       expect(expandBtn.style.opacity).toBe('1');
@@ -993,6 +1002,15 @@ describe('TableView — rendering and interaction', () => {
 
       fireEvent.click(getByRole('button', { name: 'Delete document 1' }));
       expect(openDelete).toHaveBeenCalledWith(docs[0]);
+    });
+
+    it('shows the Delete document tooltip when keyboard focus lands on the icon button', async () => {
+      const { getByRole } = renderTable([{ _id: 1, sku: 'a' }]);
+
+      fireEvent.focus(getByRole('button', { name: 'Delete document 1' }));
+
+      const tip = await screen.findByRole('tooltip');
+      expect(tip.textContent).toBe('Delete document');
     });
 
     it('is not a data column: FieldsControl lists no "Actions" entry', () => {

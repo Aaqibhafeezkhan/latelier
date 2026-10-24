@@ -67,7 +67,7 @@ test('switching the Focused Tab while a per-row delete confirm is open closes it
       // Back to orders (tab 1), open the per-row delete confirm on it.
       await ws.tabByName('orders').click();
       await expect(ws.tabByName('orders')).toHaveAttribute('aria-selected', 'true');
-      await win.locator('button[title="Delete document"]').first().click();
+      await win.getByRole('button', { name: /^Delete document/ }).first().click();
       await expect(win.getByText('Delete document?')).toBeVisible({ timeout: 5000 });
 
       // ⌘2/Ctrl+2 jumps to the second tab on screen — users — while the
@@ -164,7 +164,7 @@ test('cross-database tab switch closes the confirm too, even though the collecti
       await expect(ws.tabByName('orders').first()).toHaveAttribute('aria-selected', 'true', {
         timeout: 5000,
       });
-      await win.locator('button[title="Delete document"]').first().click();
+      await win.getByRole('button', { name: /^Delete document/ }).first().click();
       await expect(win.getByText('Delete document?')).toBeVisible({ timeout: 5000 });
 
       await win.keyboard.press(`${MOD}+2`);

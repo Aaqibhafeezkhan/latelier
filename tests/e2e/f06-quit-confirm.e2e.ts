@@ -6,6 +6,7 @@ import {
   stopAllMemoryServers,
   withApp,
 } from '../helpers/e2eApp';
+import { NewConnectionPage, WorkspacePage } from './pages';
 
 test.afterAll(stopAllMemoryServers);
 
@@ -190,5 +191,38 @@ test('closing the window with a script running asks once, keeps the window on Ca
     await requestWindowClose(app);
     expect(await gone).toBe(0);
     // Asked once for this close, not again when the app quit that followed it.
+  });
+});
+
+// A dirty connection form is not running work, but quitting loses it: the form
+// reports itself to main, and the question names it.
+test('quitting with text typed into a new connection form asks, naming the form', async () => {
+  await withApp(async (app) => {
+    const win = await app.firstWindow();
+    await win.waitForLoadState('domcontentloaded');
+    const switcher = new WorkspacePage(win).switcher;
+    await switcher.waitVisible();
+    await switcher.openNew();
+    const form = new NewConnectionPage(win);
+    await form.waitVisible();
+    await form.nameInput.fill('Half typed');
+    await expect(form.nameInput).toHaveValue('Half typed');
+    // The report is sent from an effect once the form reads dirty. Let that
+    // effect run, then make one more round trip: main handles invokes in
+    // order, so when this one answers the report has landed.
+    await win.evaluate(() => new Promise((r) => setTimeout(r, 0)));
+    await win.evaluate(() => (window as unknown as { atelier: { conn: { list: () => Promise<unknown> } } }).atelier.conn.list());
+
+    await stubQuitDialog(app, 0);
+    await requestQuit(app);
+    await expect.poll(() => dialogMessages(app), { timeout: 10_000 }).toHaveLength(1);
+    expect((await dialogMessages(app))[0]).toBe('Unsaved changes in the connection form will be lost.');
+    // Cancel keeps the app and what was typed.
+    await expect(form.nameInput).toHaveValue('Half typed');
+
+    await stubQuitDialog(app, 1);
+    const gone = exited(app);
+    await requestQuit(app);
+    expect(await gone).toBe(0);
   });
 });

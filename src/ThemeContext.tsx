@@ -1,5 +1,5 @@
 import React from 'react';
-import { api } from './api/atelier';
+import { api, getErrorMessage } from './api/atelier';
 import { notify } from './theme/notifications';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -107,4 +107,64 @@ export function useTheme(): [boolean, () => void] {
   }, []);
 
   return [dark, toggle];
+}
+
+/**
+ * The stored mode itself (Light / Dark / System), for the Settings control.
+ * `useTheme()` only exposes the resolved flag; main broadcasts every set, so
+ * its instances follow a change made here.
+ */
+export function useThemeMode(): [ThemeMode, (mode: ThemeMode) => void] {
+  const [mode, setMode] = React.useState<ThemeMode>('system');
+
+  React.useEffect(() => {
+    let cancelled = false;
+    api.prefs
+      .getTheme()
+      .then((stored) => {
+        if (!cancelled) setMode(stored);
+      })
+      .catch((err) => {
+        notify.error(getErrorMessage(err, 'Could not read the theme setting.'), {
+          id: 'theme-read-failed',
+        });
+      });
+    const off = api.prefs.onThemeChanged((next) => setMode(next));
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
+
+  const modeRef = React.useRef(mode);
+  React.useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  const set = React.useCallback((next: ThemeMode) => {
+    const prev = modeRef.current;
+    setMode(next);
+    void api.prefs.setTheme(next).catch(() => {
+      setMode(prev);
+      notify.error('Could not save the theme', { id: 'theme-save-failed' });
+    });
+  }, []);
+
+  return [mode, set];
+}
+
+export const EDITOR_FONT_SIZE_PREF_KEY = 'ui.editor.fontSize';
+export const EDITOR_FONT_SIZE_MIN = 10;
+export const EDITOR_FONT_SIZE_MAX = 20;
+
+/** Points every CodeMirror editor at `px` through a CSS variable, no context plumbing. */
+export function applyEditorFontSize(px: number): void {
+  document.documentElement.style.setProperty('--atelier-editor-font-size', `${px}px`);
+}
+
+/** True for a stored font size the editors may use; anything else is treated as never set. */
+export function isEditorFontSize(v: unknown): v is number {
+  return (
+    typeof v === 'number' && Number.isInteger(v) && v >= EDITOR_FONT_SIZE_MIN && v <= EDITOR_FONT_SIZE_MAX
+  );
 }

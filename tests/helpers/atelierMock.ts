@@ -45,6 +45,7 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
       openExternal: async () => ({ opened: false }),
       saveFile: async () => ({ path: null }),
       diagnosticBundle: async () => ({ path: null }),
+      setUnsavedWork: async () => {},
       onMenuCommand: () => () => {},
     },
     updates: {
@@ -94,6 +95,16 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
     },
     role: {
       list: async () => [],
+      create: unused('role.create') as IpcApi['role']['create'],
+      update: unused('role.update') as IpcApi['role']['update'],
+      drop: unused('role.drop') as IpcApi['role']['drop'],
+    },
+    admin: {
+      currentOp: async () => ({ ops: [] }),
+      killOp: unused('admin.killOp') as IpcApi['admin']['killOp'],
+      profileStatus: async () => ({ level: 0 as const, slowms: 100 }),
+      setProfileLevel: unused('admin.setProfileLevel') as IpcApi['admin']['setProfileLevel'],
+      profileTail: async () => ({ docs: [] }),
     },
     prefs: {
       get: async () => null,
@@ -208,6 +219,7 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
     database:   { ...base.database,   ...(overrides.database   ?? {}) } as IpcApi['database'],
     user:   { ...base.user,   ...(overrides.user   ?? {}) } as IpcApi['user'],
     role:   { ...base.role,   ...(overrides.role   ?? {}) } as IpcApi['role'],
+    admin:  { ...base.admin,  ...(overrides.admin  ?? {}) } as IpcApi['admin'],
     prefs:  { ...base.prefs,  ...(overrides.prefs  ?? {}) } as IpcApi['prefs'],
     secrets: { ...base.secrets, ...(overrides.secrets ?? {}) } as IpcApi['secrets'],
     query:  { ...base.query,  ...(overrides.query  ?? {}) } as IpcApi['query'],
@@ -373,6 +385,7 @@ function makePermissiveStub(): IpcApi {
       openExternal: async () => ({ opened: false }),
       saveFile: async () => ({ path: null }),
       diagnosticBundle: async () => ({ path: null }),
+      setUnsavedWork: async () => {},
       onMenuCommand: () => () => {},
     },
     updates: {
@@ -420,6 +433,16 @@ function makePermissiveStub(): IpcApi {
     },
     role: {
       list: async () => [],
+      create: noopAsync as IpcApi['role']['create'],
+      update: noopAsync as IpcApi['role']['update'],
+      drop: async () => ({ dropped: true as const }),
+    },
+    admin: {
+      currentOp: async () => ({ ops: [] }),
+      killOp: async () => ({ ok: true as const }),
+      profileStatus: async () => ({ level: 0 as const, slowms: 100 }),
+      setProfileLevel: async () => ({ ok: true as const }),
+      profileTail: async () => ({ docs: [] }),
     },
     prefs: {
       get: async () => null,

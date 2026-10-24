@@ -325,6 +325,30 @@ describe('useWorkspaceTabs — opening a saved pipeline over unsaved edits', () 
     expect(openSpy).toHaveBeenCalledWith(saved);
   });
 
+  it('asks first when the open seeds stages (Open as pipeline, #156)', async () => {
+    const { openSpy, hook } = setup(dirtyOrders());
+    await waitFor(() => expect(hook.result.current.tabs).toHaveLength(1));
+    const seeded = {
+      connectionId: 'c1',
+      dbName: 'db',
+      collection: 'orders',
+      initialState: { stages: [{ id: 1, op: '$limit', body: '5', enabled: true }], activeStageId: null, dirty: true },
+    };
+
+    let outcome: unknown = 'unsettled';
+    const pending = hook.result.current.openAggregation(seeded).then((tab) => { outcome = tab; });
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).toContain('Discard unsaved pipeline changes?');
+    expect(openSpy).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      await pending;
+    });
+    expect(outcome).toBeNull();
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['the tab has no unsaved edits', dirtyOrders({ state: { ...collectionTab().state, aggregation: { ...DEFAULT_AGGREGATION_TAB_STATE, dirty: false } } }), saved],
     ['the dirty tab is on another collection', dirtyOrders({ collection: 'users' }), saved],

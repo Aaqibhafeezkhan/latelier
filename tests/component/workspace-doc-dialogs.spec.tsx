@@ -245,9 +245,9 @@ describe('workspace doc dialogs (T2)', () => {
     mount({ doc: { updateOne }, query: { find } });
 
     await screen.findByText(/widget/);
-    fireEvent.click(screen.getByTitle('Edit document'));
+    fireEvent.click(screen.getByRole('button', { name: /^Edit document/ }));
 
-    const dialog = await screen.findByRole('dialog', { name: 'Edit document' });
+    const dialog = await screen.findByRole('dialog', { name: /^Edit document/ });
     const sku = within(dialog).getByRole('textbox', { name: 'sku' }) as HTMLTextAreaElement;
     expect(sku.value).toBe('widget');
 
@@ -262,7 +262,7 @@ describe('workspace doc dialogs (T2)', () => {
       }),
     );
     await waitFor(() => expect(find).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit document' })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Edit document/ })).toBeNull());
   });
 
   it('on a read-only connection, row "Edit" never opens the editor', async () => {
@@ -273,10 +273,10 @@ describe('workspace doc dialogs (T2)', () => {
     mountWorkspace();
 
     await screen.findByText(/widget/);
-    fireEvent.click(screen.getByTitle('Edit document'));
+    fireEvent.click(screen.getByRole('button', { name: /^Edit document/ }));
 
     expect(await screen.findByText('Read-only connection')).toBeTruthy();
-    expect(screen.queryByRole('dialog', { name: 'Edit document' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: /^Edit document/ })).toBeNull();
   });
 });
 
@@ -339,7 +339,7 @@ describe('workspace doc dialogs (T2) — Table Quick Edit (W18 §8)', () => {
     expect(within(cell).queryByRole('textbox')).toBeNull();
     fireEvent.click(within(cell).getByRole('button', { name: 'Edit cell value' }));
 
-    const dialog = await screen.findByRole('dialog', { name: 'Edit document' });
+    const dialog = await screen.findByRole('dialog', { name: /^Edit document/ });
     expect(scrollSpy).toHaveBeenCalled();
     // Mantine's own focus trap also moves focus on open, asynchronously —
     // let both settle before reading `document.activeElement`.

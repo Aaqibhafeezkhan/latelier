@@ -14,6 +14,15 @@ export interface QueryRunKeyInput {
   sort?: string;
   limit?: number | null;
   skip?: number;
+  /**
+   * W14 §9's compiled find options (`compileFindOptions`): a collation alone
+   * changes which documents match, so the same filter with a different one
+   * is a different query. Unset joins as empty, like a blank one.
+   */
+  collation?: string;
+  hint?: string;
+  maxTimeMS?: number;
+  readPreference?: string;
 }
 
 // Use the unit-separator (US, U+001F) so user-controlled strings
@@ -50,5 +59,9 @@ export function queryRunKey(input: QueryRunKeyInput): string {
     input.sort ?? '',
     input.limit ?? '',
     input.skip ?? 0,
+    input.collation,
+    input.hint,
+    input.maxTimeMS,
+    input.readPreference,
   ].join(SEP);
 }

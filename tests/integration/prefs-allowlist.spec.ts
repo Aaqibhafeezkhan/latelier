@@ -19,6 +19,8 @@ const ROUND_TRIPS: Array<[string, unknown]> = [
   ['ui.users.lastDb', 'admin'],
   ['ui.hints.dismissed', { dismissedIds: ['tabs.pin'], resetAt: '2026-01-01T00:00:00.000Z' }],
   ['ui.workspace.defaultPageSize', 50],
+  ['ui.workspace.defaultView', 'Table'],
+  ['ui.editor.fontSize', 16],
   ['ui.workspace.leftWidth', 240],
   ['ui.workspace.refDrawerWidth', 320],
   ['ui.workspace.innerHSplit', 61.5],
@@ -28,6 +30,7 @@ const ROUND_TRIPS: Array<[string, unknown]> = [
   ['ui.workspace.restoreTabs', false],
   ['ui.workspace.documentEditorSize', { width: 600, height: 400 }],
   ['ui.commandPalette.mru', ['tab.new', 'tab.open:shop:orders']],
+  ['ui.connections.pinned', [UUID]],
   [`ui.workspace.navigator.connExpanded:${UUID}`, true],
 ];
 
@@ -126,6 +129,18 @@ describe('prefs key allowlist and the main-confirmed plaintext switch', () => {
     expect(appState.get('ui.hints.dismissed')).toBeNull();
   });
 
+  it('rejects a default view outside Table / Tree / JSON and an editor font size outside 10 to 20', async () => {
+    const { appState, invoke } = setup();
+    expectValidation(
+      await invoke(IPC_CHANNELS.prefsSet, { key: 'ui.workspace.defaultView', value: 'Grid' }),
+    );
+    expectValidation(await invoke(IPC_CHANNELS.prefsSet, { key: 'ui.editor.fontSize', value: 9 }));
+    expectValidation(await invoke(IPC_CHANNELS.prefsSet, { key: 'ui.editor.fontSize', value: 21 }));
+    expectValidation(await invoke(IPC_CHANNELS.prefsSet, { key: 'ui.editor.fontSize', value: 12.5 }));
+    expect(appState.get('ui.workspace.defaultView')).toBeNull();
+    expect(appState.get('ui.editor.fontSize')).toBeNull();
+  });
+
   it('bounds the palette history: strings only, at most 16 of them', async () => {
     const { appState, invoke } = setup();
     const key = 'ui.commandPalette.mru';
@@ -134,6 +149,19 @@ describe('prefs key allowlist and the main-confirmed plaintext switch', () => {
       await invoke(IPC_CHANNELS.prefsSet, { key, value: Array.from({ length: 17 }, () => 'a') }),
     );
     expect(appState.get(key)).toBeNull();
+  });
+
+  it('bounds the pinned connections: UUID strings only, at most 500 of them', async () => {
+    const { appState, invoke } = setup();
+    const key = 'ui.connections.pinned';
+    expectValidation(await invoke(IPC_CHANNELS.prefsSet, { key, value: [UUID, 'not-a-uuid'] }));
+    expectValidation(
+      await invoke(IPC_CHANNELS.prefsSet, { key, value: Array.from({ length: 501 }, () => UUID) }),
+    );
+    expect(appState.get(key)).toBeNull();
+    expect(
+      (await invoke(IPC_CHANNELS.prefsSet, { key, value: Array.from({ length: 500 }, () => UUID) })).ok,
+    ).toBe(true);
   });
 
   describe('secrets:set-plaintext-fallback', () => {

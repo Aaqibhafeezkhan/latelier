@@ -147,7 +147,7 @@ describe(' legacy saved-find payload hydrates through the shim', () => {
   it('a pre-queryRaw saved find compiles its filter, not {}, on Run here', async () => {
     mountWith(makeState());
 
-    const runHere = await screen.findByTitle('Run here');
+    const runHere = await screen.findByRole('button', { name: /in this tab$/ });
     fireEvent.click(runHere);
 
     const textarea = (await screen.findByTestId('query-bar-input')) as HTMLTextAreaElement;
@@ -168,7 +168,7 @@ describe(' legacy saved-find payload hydrates through the shim', () => {
     // real output of the hydrated builder, not a hand-constructed stand-in.
     const { findSpy } = mountWith(makeState());
 
-    fireEvent.click(await screen.findByTitle('Run here'));
+    fireEvent.click(await screen.findByRole('button', { name: /in this tab$/ }));
 
     await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(1));
     const call = findSpy.mock.calls[0]?.[0];
@@ -188,7 +188,7 @@ describe(' a saved raw projection survives Run here', () => {
   it('sends the saved `projectionRaw` verbatim, not the empty inclusion list', async () => {
     const { findSpy } = mountWith(makeState(), RAW_PROJECTION_SAVED);
 
-    fireEvent.click(await screen.findByTitle('Run here'));
+    fireEvent.click(await screen.findByRole('button', { name: /in this tab$/ }));
 
     await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(1));
     expect(findSpy.mock.calls[0]?.[0]?.projection).toBe('{"_id":0}');
@@ -204,11 +204,99 @@ describe(' a saved raw projection survives Run here', () => {
       }),
     );
 
-    fireEvent.click(await screen.findByTitle('Run here'));
+    fireEvent.click(await screen.findByRole('button', { name: /in this tab$/ }));
 
     await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(1));
     const sent = findSpy.mock.calls[0]?.[0]?.projection;
     expect(sent).not.toBe('{"secret":1}');
     expect(JSON.parse(sent ?? '{}')).toEqual({ _id: 1, name: 1 });
+  });
+});
+
+// W14 §9 — the find options persist with a saved query and a Recent row, but
+// the hydrate call site rebuilt the builder field by field and dropped them.
+// A collation changes which documents match, so the rerun was not the query.
+describe('saved find options survive Run here', () => {
+  const OPTIONS_SAVED = {
+    ...SAVED_SUMMARY,
+    createdAt: now,
+    payload: {
+      kind: 'find',
+      builder: {
+        projection: [],
+        sort: '',
+        limit: '',
+        collation: '{"locale":"en","strength":2}',
+        hint: '_id_',
+        maxTimeMS: '500',
+        readPreference: 'nearest',
+      },
+      queryRaw: '{"name":"a"}',
+    },
+  } as unknown as SavedQuery;
+
+  it('sends the saved collation, hint, maxTimeMS and read preference', async () => {
+    const { findSpy } = mountWith(makeState(), OPTIONS_SAVED);
+
+    fireEvent.click(await screen.findByRole('button', { name: /in this tab$/ }));
+
+    await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(1));
+    expect(findSpy.mock.calls[0]?.[0]).toMatchObject({
+      filter: '{"name":"a"}',
+      collation: '{"locale":"en","strength":2}',
+      hint: '_id_',
+      maxTimeMS: 500,
+      readPreference: 'nearest',
+    });
+  });
+
+  it('a saved query with no options clears the ones already on the tab', async () => {
+    const { findSpy } = mountWith(
+      makeState({
+        builder: { projection: [], sort: '', limit: '', collation: '{"locale":"fr"}', hint: 'x_1' },
+      }),
+      RAW_PROJECTION_SAVED,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /in this tab$/ }));
+
+    await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(1));
+    const call = findSpy.mock.calls[0]?.[0];
+    expect(call?.collation).toBeUndefined();
+    expect(call?.hint).toBeUndefined();
+  });
+
+  // A row written before the builder carried options never had any: keeping
+  // the tab's would rerun the saved filter under a collation it never had.
+  it('a legacy row with no builder at all clears the options on the tab too', async () => {
+    const NO_BUILDER_SAVED = {
+      ...SAVED_SUMMARY,
+      createdAt: now,
+      payload: { kind: 'find', queryRaw: '{"name":"a"}' },
+    } as unknown as SavedQuery;
+    const { findSpy } = mountWith(
+      makeState({
+        builder: {
+          projection: [],
+          sort: '',
+          limit: '',
+          collation: '{"locale":"fr"}',
+          hint: 'x_1',
+          maxTimeMS: '500',
+          readPreference: 'nearest',
+        },
+      }),
+      NO_BUILDER_SAVED,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /in this tab$/ }));
+
+    await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(1));
+    const call = findSpy.mock.calls[0]?.[0];
+    expect(call?.filter).toBe('{"name":"a"}');
+    expect(call?.collation).toBeUndefined();
+    expect(call?.hint).toBeUndefined();
+    expect(call?.maxTimeMS).toBeUndefined();
+    expect(call?.readPreference).toBeUndefined();
   });
 });

@@ -18,8 +18,10 @@ const LEVEL_ORDER: Record<LogLevel, number> = {
 /**
  * Field names whose value is replaced with '<redacted>' before serialisation.
  * Matched case-insensitively against object keys at any nesting depth.
+ * Exported only so a test can pin `src/utils/secretFieldPath.ts`, the
+ * renderer's copy, to this list.
  */
-const REDACTED_KEYS = new Set([
+export const REDACTED_KEYS: ReadonlySet<string> = new Set([
   'password', 'pwd', 'sshpassword', 'sshpassphrase',
   'passphrase', 'secret', 'token', 'apikey', 'authorization',
   'ssh_password', 'ssh_passphrase',

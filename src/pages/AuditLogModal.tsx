@@ -4,6 +4,7 @@ import type { AuditEntry, ConnectionSummary } from '@shared/types';
 import { api, getErrorMessage } from '../api/atelier';
 import { undoFailureMessage } from '../utils/auditUndo';
 import { invalidateSampleSchemaCache } from '../features/fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../features/fieldSuggestions/sources/schemaEnumSource';
 import { useDialogFocusReturn } from '../hooks/useDialogFocusReturn';
 
 interface AuditLogModalProps {
@@ -116,6 +117,7 @@ export function AuditLogModal({ initialConnectionId, onClose }: AuditLogModalPro
         // picker's: it can have moved on while the request ran. Also when the
         // request failed, since it may have restored documents before that.
         invalidateSampleSchemaCache(entry.connectionId);
+        invalidateSchemaEnumCache(entry.connectionId);
         setReverting(null);
         setReload((n) => n + 1);
       });

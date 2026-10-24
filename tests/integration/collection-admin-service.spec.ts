@@ -84,6 +84,26 @@ describe('CollectionAdminService', () => {
     }
   });
 
+  it('creates a clustered collection', async () => {
+    setup();
+    await svc.create({
+      connectionId: connId,
+      dbName: DB,
+      collection: 'clustered_coll',
+      options: { clustered: true, clusteredIndexName: 'by_id' },
+    });
+    const client = new MongoClient(getSharedMongoUri());
+    try {
+      await client.connect();
+      const specs = await client.db(DB).listCollections({ name: 'clustered_coll' }).toArray();
+      const spec = specs[0];
+      if (!spec || !('options' in spec)) throw new Error('expected a full collection spec');
+      expect(spec.options?.clusteredIndex).toMatchObject({ key: { _id: 1 }, unique: true, name: 'by_id' });
+    } finally {
+      await client.close();
+    }
+  });
+
   it('creates a timeseries collection', async () => {
     setup();
     await svc.create({

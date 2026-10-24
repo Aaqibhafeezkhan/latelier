@@ -203,7 +203,9 @@ The existing Workspace's right pane is the home for this. Structure:
   - "Saved for {collection}" section (optional, W09): renders if there are any saved queries targeting this collection.
 - **Saved tab content**: list from `api.saved.list({ connectionId, dbName, collection? })` (W09). Each row has `Run here` + `Open in new tab`.
 - **Recent tab content**: list from `api.recent.list(...)` (W10). Each row has `Run here` + `Copy MQL`.
-- **Footer**: `Reset`, `Copy code`, `Run`. Matches mock.
+- **Footer**: `Reset`, `Copy code`, `Open as pipeline`.
+  - `Copy code` is a menu: mongosh, Node.js, Python. It copies the find as run (the page's skip and limit), refused when the query will not run. Each document is a plain literal in the snippet's language; each exact EJSON sentinel in it (and only the sentinel, so `{ $regex, $ne }` stays an operator document) goes through the driver's EJSON parser, so an ObjectId filter pastes as working code. Python gets sort direction words as 1/-1, which PyMongo does not map itself. Of the find options (W14 §9) it carries the collation and the hint — `.collation()`/`.hint()` in mongosh, find options in Node, keyword arguments in Python (a key-pattern hint as a list of pairs, like sort) — because a collation changes which documents match and a hint naming a sparse index can leave some out. `maxTimeMS` and the read preference are left out: neither changes the documents or their order.
+  - `Open as pipeline` opens the collection's Aggregation view with the query as `$match`, `$sort`, `$limit` (the user's limit, not the page's) and `$project`; an empty `{}` filter, sort or projection is omitted. Bodies are verbatim except that a sort's "asc"/"desc" words become 1/-1, which `$sort` requires. A filter using an operator `$match` refuses (`$where`, `$near`, `$nearSphere`, at any depth) or a projection using a find-only operator (`$slice`, `$elemMatch`, positional `field.$`) opens nothing and says why. A dirty pipeline asks before it is replaced.
 
 ### Condition row layout
 

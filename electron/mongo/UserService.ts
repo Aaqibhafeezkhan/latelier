@@ -1,6 +1,9 @@
 import type {
   AuthMechanism,
+  RoleCreateInput,
+  RoleDropInput,
   RoleInfo,
+  RoleUpdateInput,
   UserCreateInput,
   UserDropInput,
   UserInfo,
@@ -31,7 +34,9 @@ interface RawRole {
   role: string;
   db: string;
   isBuiltin?: boolean;
+  roles?: Array<{ role: string; db: string }>;
   inheritedRoles?: Array<{ role: string; db: string }>;
+  privileges?: unknown;
 }
 
 export class UserService {
@@ -163,9 +168,64 @@ export class UserService {
       const res = (await db.command({
         rolesInfo: 1,
         showBuiltinRoles: true,
+        showPrivileges: true,
         maxTimeMS: STATS_TIMEOUT_MS,
       })) as { roles?: RawRole[] };
       return (res.roles ?? []).map(toRoleInfo);
+    } catch (err) {
+      throw classifyMongoOpError(err);
+    }
+  }
+
+  async createRole(input: RoleCreateInput): Promise<{ ok: true }> {
+    const w = this.pool.write(input.connectionId);
+    validateRoleName(input.role);
+    validateRoleRefs(input.roles);
+    // createRole requires both arrays on the command, even when empty.
+    const privileges = parsePrivileges(input.privileges);
+    const client = await w.client();
+    try {
+      await client.db(input.dbName).command({
+        createRole: input.role,
+        privileges,
+        roles: input.roles,
+        maxTimeMS: STATS_TIMEOUT_MS,
+      });
+      return { ok: true };
+    } catch (err) {
+      throw classifyMongoOpError(err);
+    }
+  }
+
+  async updateRole(input: RoleUpdateInput): Promise<{ ok: true }> {
+    const w = this.pool.write(input.connectionId);
+    const { role, dbName, patch } = input;
+    const cmd: Record<string, unknown> = { updateRole: role };
+    if (patch.privileges !== undefined) cmd.privileges = parsePrivileges(patch.privileges);
+    if (patch.roles !== undefined) {
+      validateRoleRefs(patch.roles);
+      cmd.roles = patch.roles;
+    }
+    if (Object.keys(cmd).length === 1) {
+      throw new ValidationError('patch is empty', { role });
+    }
+    // After the empty-patch check, which counts cmd's own keys.
+    cmd.maxTimeMS = STATS_TIMEOUT_MS;
+    const client = await w.client();
+    try {
+      await client.db(dbName).command(cmd);
+      return { ok: true };
+    } catch (err) {
+      throw classifyMongoOpError(err);
+    }
+  }
+
+  async dropRole(input: RoleDropInput): Promise<{ dropped: true }> {
+    const w = this.pool.write(input.connectionId);
+    const client = await w.client();
+    try {
+      await client.db(input.dbName).command({ dropRole: input.role, maxTimeMS: STATS_TIMEOUT_MS });
+      return { dropped: true };
     } catch (err) {
       throw classifyMongoOpError(err);
     }
@@ -191,12 +251,17 @@ export function toUserInfo(raw: RawUser): UserInfo {
 }
 
 export function toRoleInfo(raw: RawRole): RoleInfo {
-  return {
+  const info: RoleInfo = {
     role: raw.role,
     db: raw.db,
     isBuiltin: Boolean(raw.isBuiltin),
+    roles: (raw.roles ?? []).map((r) => ({ role: r.role, db: r.db })),
     inheritedRoles: (raw.inheritedRoles ?? []).map((r) => ({ role: r.role, db: r.db })),
   };
+  if (raw.privileges !== undefined) {
+    info.privileges = ejsonStringifyDriverValue(raw.privileges);
+  }
+  return info;
 }
 
 export function validateUsername(name: string): void {
@@ -228,6 +293,11 @@ export function validateRoles(roles: UserRoleRef[]): void {
   if (!Array.isArray(roles) || roles.length === 0) {
     throw new ValidationError('at least one role is required', { field: 'roles' });
   }
+  validateRoleRefs(roles);
+}
+
+/** A role's inherited roles may be empty, unlike a user's; each ref is still checked. */
+function validateRoleRefs(roles: UserRoleRef[]): void {
   for (const r of roles) {
     if (!r.role || !r.db) {
       throw new ValidationError('each role requires both a role name and a db', {
@@ -235,6 +305,20 @@ export function validateRoles(roles: UserRoleRef[]): void {
       });
     }
   }
+}
+
+function validateRoleName(name: string): void {
+  if (typeof name !== 'string' || name.length === 0) {
+    throw new ValidationError('role name is required', { field: 'role' });
+  }
+}
+
+function parsePrivileges(s: string): unknown[] {
+  const parsed = parseEjsonField(s, 'privileges');
+  if (!Array.isArray(parsed)) {
+    throw new ValidationError('privileges must be an array', { field: 'privileges' });
+  }
+  return parsed;
 }
 
 function parseEjsonField(s: string, field: string): unknown {

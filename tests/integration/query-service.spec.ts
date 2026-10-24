@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs/promises';
+import { AbstractCursor, Collection, FindCursor, Long, MongoServerSelectionError } from 'mongodb';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { QueryService } from '../../electron/mongo/QueryService';
 import { RecentQueryService } from '../../electron/services/RecentQueryService';
@@ -7,6 +11,11 @@ import { ValidationError } from '../../electron/errors';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { getSharedMongoUri, makeConnection, makeReader } from '../helpers/mongo';
 import { repairToCanonicalEjson } from '../../src/utils/shellSyntax';
+import type { IpcMainInvokeEvent } from 'electron';
+import { registerQueryChannels } from '../../electron/ipc/handlers/query';
+import { createRouter } from '../../electron/ipc/router';
+import { IPC_CHANNELS, type Envelope } from '../../shared/ipc';
+import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
 
 describe('QueryService', () => {
   let pool: MongoPool;
@@ -153,6 +162,19 @@ describe('QueryService', () => {
       filter: '{ "tag": "seed" }',
     });
     expect(result.count).toBe(10);
+  });
+
+  it('count takes $where, which countDocuments refuses, and a plain filter keeps the fast path', async () => {
+    const target = { connectionId: connId, dbName, collection: collName };
+    const spy = vi.spyOn(Collection.prototype, 'countDocuments');
+    const plain = await svc.count({ ...target, filter: '{}' });
+    expect(spy).toHaveBeenCalledTimes(1);
+    spy.mockClear();
+    const where = await svc.count({ ...target, filter: '{"$and":[{"$where":"this.n >= 0"}]}' });
+    expect(spy).not.toHaveBeenCalled();
+    expect(where.count).toBe(plain.count);
+    const none = await svc.count({ ...target, filter: '{"$where":"this.n < -1"}' });
+    expect(none.count).toBe(0);
   });
 
   it('count with selective filter', async () => {
@@ -542,5 +564,222 @@ describe('QueryService', () => {
       expect((err as Error).message).toMatch(/index|filter/);
       expect((err as Error).message).not.toMatch(/MaxTimeMS/i);
     });
+  });
+
+  // W14 §9 — find options. Collation decides which documents match, so the
+  // count, explain and export of the on-screen query carry it too.
+  describe('find options', () => {
+    const optsColl = 'find_opts';
+    const target = { connectionId: connId, dbName, collection: optsColl };
+    const CI = '{"locale":"en","strength":2}';
+
+    beforeAll(async () => {
+      const client = await pool.write(connId).client();
+      const coll = client.db(dbName).collection(optsColl);
+      await coll.deleteMany({});
+      await coll.insertMany([
+        { name: 'A', big: Long.fromString('9007199254740993') },
+        { name: 'a', big: Long.fromString('9007199254740992') },
+        { name: 'b', big: Long.fromString('9007199254740993') },
+      ]);
+      await coll.createIndex({ name: 1 }, { name: 'name_1' });
+    });
+
+    const names = (json: string) =>
+      (JSON.parse(json) as { name: string }[]).map((d) => d.name).sort((x, y) => x.localeCompare(y));
+
+    it('a case-insensitive collation makes {name:"a"} match "A" in find and in count', async () => {
+      const plain = await svc.find({ ...target, filter: '{"name":"a"}', limit: 50, skip: 0 });
+      expect(names(plain.documentsJson)).toEqual(['a']);
+      expect((await svc.count({ ...target, filter: '{"name":"a"}' })).count).toBe(1);
+
+      const ci = await svc.find({ ...target, filter: '{"name":"a"}', collation: CI, limit: 50, skip: 0 });
+      expect(names(ci.documentsJson)).toEqual(['a', 'A']);
+      expect((await svc.count({ ...target, filter: '{"name":"a"}', collation: CI })).count).toBe(2);
+    });
+
+    it('keeps a Long past 2^53 in the filter exact alongside a collation', async () => {
+      const res = await svc.find({
+        ...target,
+        filter: '{"name":"a","big":{"$numberLong":"9007199254740993"}}',
+        collation: CI,
+        limit: 50,
+        skip: 0,
+      });
+      const docs = JSON.parse(res.documentsJson) as { name: string; big: { $numberLong: string } }[];
+      expect(docs).toHaveLength(1);
+      expect(docs[0]).toMatchObject({ name: 'A', big: { $numberLong: '9007199254740993' } });
+    });
+
+    it('explain and export see the collation too', async () => {
+      const find = vi.spyOn(Collection.prototype, 'find');
+      await svc.explain({ ...target, filter: '{"name":"a"}', collation: CI, verbosity: 'queryPlanner' });
+      expect(find.mock.calls.at(-1)![1]).toMatchObject({ collation: { locale: 'en', strength: 2 } });
+
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'find-opts-'));
+      try {
+        const out = path.join(dir, 'out.json');
+        const res = await svc.exportToFile({ ...target, filter: '{"name":"a"}', collation: CI, format: 'json' }, out);
+        expect(res.written).toBe(2);
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('a hint by index name and by key pattern both reach the plan', async () => {
+      for (const hint of ['name_1', '{"name":1}']) {
+        const { plan } = await svc.explain({ ...target, filter: '{}', hint, verbosity: 'queryPlanner' });
+        expect(JSON.stringify(plan)).toContain('"indexName":"name_1"');
+        const res = await svc.find({ ...target, filter: '{}', hint, limit: 50, skip: 0 });
+        expect(JSON.parse(res.documentsJson)).toHaveLength(3);
+      }
+      const count = vi.spyOn(Collection.prototype, 'countDocuments');
+      await svc.count({ ...target, filter: '{}', hint: '{"name":1}' });
+      expect(count.mock.calls.at(-1)![1]).toMatchObject({ hint: { name: 1 } });
+    });
+
+    it('a hint naming no index is refused by the server as a classified error', async () => {
+      const err = await svc
+        .find({ ...target, filter: '{}', hint: 'no_such_index', limit: 50, skip: 0 })
+        .catch((e: unknown) => e);
+      // The server's BadValue, which the classifier maps to VALIDATION.
+      expect(err).toMatchObject({ code: 'VALIDATION' });
+      expect((err as Error).message).toMatch(/hint/i);
+    });
+
+    it('a malformed collation is a VALIDATION error before any driver call', async () => {
+      const readDb = vi.spyOn(pool, 'readDb');
+      await expect(
+        svc.find({ ...target, filter: '{}', collation: '{"locale":', limit: 50, skip: 0 }),
+      ).rejects.toBeInstanceOf(ValidationError);
+      await expect(svc.count({ ...target, filter: '{}', collation: '[1]' })).rejects.toBeInstanceOf(ValidationError);
+      expect(readDb).not.toHaveBeenCalled();
+    });
+
+    it('maxTimeMS can only lower the 30 s cap: 40000 is clamped, 2000 is kept', async () => {
+      const find = vi.spyOn(Collection.prototype, 'find');
+      await svc.find({ ...target, filter: '{}', maxTimeMS: 40000, limit: 50, skip: 0 });
+      expect(find.mock.calls.at(-1)![1]).toMatchObject({ maxTimeMS: 30_000 });
+      await svc.find({ ...target, filter: '{}', maxTimeMS: 2000, limit: 50, skip: 0 });
+      expect(find.mock.calls.at(-1)![1]).toMatchObject({ maxTimeMS: 2000 });
+      await svc.find({ ...target, filter: '{}', limit: 50, skip: 0 });
+      expect(find.mock.calls.at(-1)![1]).toMatchObject({ maxTimeMS: 30_000 });
+    });
+
+    it('a find stopped by the user maxTimeMS says that limit, not the 30 s cap', async () => {
+      const err = await svc
+        .find({ ...target, filter: '{"$where":"sleep(500) || true"}', maxTimeMS: 50, limit: 10, skip: 0 })
+        .catch((e: unknown) => e);
+      expect(err).toMatchObject({ code: 'TIMEOUT' });
+      expect((err as Error).message).toMatch(/stopped after 0\.05 s/);
+    });
+
+    it('readPreference reaches find, count, explain and export; blank options are left out', async () => {
+      const find = vi.spyOn(Collection.prototype, 'find');
+      const count = vi.spyOn(Collection.prototype, 'countDocuments');
+      const rp = { readPreference: 'secondaryPreferred' } as const;
+      await svc.find({ ...target, filter: '{}', ...rp, limit: 50, skip: 0 });
+      expect(find.mock.calls.at(-1)![1]).toMatchObject(rp);
+      await svc.count({ ...target, filter: '{}', ...rp });
+      expect(count.mock.calls.at(-1)![1]).toMatchObject(rp);
+      await svc.explain({ ...target, filter: '{}', ...rp, verbosity: 'queryPlanner' });
+      expect(find.mock.calls.at(-1)![1]).toMatchObject(rp);
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'find-opts-'));
+      try {
+        await svc.exportToFile({ ...target, filter: '{}', ...rp, format: 'jsonl' }, path.join(dir, 'o.jsonl'));
+        expect(find.mock.calls.at(-1)![1]).toMatchObject(rp);
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+
+      await svc.find({ ...target, filter: '{}', collation: '  ', hint: ' ', limit: 50, skip: 0 });
+      const blank = find.mock.calls.at(-1)![1]!;
+      expect(blank).not.toHaveProperty('collation');
+      expect(blank).not.toHaveProperty('hint');
+      expect(blank).not.toHaveProperty('readPreference');
+    });
+
+    // The shared server is a standalone, which ignores read preference, so
+    // the driver's failure is injected: the error a replica set with no
+    // secondary throws for `secondary` (probed against a real one).
+    it('a read preference no server can serve is named, in find, count, explain and export', async () => {
+      const selection = () =>
+        new MongoServerSelectionError('Server selection timed out after 30000 ms', { servers: new Map() } as never);
+      vi.spyOn(AbstractCursor.prototype, 'next').mockImplementation(async () => {
+        throw selection();
+      });
+      vi.spyOn(FindCursor.prototype, 'toArray').mockImplementation(async () => {
+        throw selection();
+      });
+      vi.spyOn(FindCursor.prototype, 'explain').mockImplementation(async () => {
+        throw selection();
+      });
+      vi.spyOn(Collection.prototype, 'countDocuments').mockImplementation(async () => {
+        throw selection();
+      });
+      const rp = { readPreference: 'secondary' } as const;
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'find-opts-'));
+      try {
+        const errors = await Promise.all([
+          svc.find({ ...target, filter: '{}', ...rp, limit: 50, skip: 0 }).catch((e: unknown) => e),
+          svc.count({ ...target, filter: '{}', ...rp }).catch((e: unknown) => e),
+          svc.explain({ ...target, filter: '{}', ...rp, verbosity: 'queryPlanner' }).catch((e: unknown) => e),
+          svc
+            .exportToFile({ ...target, filter: '{}', ...rp, format: 'jsonl' }, path.join(dir, 'o.jsonl'))
+            .catch((e: unknown) => e),
+        ]);
+        for (const err of errors) {
+          expect(err).toMatchObject({
+            code: 'MONGO_ERROR',
+            message: 'No server can serve the read preference secondary: server selection timed out. Choose another read preference, or clear it.',
+            details: { mongoMessage: 'Server selection timed out after 30000 ms' },
+          });
+        }
+        // With no read preference chosen, the driver's own words stand.
+        const plain = await svc.count({ ...target, filter: '{}' }).catch((e: unknown) => e);
+        expect(plain).toMatchObject({ code: 'MONGO_ERROR', message: 'Server selection timed out after 30000 ms' });
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+});
+
+// W14 §9 — zod strips unknown keys silently, so an option missing from a
+// channel's schema would vanish between the renderer and the service. Drive
+// each channel through the router, the path the preload bridge takes.
+describe('query channels carry the find options through the router', () => {
+  type Handler = (evt: IpcMainInvokeEvent, payload: unknown) => Promise<Envelope<unknown>>;
+  const options = { collation: '{"locale":"en","strength":2}', hint: 'name_1', readPreference: 'secondaryPreferred' };
+  const target = { connectionId: 'c', dbName: 'd', collection: 'coll', filter: '{}' };
+
+  function wire() {
+    const handlers = new Map<string, Handler>();
+    const router = createRouter(
+      { handle: (channel: string, fn: Handler) => handlers.set(channel, fn) } as never,
+      testSenderCheck,
+    );
+    const svc = {
+      find: vi.fn<(input: unknown) => Promise<unknown>>(async () => ({ documentsJson: '[]', durationMs: 0, hasMore: false })),
+      count: vi.fn<(input: unknown) => Promise<unknown>>(async () => ({ count: 0 })),
+      explain: vi.fn<(input: unknown) => Promise<unknown>>(async () => ({})),
+      exportToFile: vi.fn<(input: unknown, path: string) => Promise<unknown>>(async () => ({ written: 0, truncated: false })),
+    };
+    registerQueryChannels(router, svc as unknown as QueryService, async () => '/tmp/out.json');
+    return { handlers, svc };
+  }
+
+  it.each([
+    [IPC_CHANNELS.queryFind, 'find', { limit: 50, skip: 0, maxTimeMS: 2000 }],
+    [IPC_CHANNELS.queryCount, 'count', {}],
+    [IPC_CHANNELS.queryExplain, 'explain', { verbosity: 'queryPlanner' }],
+    [IPC_CHANNELS.queryExport, 'exportToFile', { format: 'json' }],
+  ] as const)('%s hands collation, hint and readPreference to QueryService.%s', async (channel, method, rest) => {
+    const { handlers, svc } = wire();
+    const envelope = await handlers.get(channel)!(invokeEvent, { ...target, ...rest, ...options });
+
+    expect(envelope.ok).toBe(true);
+    expect(svc[method]).toHaveBeenCalledTimes(1);
+    expect(svc[method].mock.calls[0]![0]).toMatchObject({ ...target, ...rest, ...options });
   });
 });

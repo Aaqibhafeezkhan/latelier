@@ -51,6 +51,25 @@ describe('buildCreateCollectionOptions', () => {
     });
   });
 
+  it('builds a clustered index on _id, with or without a name', () => {
+    expect(buildCreateCollectionOptions({ clustered: true })).toEqual({
+      clusteredIndex: { key: { _id: 1 }, unique: true },
+    });
+    expect(buildCreateCollectionOptions({ clustered: true, clusteredIndexName: 'by_id' })).toEqual({
+      clusteredIndex: { key: { _id: 1 }, unique: true, name: 'by_id' },
+    });
+  });
+
+  it.each([
+    { capped: true, size: 1024 },
+    { timeseries: { timeField: 'ts' } },
+    { viewOn: 'src' },
+  ])('refuses clustered combined with %j', (other) => {
+    expect(() => buildCreateCollectionOptions({ clustered: true, ...other })).toThrow(
+      'clustered cannot be combined with capped, timeseries or a view',
+    );
+  });
+
   it('maps timeseries fields', () => {
     const opts = buildCreateCollectionOptions({
       timeseries: { timeField: 'ts', metaField: 'meta', granularity: 'hours' },

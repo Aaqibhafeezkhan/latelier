@@ -419,3 +419,34 @@ describe(' per-group drag targeting for nested filter groups', () => {
     });
   });
 });
+
+describe('a malformed drag payload is ignored, not thrown', () => {
+  // `JSON.parse('null')` succeeds, so a `null` payload reached
+  // `dragged.field` and threw — in the row, group and fallback handlers alike.
+  // React reports a throwing handler on window rather than failing
+  // `fireEvent`, so collect those reports.
+  it('drops of null and of a bare string change nothing', async () => {
+    const thrown: unknown[] = [];
+    const onError = (e: ErrorEvent) => {
+      thrown.push(e.error);
+      e.preventDefault();
+    };
+    window.addEventListener('error', onError);
+    const { updateSpy } = mountWith(makeState({ queryRaw: '{"$and":[{"a":{"$eq":1}}]}' }));
+    const [fieldInput] = await screen.findAllByPlaceholderText('field');
+    const targets = [fieldInput!, groupEl('root'), groupEl('root').parentElement!];
+    for (const payload of ['null', '"age"']) {
+      const dataTransfer = {
+        types: [DRAGGED_FIELD_MIME],
+        getData: (type: string) => (type === DRAGGED_FIELD_MIME ? payload : ''),
+      };
+      for (const target of targets) {
+        fireEvent.dragOver(target, { dataTransfer });
+        fireEvent.drop(target, { dataTransfer });
+      }
+    }
+    window.removeEventListener('error', onError);
+    expect(thrown).toEqual([]);
+    expect(lastWrittenQueryRaw(updateSpy)).toBeUndefined();
+  });
+});

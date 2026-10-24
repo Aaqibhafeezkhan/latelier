@@ -4,6 +4,8 @@
 // file, but co-locating the slots is the whole point — and they're not
 // addressed as top-level exports, only via the namespace.
 import { useState, type ReactNode } from 'react';
+import { Button, Skeleton, Stack } from '@mantine/core';
+import { themeVars } from '../../theme/themeVars';
 import { TreeView } from './views/TreeView';
 import { JsonView } from './views/JsonView';
 import { TableView } from './views/TableView';
@@ -81,6 +83,11 @@ function Body({
   const documents = state.lastRun?.documents ?? EMPTY_DOCUMENTS;
   const hasError = !!state.lastRun?.error;
   const isEmpty = documents.length === 0 && !isLoading && !hasError;
+  // Only a first load (no run has ever landed in this tab's state) gets
+  // placeholder rows in place of the body. Any re-run, including one after an
+  // empty or errored result, keeps the body under the "Loading…" strip, so
+  // the layout doesn't jump. One live region at a time.
+  const showSkeleton = isLoading && !state.lastRun;
   // X14 §5 — dimmed, not hidden or inert, while the query above cannot
   // run: these rows still describe a real earlier query, and a user editing a
   // filter is often reading them to decide what to type next. Same rule as the
@@ -100,8 +107,9 @@ function Body({
         opacity: isStale ? 0.45 : undefined,
       }}
     >
-      {isLoading && (
+      {isLoading && !showSkeleton && (
         <div
+          role="status"
           style={{
             position: 'absolute',
             top: 32,
@@ -120,7 +128,13 @@ function Body({
         </div>
       )}
 
-      {isEmpty ? (
+      {showSkeleton ? (
+        <Stack role="status" aria-label="Loading results" gap={6} p="8px 12px">
+          {Array.from({ length: 8 }, (_, i) => (
+            <Skeleton key={i} height={22} />
+          ))}
+        </Stack>
+      ) : isEmpty ? (
         <EmptyState onClearFilter={onClearFilter} onImport={() => setImportOpen(true)} />
       ) : (
         <>
@@ -161,15 +175,6 @@ function Body({
   );
 }
 
-const LINK_BUTTON_STYLE = {
-  background: 'none',
-  border: 'none',
-  cursor: 'pointer',
-  color: 'var(--atelier-accent)',
-  fontSize: 12,
-  textDecoration: 'underline',
-} as const;
-
 function EmptyState({ onClearFilter, onImport }: { onClearFilter: () => void; onImport: () => void }) {
   const { state, meta } = useCollectionWorkspace();
   // No filter, first page, no error: the collection itself is empty, not
@@ -198,17 +203,17 @@ function EmptyState({ onClearFilter, onImport }: { onClearFilter: () => void; on
         <>
           <span>This collection is empty</span>
           {!meta.isReadOnly && (
-            <button onClick={onImport} style={LINK_BUTTON_STYLE}>
+            <Button variant="subtle" size="compact-xs" fz={12} td="underline" c={themeVars.accent} onClick={onImport}>
               Import documents…
-            </button>
+            </Button>
           )}
         </>
       ) : (
         <>
           <span>No matching documents</span>
-          <button onClick={onClearFilter} style={LINK_BUTTON_STYLE}>
+          <Button variant="subtle" size="compact-xs" fz={12} td="underline" c={themeVars.accent} onClick={onClearFilter}>
             Clear filter
-          </button>
+          </Button>
         </>
       )}
     </div>

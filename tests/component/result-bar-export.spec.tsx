@@ -207,6 +207,41 @@ describe('ResultBar — Export all matching', () => {
     );
   });
 
+  // W14 §9 — a collation changes which documents match, so the export of
+  // "all matching" has to carry it; maxTimeMS is a find-only option.
+  it('sends the collation, hint and read preference with the filter', async () => {
+    const exportFn = vi.fn<(input: Record<string, unknown>) => Promise<{ path: string | null; written: number; truncated: boolean }>>(
+      async () => ({ path: '/tmp/orders.json', written: 2, truncated: false }),
+    );
+    installAtelierMock({ query: { export: exportFn } as never });
+    renderBar({
+      queryRaw: '{"name":"a"}',
+      builder: {
+        projection: [],
+        sort: '',
+        limit: '',
+        collation: ' {"locale":"en","strength":2} ',
+        hint: '_id_',
+        maxTimeMS: '500',
+        readPreference: 'nearest',
+      },
+    });
+
+    await openExportDialog();
+    fireEvent.click(screen.getByRole('radio', { name: /All matching/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Export…$/ }));
+
+    await vi.waitFor(() => expect(exportFn).toHaveBeenCalledTimes(1));
+    const input = exportFn.mock.calls[0]![0];
+    expect(input).toMatchObject({
+      filter: '{"name":"a"}',
+      collation: '{"locale":"en","strength":2}',
+      hint: '_id_',
+      readPreference: 'nearest',
+    });
+    expect(input).not.toHaveProperty('maxTimeMS');
+  });
+
   it('warns when the export hit the cap, naming how many were written', async () => {
     const exportFn = vi.fn(async () => ({ path: '/tmp/orders.json', written: 100_000, truncated: true }));
     installAtelierMock({ query: { export: exportFn } as never });

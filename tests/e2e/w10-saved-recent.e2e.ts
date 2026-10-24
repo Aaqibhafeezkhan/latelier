@@ -75,7 +75,7 @@ test('saved+recent: Save modal persists; Saved + Recent tabs reflect activity', 
       // empty-state message is gone instead of pinning to a specific format.
       await win.getByRole('tab', { name: 'Recent', exact: true }).click();
       await expect(win.getByText('No recent queries yet.')).not.toBeVisible({ timeout: 5000 });
-      await expect(win.locator('button[title="Run here"]').first()).toBeVisible();
+      await expect(win.getByRole('button', { name: /in this tab$/ }).first()).toBeVisible();
     });
   });
 });

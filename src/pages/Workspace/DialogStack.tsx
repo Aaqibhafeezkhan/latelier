@@ -394,6 +394,8 @@ export function DialogStack({
             collection={activeCollection.collection}
             readOnly={focusedConnectionReadOnly}
             filter={filterJson}
+            collation={activeCollection.state.builder.collation}
+            hint={activeCollection.state.builder.hint}
             onClose={closeUpdateAllModal}
             onUpdated={(auditId, message) => handleUpdatedAll(auditId, message, target)}
           />
@@ -402,12 +404,10 @@ export function DialogStack({
 
       {(() => {
         if (!activeCollection) return null;
-        const dialog = resolveDeleteDialog({
-          deleteDoc,
-          deleteSelected,
-          deleteAllFilterJson: deleteAllOpen ? currentFilterJson(activeCollection.state) : null,
-        });
+        const deleteAllFilterJson = deleteAllOpen ? currentFilterJson(activeCollection.state) : null;
+        const dialog = resolveDeleteDialog({ deleteDoc, deleteSelected, deleteAllFilterJson });
         if (!dialog.open) return null;
+        const byTabFilter = deleteAllFilterJson !== null && dialog.filter === deleteAllFilterJson;
         // The write's own collection — see UpdateConfirm above.
         const target = targetOf(activeCollection);
         return (
@@ -418,6 +418,13 @@ export function DialogStack({
             readOnly={focusedConnectionReadOnly}
             docs={dialog.docs}
             filter={dialog.filter}
+            // Only when the dialog deletes by the tab's own filter. A
+            // selection deletes the selected documents by `_id`, the same set
+            // with or without the collation or hint, and DeleteConfirm refuses
+            // any multi delete given one. Keyed on the filter the dialog was
+            // handed, not on which menu opened it.
+            collation={byTabFilter ? activeCollection.state.builder.collation : undefined}
+            hint={byTabFilter ? activeCollection.state.builder.hint : undefined}
             onClose={closeDeleteDialogs}
             onDeleted={(auditId, message) => handleDeleted(auditId, message, target)}
           />

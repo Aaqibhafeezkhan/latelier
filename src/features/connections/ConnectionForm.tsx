@@ -3,9 +3,11 @@ import { themeVars } from '../../theme/themeVars';
 import { tlsWarning } from '../../utils/hostLocality';
 import { isMacRenderer } from '../../utils/platform';
 import { I } from '../../icons';
-import { Button, Modal, Tabs } from '@mantine/core';
+import { ActionIcon, Button, ColorSwatch, Modal, Tabs, Tooltip } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { api, isIpcError } from '../../api/atelier';
+import { invalidateSampleSchemaCache } from '../fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../fieldSuggestions/sources/schemaEnumSource';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
 import { SubmitButton } from '../../components/SubmitButton';
 import { notify } from '../../theme/notifications';
@@ -209,6 +211,8 @@ function Input({ value, onChange, placeholder, type = 'text', style: sx, readOnl
     <input
       {...fieldProps}
       type={type}
+      // Hosts, usernames and URIs are not prose; the squiggle only misleads.
+      spellCheck={false}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
@@ -325,6 +329,8 @@ function PasswordInput({ value, onChange, placeholder, autoFocus }: {
         data-autofocus={autoFocus ? true : undefined}
         autoFocus={autoFocus}
         type={showPwd ? 'text' : 'password'}
+        // Revealed, the password is plain text a spell checker would otherwise see.
+        spellCheck={false}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder ?? '••••••••'}
@@ -335,19 +341,23 @@ function PasswordInput({ value, onChange, placeholder, autoFocus }: {
           color: T.text, fontSize: 12, fontFamily: 'inherit', outline: 'none',
         }}
       />
-      <button
-        type="button"
-        aria-label={showPwd ? 'Hide password' : 'Show password'}
-        aria-pressed={showPwd}
-        onClick={() => setShowPwd((s) => !s)}
-        style={{
-          position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-          background: 'none', border: 'none', cursor: 'pointer',
-          color: T.textMuted, display: 'flex', padding: 0,
-        }}
-      >
-        {showPwd ? I.eyeOff : I.eye}
-      </button>
+      <Tooltip label={showPwd ? 'Hide password' : 'Show password'} withArrow openDelay={400}>
+        <ActionIcon
+          type="button"
+          variant="subtle"
+          color="gray"
+          size="sm"
+          aria-label={showPwd ? 'Hide password' : 'Show password'}
+          aria-pressed={showPwd}
+          onClick={() => setShowPwd((s) => !s)}
+          style={{
+            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+            color: T.textMuted,
+          }}
+        >
+          {showPwd ? I.eyeOff : I.eye}
+        </ActionIcon>
+      </Tooltip>
     </div>
   );
 }
@@ -362,7 +372,6 @@ function FilePathRow({ purpose, label, value, onChange, placeholder }: {
   onChange: (v: string) => void;
   placeholder?: string;
 }) {
-  const T = themeVars;
   const pick = async () => {
     try {
       const r = await api.app.pickFile(purpose);
@@ -375,34 +384,27 @@ function FilePathRow({ purpose, label, value, onChange, placeholder }: {
   return (
     <div style={{ display: 'flex', gap: 6 }}>
       <Input value={value} onChange={onChange} placeholder={placeholder} readOnly />
-      <button
-        type="button"
-        onClick={() => void pick()}
-        title="Browse"
-        aria-label={`Browse for ${label}`}
-        style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: T.rs,
-          background: T.surfaceRaised, color: T.textMuted, cursor: 'pointer',
-          fontSize: 11,
-        }}
-      >
-        ⋯
-      </button>
-      {value !== '' && (
-        <button
+      <Tooltip label="Browse" withArrow openDelay={400}>
+        <Button
           type="button"
+          variant="default"
+          size="xs"
+          onClick={() => void pick()}
+          aria-label={`Browse for ${label}`}
+        >
+          ⋯
+        </Button>
+      </Tooltip>
+      {value !== '' && (
+        <Button
+          type="button"
+          variant="default"
+          size="xs"
           onClick={() => onChange('')}
           aria-label={`Clear ${label}`}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: '6px 10px', border: `1px solid ${T.border}`, borderRadius: T.rs,
-            background: T.surfaceRaised, color: T.textMuted, cursor: 'pointer',
-            fontSize: 11,
-          }}
         >
           Clear
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -438,21 +440,22 @@ function GeneralTab({
           <Field label="Color" group>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               {COLORS.map((c) => (
-                <button
+                <ColorSwatch
                   key={c}
+                  component="button"
                   type="button"
+                  color={c}
+                  size={22}
+                  withShadow={false}
                   // COLORS is bare hex, so this is the honest accessible
                   // name available — not pretty, but truthful.
                   aria-label={`Color ${c}`}
                   aria-pressed={form.color === c}
                   onClick={() => set('color', c)}
                   style={{
-                    padding: 0, margin: 0, font: 'inherit', textAlign: 'left',
-                    width: 22, height: 22, borderRadius: '50%',
                     cursor: 'pointer',
                     border: form.color === c ? `2px solid ${T.text}` : `2px solid transparent`,
                     boxSizing: 'border-box',
-                    background: c,
                   }}
                 />
               ))}
@@ -1131,6 +1134,10 @@ function ConnectionFormImpl({
       formApi.clearErrors();
       if (isEdit && connectionId) {
         const updated = await api.conn.update(connectionId, toUpdate(form));
+        // The same id may now reach another server, with other validators
+        // and other fields.
+        invalidateSampleSchemaCache(updated.id);
+        invalidateSchemaEnumCache(updated.id);
         onSaved(updated.id);
       } else {
         const created = await api.conn.create(toInput(form));
@@ -1236,16 +1243,9 @@ function ConnectionFormImpl({
             Connection passwords are stored unencrypted in the local database.
           </span>
           <div style={{ flex: 1 }} />
-          <button
-            onClick={() => void disablePlaintextFallback()}
-            style={{
-              background: 'none', border: `1px solid ${T.border}`,
-              borderRadius: T.rs, padding: '3px 8px', cursor: 'pointer',
-              color: T.text, fontSize: 11, fontFamily: 'inherit',
-            }}
-          >
+          <Button variant="default" size="compact-xs" onClick={() => void disablePlaintextFallback()}>
             Disable
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1341,7 +1341,10 @@ function ConnectionFormImpl({
           }}>
             <TestStatus state={testState} errorMsg={testErrorMsg} />
             {testState === 'fail' && testFailure && (
-              <button
+              <Button
+                variant="subtle"
+                size="compact-xs"
+                c={T.accent}
                 onClick={() =>
                   help.open(testFailure, {
                     retryWithoutTls: async () => {
@@ -1358,31 +1361,14 @@ function ConnectionFormImpl({
                     },
                   })
                 }
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: T.accent,
-                  fontSize: 11,
-                  fontFamily: 'inherit',
-                  padding: '4px 6px',
-                  textDecoration: 'underline',
-                }}
               >
                 Help me fix this →
-              </button>
+              </Button>
             )}
             <div style={{ flex: 1 }} />
-            <button
-              onClick={onCancel}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: T.textMuted, fontSize: 12, fontFamily: 'inherit',
-                padding: '6px 4px',
-              }}
-            >
+            <Button variant="subtle" color="gray" size="compact-xs" onClick={onCancel}>
               Cancel
-            </button>
+            </Button>
             <Button variant="subtle" size="compact-xs" onClick={() => void handleTest()} leftSection={I.server}>
               {testState === 'testing' ? 'Testing…' : 'Test connection'}
             </Button>
@@ -1480,17 +1466,9 @@ function PlaintextFallbackModal({
           {' '}file will be able to recover the password. Use this only on machines you control.
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <button
-            type="button"
-            onClick={close}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: T.textMuted, fontSize: 13, fontFamily: 'inherit',
-              padding: '6px 8px',
-            }}
-          >
+          <Button type="button" variant="subtle" color="gray" size="compact-xs" onClick={close}>
             Cancel
-          </button>
+          </Button>
           <Button variant="filled" color="red" size="compact-xs" onClick={onConfirm}>
             Store as plaintext
           </Button>

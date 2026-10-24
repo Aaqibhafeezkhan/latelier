@@ -115,6 +115,44 @@ describe('QueryBar - Explain menu', () => {
     });
   });
 
+  // W14 §9 — the plan has to be for the query that runs, collation included.
+  it('sends the collation, hint and read preference', async () => {
+    const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan: {}, verbosity: 'queryPlanner' }));
+    const tab = makeCollectionTab();
+    tab.state.builder = {
+      ...tab.state.builder,
+      collation: '{"locale":"en"}',
+      hint: '{"name":1}',
+      maxTimeMS: '500',
+      readPreference: 'primaryPreferred',
+    };
+    installAtelierMock({
+      tabs: {
+        list: async () => [tab],
+        setActive: async (id) => ({ id }),
+        update: async () => tab,
+      },
+      conn: { list: async () => [baseConn] },
+      query: {
+        find: async () => ({ documents: [], durationMs: 0, hasMore: false }),
+        count: async () => ({ count: 0 }),
+        explain: explainSpy,
+      },
+    });
+
+    mountWorkspace();
+    await openExplainMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'queryPlanner' }));
+
+    await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(1));
+    expect(explainSpy.mock.calls[0]![0]).toMatchObject({
+      collation: '{"locale":"en"}',
+      hint: '{"name":1}',
+      readPreference: 'primaryPreferred',
+    });
+    expect(explainSpy.mock.calls[0]![0]).not.toHaveProperty('maxTimeMS');
+  });
+
   it('sends queryRaw as the filter', async () => {
     const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({
       plan: { ok: 1 },

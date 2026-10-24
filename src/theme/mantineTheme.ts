@@ -26,6 +26,7 @@ const violet: MantineColorsTuple = [
 
 export const mantineTheme: MantineThemeOverride = createTheme({
   primaryColor: 'violet',
+  respectReducedMotion: true,
   primaryShade: { light: 4, dark: 4 },
   colors: { violet },
   defaultRadius: 'md',

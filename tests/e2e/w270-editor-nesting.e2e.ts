@@ -54,7 +54,7 @@ test('editor nesting: no horizontal overflow at 4 levels deep, and an array elem
       await ws.queryBarRunButton.click();
       await expect(win.getByText('deep-nest')).toBeVisible({ timeout: 8000 });
 
-      await win.locator('button[title="Edit document"]').first().click();
+      await win.getByRole('button', { name: /^Edit document/ }).first().click();
       const editor = win.getByRole('dialog', { name: 'Edit document' });
       await expect(editor).toBeVisible({ timeout: 5000 });
 
@@ -81,7 +81,7 @@ test('editor nesting: no horizontal overflow at 4 levels deep, and an array elem
       // Re-open and read the stored value back: the edited element saved,
       // and its untouched sibling survived — the array was resent whole,
       // not merged field-by-field, but nothing else in the document changed.
-      await win.locator('button[title="Edit document"]').first().click();
+      await win.getByRole('button', { name: /^Edit document/ }).first().click();
       const reopened = win.getByRole('dialog', { name: 'Edit document' });
       await expect(reopened).toBeVisible({ timeout: 5000 });
       await expect(reopened.getByRole('textbox', { name: 'cast.0.name' })).toHaveValue('Alicia');

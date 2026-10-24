@@ -1,14 +1,26 @@
 import fs from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { openPrivateFile } from '../utils/privateFs.ts';
-import type { Sort } from 'mongodb';
-import type { FindInput, FindResultWire, ExplainInput, QueryExportInput, QueryExportResult } from '@shared/types';
+import type { CollationOptions, Hint, Sort } from 'mongodb';
+import type {
+  CountInput,
+  FindInput,
+  FindMatchOptions,
+  FindResultWire,
+  ExplainInput,
+  QueryExportInput,
+  QueryExportResult,
+  ReadPreferenceMode,
+} from '@shared/types';
 import {
   ByteCapExceededError,
   DEFAULT_MAX_EJSON_BYTES,
   ejsonEncode,
   ejsonEncodeArrayJson,
+  ejsonParse,
   ejsonStringifyRelaxed,
+  isPlainDocument,
+  isValidEjson,
   parseEjsonDocument,
 } from './ejson.ts';
 import { classifyMongoOpError } from './errors.ts';
@@ -63,6 +75,61 @@ function describeBytes(bytes: number): string {
   return bytes >= MIB ? `${bytes / MIB} MB` : `${bytes} bytes`;
 }
 
+/** A hint that parses as an EJSON document is a key pattern; any other text names an index. */
+function parseHint(text: string): Hint {
+  if (!isValidEjson(text)) return text;
+  const parsed = ejsonParse(text);
+  return isPlainDocument(parsed) ? (parsed as Hint) : text;
+}
+
+/**
+ * `FindMatchOptions` as driver options, for every op that must see the same
+ * documents as the find on screen (W14 §9): a collation changes which
+ * documents match, so a count or an export without it would describe a
+ * different set. Blank is unset, and an unset option is left out entirely.
+ */
+/**
+ * A driver error as an AppError, for the four operations that take a read
+ * preference. One no member can serve fails server selection after
+ * `serverSelectionTimeoutMS` with the driver's "Server selection timed out",
+ * which leaves the cause to guess: it is named instead. Still MONGO_ERROR,
+ * as `classifyMongoOpError` has it: TIMEOUT would say the query itself ran
+ * too long.
+ */
+function classifyReadError(err: unknown, readPreference: ReadPreferenceMode | undefined): AppError {
+  const classified = classifyMongoOpError(err);
+  if (readPreference === undefined || (err as { name?: unknown } | null)?.name !== 'MongoServerSelectionError') {
+    return classified;
+  }
+  return new SystemError(
+    classified.code,
+    `No server can serve the read preference ${readPreference}: server selection timed out. Choose another read preference, or clear it.`,
+    { mongoMessage: classified.message },
+  );
+}
+
+function matchOptions(input: FindMatchOptions): {
+  collation?: CollationOptions;
+  hint?: Hint;
+  readPreference?: ReadPreferenceMode;
+} {
+  const collation = input.collation?.trim();
+  const hint = input.hint?.trim();
+  return {
+    ...(collation ? { collation: parseEjsonDocument<CollationOptions>(collation, 'collation') } : {}),
+    ...(hint ? { hint: parseHint(hint) } : {}),
+    ...(input.readPreference ? { readPreference: input.readPreference } : {}),
+  };
+}
+
+/** Filter operators `countDocuments` (an aggregation `$match`) refuses. */
+const MATCH_FORBIDDEN = new Set(['$where', '$near', '$nearSphere']);
+
+function usesMatchForbidden(node: unknown): boolean {
+  if (node === null || typeof node !== 'object') return false;
+  return Object.entries(node).some(([k, v]) => MATCH_FORBIDDEN.has(k) || usesMatchForbidden(v));
+}
+
 export class QueryService {
   private pool: MongoPool;
   private recent: RecentQueryService;
@@ -103,7 +170,10 @@ export class QueryService {
     const projection = input.projection
       ? parseEjsonDocument<Record<string, unknown>>(input.projection, 'projection')
       : undefined;
+    const options = matchOptions(input);
     const limit = Math.min(input.limit, 1000);
+    // A user value can only lower the cap, never raise it.
+    const maxTimeMS = Math.min(input.maxTimeMS ?? this.queryTimeoutMs, this.queryTimeoutMs);
 
     const ctrl = new AbortController();
     if (input.cancelToken) this.active.set(input.cancelToken, ctrl);
@@ -115,12 +185,13 @@ export class QueryService {
     try {
       const docs = await coll
         .find(filter, {
+          ...options,
           sort,
           projection,
           limit,
           skip: input.skip,
           signal: ctrl.signal,
-          maxTimeMS: this.queryTimeoutMs,
+          maxTimeMS,
         })
         .toArray();
       const durationMs = Date.now() - t0;
@@ -137,7 +208,7 @@ export class QueryService {
       return { documentsJson, durationMs, hasMore: docs.length === limit };
     } catch (err) {
       const durationMs = Date.now() - t0;
-      const classified = this.explainFindCap(classifyMongoOpError(err));
+      const classified = this.explainFindCap(classifyReadError(err, input.readPreference), maxTimeMS);
       void this.recent
         .recordFind(input, durationMs, 0, classified.code)
         .catch((e: unknown) => logRecentWriteFailure(this.log, e));
@@ -152,7 +223,7 @@ export class QueryService {
    * not a byte count under `INTERNAL` or the driver's "MaxTimeMS" wording.
    * The raw message stays in `details` for the log and the diagnostic bundle.
    */
-  private explainFindCap(err: AppError): AppError {
+  private explainFindCap(err: AppError, maxTimeMS: number): AppError {
     if (err instanceof ByteCapExceededError) {
       return new ValidationError(
         `The result is larger than ${describeBytes(this.maxFindBytes)}. Add a filter, a projection, or lower the rows per page.`,
@@ -162,7 +233,7 @@ export class QueryService {
     if (err.code === 'TIMEOUT') {
       return new SystemError(
         'TIMEOUT',
-        `The query was stopped after ${this.queryTimeoutMs / 1000} s. Add an index or narrow the filter.`,
+        `The query was stopped after ${maxTimeMS / 1000} s. Add an index or narrow the filter.`,
         { mongoMessage: err.message },
       );
     }
@@ -170,17 +241,34 @@ export class QueryService {
   }
 
   async count(
-    input: Omit<FindInput, 'limit' | 'skip' | 'projection' | 'sort' | 'cancelToken'>,
+    input: CountInput,
   ): Promise<{ count: number }> {
     const filter = parseEjsonDocument<Record<string, unknown>>(input.filter, 'filter');
+    const options = matchOptions(input);
     const db = await this.pool.readDb(input.connectionId, input.dbName);
     try {
+      if (usesMatchForbidden(filter)) {
+        // The legacy `count` command runs a find-style match, so it takes
+        // $where/$near/$nearSphere, which countDocuments' $match rejects.
+        const { collation, hint, readPreference } = options;
+        const res = await db.command(
+          {
+            count: input.collection,
+            query: filter,
+            maxTimeMS: PROBE_TIMEOUT_MS,
+            ...(collation ? { collation } : {}),
+            ...(hint ? { hint } : {}),
+          },
+          readPreference ? { readPreference } : undefined,
+        );
+        return { count: res.n as number };
+      }
       const count = await db
         .collection(input.collection)
-        .countDocuments(filter, { maxTimeMS: PROBE_TIMEOUT_MS });
+        .countDocuments(filter, { ...options, maxTimeMS: PROBE_TIMEOUT_MS });
       return { count };
     } catch (err) {
-      throw classifyMongoOpError(err);
+      throw classifyReadError(err, input.readPreference);
     }
   }
 
@@ -216,15 +304,16 @@ export class QueryService {
     const projection = input.projection
       ? parseEjsonDocument<Record<string, unknown>>(input.projection, 'projection')
       : undefined;
+    const options = matchOptions(input);
     const db = await this.pool.readDb(input.connectionId, input.dbName);
     const cursor = db
       .collection(input.collection)
-      .find(filter, { sort, projection, maxTimeMS: QUERY_TIMEOUT_MS });
+      .find(filter, { ...options, sort, projection, maxTimeMS: QUERY_TIMEOUT_MS });
     try {
       const plan = await cursor.explain(input.verbosity);
       return { plan, verbosity: input.verbosity };
     } catch (err) {
-      throw classifyMongoOpError(err);
+      throw classifyReadError(err, input.readPreference);
     } finally {
       // explain() leaves the underlying cursor open server-side until the
       // driver session times out; close eagerly so an explain spike can't
@@ -262,6 +351,7 @@ export class QueryService {
     const projection = input.projection
       ? parseEjsonDocument<Record<string, unknown>>(input.projection, 'projection')
       : undefined;
+    const options = matchOptions(input);
 
     const cap = this.exportCap;
     // A user limit at or under the cap is the actual reason the export
@@ -276,6 +366,7 @@ export class QueryService {
     const db = await this.pool.readDb(input.connectionId, input.dbName);
     const coll = db.collection(input.collection);
     const cursor = coll.find(filter, {
+      ...options,
       sort,
       projection,
       limit: cursorLimit,
@@ -365,7 +456,7 @@ export class QueryService {
       if (opened) {
         await fs.unlink(filePath).catch((e: unknown) => this.logCleanup('removing the partial export file', e));
       }
-      throw classifyMongoOpError(err);
+      throw classifyReadError(err, input.readPreference);
     } finally {
       await cursor.close().catch((e: unknown) => this.logCleanup('closing the export cursor', e));
     }

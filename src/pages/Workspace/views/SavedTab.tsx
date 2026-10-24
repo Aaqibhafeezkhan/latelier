@@ -1,6 +1,7 @@
 import React from 'react';
-import { Badge } from '@mantine/core';
+import { ActionIcon, Badge, Box, Button, Group, Text, Tooltip } from '@mantine/core';
 import { I } from '../../../icons';
+import { themeVars } from '../../../theme/themeVars';
 import { api, getErrorMessage } from '../../../api/atelier';
 import { confirmDestructive } from '../../../utils/confirm';
 import type { SavedKind, SavedQuery, SavedQuerySummary } from '@shared/types';
@@ -33,6 +34,7 @@ export function SavedTab({
   onRunHere,
   onOpenInTab,
 }: SavedTabProps) {
+  const T = themeVars;
   const [items, setItems] = React.useState<SavedQuerySummary[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
@@ -96,68 +98,60 @@ export function SavedTab({
       {/* W15 §13.5 — the header survives loading, error and empty.
           This view used to early-return a bare centered message, so anyone
           switching here while it loaded got an unlabelled blank panel. */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '10px 10px 6px',
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: 0.6,
-          textTransform: 'uppercase',
-          color: 'var(--atelier-text-muted)',
-        }}
+      <Group
+        gap={6}
+        wrap="nowrap"
+        px={10}
+        pt={10}
+        pb={6}
+        fz={10}
+        fw={700}
+        c={T.textMuted}
+        style={{ letterSpacing: 0.6, textTransform: 'uppercase' }}
       >
         <span style={{ flex: 1 }}>Saved · {collection}</span>
-        <button
+        <Button
+          variant="default"
+          size="compact-xs"
+          h={18}
+          px={6}
+          fz={10}
+          c={loading ? undefined : T.textMuted}
           onClick={() => void load()}
           disabled={loading}
           aria-label="Refresh saved queries"
-          title="Refresh"
-          style={{
-            fontSize: 10,
-            border: '1px solid var(--atelier-border)',
-            borderRadius: 'var(--atelier-radius-xs)',
-            background: 'none',
-            color: 'var(--atelier-text-muted)',
-            cursor: loading ? 'default' : 'pointer',
-            padding: '1px 6px',
-          }}
         >
           Refresh
-        </button>
-      </div>
+        </Button>
+      </Group>
 
       {loading && (
-        <div style={{ padding: '4px 10px 10px', fontSize: 12, color: 'var(--atelier-text-muted)' }}>
+        <Text fz={12} c={T.textMuted} px={10} pt={4} pb={10}>
           Loading…
-        </div>
+        </Text>
       )}
 
       {!loading && err && (
-        <div style={{ padding: '4px 10px 10px', fontSize: 12, color: 'var(--atelier-warn)' }}>
+        <Text fz={12} c={T.warn} px={10} pt={4} pb={10}>
           {err}
-        </div>
+        </Text>
       )}
 
       {!loading && !err && items.length === 0 && (
-        <div style={{ padding: '4px 10px 10px', fontSize: 12, color: 'var(--atelier-text-muted)' }}>
+        <Text fz={12} c={T.textMuted} px={10} pt={4} pb={10}>
           Nothing saved yet. Use Save in the toolbar above to keep one here.
-        </div>
+        </Text>
       )}
 
       {!loading && !err && items.map((item) => (
-        <div
+        <Group
           key={item.id}
-          style={{
-            padding: '7px 10px',
-            borderBottom: '1px solid var(--atelier-border)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 12,
-          }}
+          gap={6}
+          wrap="nowrap"
+          px={10}
+          py={7}
+          fz={12}
+          style={{ borderBottom: `1px solid ${T.border}` }}
         >
           {/* Kind label. `Badge` with this size/variant/color is the
               existing small-badge pattern in this file's siblings
@@ -168,83 +162,52 @@ export function SavedTab({
           <Badge size="xs" variant="light" color="violet" style={{ flexShrink: 0 }}>
             {KIND_LABEL[item.kind]}
           </Badge>
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            <div
-              style={{
-                fontWeight: 600,
-                color: 'var(--atelier-text)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
+          <Box style={{ flex: 1, overflow: 'hidden' }}>
+            <Text fw={600} c={T.text} truncate="end" fz={12}>
               {item.name}
-            </div>
-            <div style={{ fontSize: 10, color: 'var(--atelier-text-ghost)', marginTop: 1 }}>
+            </Text>
+            <Text fz={10} c={T.textGhost} mt={1}>
               {new Date(item.updatedAt).toLocaleDateString()}
-            </div>
+            </Text>
             {item.description && (
-              <div
-                title={item.description}
-                style={{
-                  fontSize: 10,
-                  color: 'var(--atelier-text-ghost)',
-                  marginTop: 1,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
+              <Text title={item.description} fz={10} c={T.textGhost} mt={1} truncate="end">
                 {item.description}
-              </div>
+              </Text>
             )}
-          </div>
-          <button
-            onClick={() => void handlePrimary(item)}
-            title={item.kind === 'find' ? 'Run here' : 'Open in a new tab'}
-            aria-label={
-              item.kind === 'find'
-                ? `Run "${item.name}" in this tab`
-                : `Open "${item.name}" in a new tab`
-            }
-            style={{
-              padding: '2px 7px',
-              fontSize: 10,
-              border: '1px solid var(--atelier-accent-border)',
-              borderRadius: 'var(--atelier-radius-xs)',
-              background: 'var(--atelier-accent-soft)',
-              color: 'var(--atelier-accent)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 3,
-            }}
-          >
-            {item.kind === 'find' ? <>{I.play} Run</> : '↗ Open'}
-          </button>
-          {/* W15 §13.5 — `title` is not an accessible name for an
-              icon-only button; it is kept for the hover tooltip and
-              the real name says which query it deletes. */}
-          <button
-            onClick={() => void requestDelete(item)}
-            disabled={deleting}
-            title="Delete"
-            aria-label={`Delete "${item.name}"`}
-            style={{
-              padding: '2px 5px',
-              fontSize: 10,
-              border: '1px solid var(--atelier-border)',
-              borderRadius: 'var(--atelier-radius-xs)',
-              background: 'none',
-              color: 'var(--atelier-red)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            {I.trash}
-          </button>
-        </div>
+          </Box>
+          <Tooltip label={item.kind === 'find' ? 'Run here' : 'Open in a new tab'} withArrow openDelay={400}>
+            <Button
+              variant="light"
+              size="compact-xs"
+              h={20}
+              px={7}
+              fz={10}
+              leftSection={item.kind === 'find' ? I.play : undefined}
+              onClick={() => void handlePrimary(item)}
+              aria-label={
+                item.kind === 'find'
+                  ? `Run "${item.name}" in this tab`
+                  : `Open "${item.name}" in a new tab`
+              }
+            >
+              {item.kind === 'find' ? 'Run' : '↗ Open'}
+            </Button>
+          </Tooltip>
+          {/* W15 §13.5 — a tooltip is not an accessible name for an
+              icon-only button; the aria-label says which query it deletes. */}
+          <Tooltip label="Delete" withArrow openDelay={400}>
+            <ActionIcon
+              variant="default"
+              size={22}
+              c={deleting ? undefined : T.red}
+              onClick={() => void requestDelete(item)}
+              disabled={deleting}
+              aria-label={`Delete "${item.name}"`}
+            >
+              {I.trash}
+            </ActionIcon>
+          </Tooltip>
+        </Group>
       ))}
     </div>
   );

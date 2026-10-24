@@ -1,23 +1,67 @@
-/** Work that quitting would cut off. Idle shells and everything else are not counted. */
+/**
+ * What quitting would cut off or throw away. Idle shells and everything else
+ * are not counted. The `unsaved*` counts are renderer reports (see
+ * `UnsavedWorkStore`); the rest are read from main's own services.
+ */
 export interface RunningWork {
   scripts: number;
   shellCommands: number;
   imports: number;
   aggregations: number;
+  unsavedForms: number;
+  unsavedPipelines: number;
+}
+
+/**
+ * Unsaved work the renderer reports through `app:setUnsavedWork`, one count
+ * per source, each report replacing the last. Main resets both to zero when
+ * the renderer reloads, crashes or its window closes, so a report never
+ * outlives the page that made it.
+ */
+export interface UnsavedWorkStore {
+  connectionForm: number;
+  pipelines: number;
 }
 
 const plural = (n: number, noun: string): string => `${n} running ${noun}${n === 1 ? '' : 's'}`;
 
-/** What quitting would stop, as a sentence, or null when nothing is running. */
-export function describeRunningWork({ scripts, shellCommands, imports, aggregations }: RunningWork): string | null {
-  const parts: string[] = [];
-  if (scripts > 0) parts.push(plural(scripts, 'script'));
-  if (shellCommands > 0) parts.push(plural(shellCommands, 'shell command'));
-  if (imports > 0) parts.push(plural(imports, 'import'));
-  if (aggregations > 0) parts.push(plural(aggregations, 'aggregation'));
-  return parts.length === 0
-    ? null
-    : `This will stop ${new Intl.ListFormat('en').format(parts)}.`;
+/**
+ * What quitting would stop and lose, as one or two sentences, or null when
+ * there is neither running work nor unsaved work.
+ */
+export function describeRunningWork({
+  scripts,
+  shellCommands,
+  imports,
+  aggregations,
+  unsavedForms,
+  unsavedPipelines,
+}: RunningWork): string | null {
+  const list = (items: string[]) => new Intl.ListFormat('en').format(items);
+  const running: string[] = [];
+  if (scripts > 0) running.push(plural(scripts, 'script'));
+  if (shellCommands > 0) running.push(plural(shellCommands, 'shell command'));
+  if (imports > 0) running.push(plural(imports, 'import'));
+  if (aggregations > 0) running.push(plural(aggregations, 'aggregation'));
+  const unsaved: string[] = [];
+  if (unsavedForms > 0) unsaved.push(unsavedForms === 1 ? 'the connection form' : `${unsavedForms} connection forms`);
+  if (unsavedPipelines > 0) unsaved.push(`${unsavedPipelines} pipeline${unsavedPipelines === 1 ? '' : 's'}`);
+  const sentences: string[] = [];
+  if (running.length > 0) sentences.push(`This will stop ${list(running)}.`);
+  if (unsaved.length > 0) sentences.push(`Unsaved changes in ${list(unsaved)} will be lost.`);
+  return sentences.length === 0 ? null : sentences.join(' ');
+}
+
+/**
+ * The quit dialog's detail line, matched to what the question is about:
+ * running work is cancelled, unsaved changes are gone for good.
+ */
+export function describeQuitDetail({ scripts, shellCommands, imports, aggregations, unsavedForms, unsavedPipelines }: RunningWork): string {
+  const running = [scripts, shellCommands, imports, aggregations].some((n) => n > 0);
+  const unsaved = unsavedForms > 0 || unsavedPipelines > 0;
+  if (running && unsaved) return 'Work in progress is cancelled, and its results and your unsaved changes are lost.';
+  if (unsaved) return 'Changes you have not saved cannot be recovered.';
+  return 'Work in progress is cancelled and its results are lost.';
 }
 
 /**

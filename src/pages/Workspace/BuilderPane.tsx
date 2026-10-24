@@ -67,6 +67,7 @@ import type {
   RecentQuery,
   SavedQuery,
   SavedQuerySummary,
+  Stage,
   ValType,
 } from '@shared/types';
 import { useCollectionWorkspace } from './context';
@@ -75,12 +76,16 @@ import { CondValueEditor } from './CondValueEditor';
 import { useStructureEntries } from './useStructureEntries';
 import { condTypeWarning } from './condValue';
 import { FILTER_TEMPLATES, type FilterTemplate } from './filterTemplates';
+import { builderToStages } from './builderToPipeline';
+import { CODE_LANGS, findCode, type CodeLang } from '../../utils/driverCode';
 
 interface BuilderPaneProps {
   /** Bumped externally after a save so SavedTab re-fetches. */
   savedRefreshKey: number;
   /** Opens an aggregation or script saved item as its own top-level tab. */
   onOpenInTab: (saved: SavedQuerySummary) => void;
+  /** Opens this query, as stages, in the collection's Aggregation view. */
+  onOpenAsPipeline: (stages: Stage[]) => void;
 }
 
 const VAL_TYPES: ValType[] = ['string', 'number', 'long', 'decimal', 'boolean', 'date', 'null', 'regex', 'objectid', 'array'];
@@ -443,7 +448,8 @@ function useRowDropHandlers(
       setActiveDropPath(null);
       const raw = e.dataTransfer.getData(DRAGGED_FIELD_MIME);
       if (!raw) return;
-      let dragged: DraggedField;
+      // `null` and bare scalars parse too; the field check below refuses them.
+      let dragged: DraggedField | null;
       try {
         dragged = JSON.parse(raw) as DraggedField;
       } catch {
@@ -453,7 +459,7 @@ function useRowDropHandlers(
       // type) — `DocFieldTree`'s drag source now guards against starting
       // such a drag at all, but this is defense in depth for any other
       // payload source, since `condFromDragged` crashes downstream on one.
-      if (typeof dragged.field !== 'string' || !dragged.field || dragged.value === undefined) return;
+      if (typeof dragged?.field !== 'string' || !dragged.field || dragged.value === undefined) return;
       // A raw row can hold a hand-typed clause a dropped field would
       // silently overwrite (`mergeOrReplaceDragged` only merges onto an
       // existing `cond`, so a `raw` target always falls to replace). An
@@ -753,31 +759,17 @@ function CondRow({
           />
           {showOpDocs && (
             <OperatorTooltip name={node.op} prefClass="query" placement="below">
-              <button
+              <ActionIcon
                 type="button"
+                variant="default"
+                radius="xl"
+                size={18}
+                c={T.textGhost}
                 aria-label={`Documentation for ${node.op}`}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 18,
-                  height: 18,
-                  borderRadius: '50%',
-                  border: `1px solid ${T.border}`,
-                  background: 'none',
-                  padding: 0,
-                  margin: 0,
-                  font: 'inherit',
-                  color: T.textGhost,
-                  fontSize: 10,
-                  fontWeight: 600,
-                  cursor: 'help',
-                  flexShrink: 0,
-                  userSelect: 'none',
-                }}
+                style={{ fontSize: 10, fontWeight: 600, cursor: 'help', flexShrink: 0 }}
               >
                 ?
-              </button>
+              </ActionIcon>
             </OperatorTooltip>
           )}
           <RowMenu
@@ -1049,7 +1041,8 @@ function GroupView({
     setActiveDropPath(null);
     const raw = e.dataTransfer.getData(DRAGGED_FIELD_MIME);
     if (!raw) return;
-    let dragged: DraggedField;
+    // `null` and bare scalars parse too; the field check below refuses them.
+    let dragged: DraggedField | null;
     try {
       dragged = JSON.parse(raw) as DraggedField;
     } catch {
@@ -1059,7 +1052,7 @@ function GroupView({
     // type) — `DocFieldTree`'s drag source now guards against starting
     // such a drag at all, but this is defense in depth for any other
     // payload source, since `condFromDragged` crashes downstream on one.
-    if (typeof dragged.field !== 'string' || !dragged.field || dragged.value === undefined) return;
+    if (typeof dragged?.field !== 'string' || !dragged.field || dragged.value === undefined) return;
     applyEdit(insertAt(root, path, condFromDragged(dragged)));
   };
 
@@ -1684,7 +1677,8 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
         setActiveDropPath(null);
         const raw = e.dataTransfer.getData(DRAGGED_FIELD_MIME);
         if (!raw) return;
-        let dragged: DraggedField;
+        // `null` and bare scalars parse too; the field check below refuses them.
+        let dragged: DraggedField | null;
         try {
           dragged = JSON.parse(raw) as DraggedField;
         } catch {
@@ -1694,7 +1688,7 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
         // type) — `DocFieldTree`'s drag source now guards against starting
         // such a drag at all, but this is defense in depth for any other
         // payload source, since `condFromDragged` crashes downstream on one.
-        if (typeof dragged.field !== 'string' || !dragged.field || dragged.value === undefined) return;
+        if (typeof dragged?.field !== 'string' || !dragged.field || dragged.value === undefined) return;
         applyEdit(insertAt(root, [], condFromDragged(dragged)));
       }}
       style={{
@@ -1766,6 +1760,7 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
 function BuilderPaneInner({
   savedRefreshKey,
   onOpenInTab,
+  onOpenAsPipeline,
 }: BuilderPaneProps) {
   const T = themeVars;
   const { state, actions, meta } = useCollectionWorkspace();
@@ -1801,7 +1796,7 @@ function BuilderPaneInner({
   // skip/limit split `useQueryRunner` computes from the page
   // (`effectivePageLimit`), same projection and sort it hands to
   // `api.query.find` — so the copied command matches the page on screen.
-  const handleCopyCode = () => {
+  const handleCopyCode = (lang: CodeLang) => {
     // Refused through the same `findProblem` the Run button gates on: one
     // rule for "is this query runnable", not a copy-path opinion beside it.
     // An unparseable filter, sort, or raw projection copies nothing rather
@@ -1832,13 +1827,40 @@ function BuilderPaneInner({
       );
       return;
     }
-    const parts = [`db.${collection}.find(${state.queryRaw}`];
-    if (opts.projection) parts[0] += `, ${opts.projection}`;
-    parts[0] += ')';
-    if (opts.sort) parts.push(`.sort(${opts.sort})`);
-    if (skip > 0) parts.push(`.skip(${skip})`);
-    parts.push(`.limit(${limit})`);
-    void copyToClipboard(parts.join(''), 'Command copied to the clipboard');
+    // `findProblem` passing means every clause is already strict JSON, so
+    // there is no Shell Syntax left to repair here. Canonical EJSON is still
+    // not shell syntax (`{"$oid": …}` pasted into mongosh is an unknown
+    // operator): `findCode` routes such a document through EJSON.parse.
+    //
+    // A clause the gates above let through but `findCode` cannot write is a
+    // bug in one of the two; from a menu click it would otherwise surface as
+    // an uncaught page error with nothing copied and nothing said.
+    let code: string;
+    try {
+      code = findCode(lang, {
+        collection,
+        filter: state.queryRaw,
+        projection: opts.projection,
+        sort: opts.sort,
+        collation: opts.collation,
+        hint: opts.hint,
+        skip,
+        limit,
+      });
+    } catch (err) {
+      notify.error(`Nothing copied — ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    void copyToClipboard(code, 'Command copied to the clipboard');
+  };
+
+  const handleOpenAsPipeline = () => {
+    const result = builderToStages(state);
+    if (!result.ok) {
+      notify.error(`Nothing opened — ${result.problem}`);
+      return;
+    }
+    onOpenAsPipeline(result.stages);
   };
 
   // Reset sits in the footer beside Save and can discard a tree that
@@ -1849,12 +1871,18 @@ function BuilderPaneInner({
   // `confirmDestructive` is the one confirm the app has, not a fourth
   // hand-rolled dialog.
   const handleReset = () => {
+    // Reset empties the find options too, so a tab carrying a collation
+    // doesn't silently lose it: name whichever are set.
+    const setOptions = (['collation', 'hint', 'maxTimeMS', 'readPreference'] as const).filter(
+      (k) => (state.builder[k] ?? '').trim() !== '',
+    );
     void confirmDestructive({
       title: 'Reset this query?',
       body: (
         <span style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.5 }}>
           This clears the filter — every condition, group and raw clause — back
-          to <code>{'{}'}</code>, along with the sort, limit and projection.
+          to <code>{'{}'}</code>, along with the sort, limit and projection
+          {setOptions.length > 0 && <>, and the {setOptions.join(', ')} you set</>}.
           It cannot be undone.
         </span>
       ),
@@ -1917,8 +1945,26 @@ function BuilderPaneInner({
     const projectionRaw = payload.builder
       ? (payload.builder as { projectionRaw?: string }).projectionRaw
       : state.builder.projectionRaw;
+    // W14 §9's find options, for the same reason: a collation changes which
+    // documents match, so dropping it reruns a different query. A payload
+    // without them clears the tab's, and so does a row with no builder at
+    // all, unlike the raw projection above: such a row predates the options,
+    // so the query it saved never had any.
+    const options = (payload.builder ?? {}) as Pick<
+      BuilderState,
+      'collation' | 'hint' | 'maxTimeMS' | 'readPreference'
+    >;
     return {
-      builder: { sort, limit, projection, projectionRaw },
+      builder: {
+        sort,
+        limit,
+        projection,
+        projectionRaw,
+        collation: options.collation,
+        hint: options.hint,
+        maxTimeMS: options.maxTimeMS,
+        readPreference: options.readPreference,
+      },
       queryRaw: payload.queryRaw ?? legacyCompileFilter(legacyBuilder),
     };
   };
@@ -2026,13 +2072,22 @@ function BuilderPaneInner({
             <Button variant="default" size="compact-xs" onClick={handleReset}>
               Reset
             </Button>
-            <Button
-              variant="default"
-              size="compact-xs"
-              leftSection={I.copy}
-              onClick={handleCopyCode}
-            >
-              Copy code
+            <Menu position="top-start" shadow="md">
+              <Menu.Target>
+                <Button variant="default" size="compact-xs" leftSection={I.copy}>
+                  Copy code
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                {CODE_LANGS.map(({ lang, label }) => (
+                  <Menu.Item key={lang} onClick={() => handleCopyCode(lang)}>
+                    {label}
+                  </Menu.Item>
+                ))}
+              </Menu.Dropdown>
+            </Menu>
+            <Button variant="default" size="compact-xs" onClick={handleOpenAsPipeline}>
+              Open as pipeline
             </Button>
           </div>
         </Tabs.Panel>

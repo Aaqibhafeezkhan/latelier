@@ -34,6 +34,7 @@ describe('classifyMongoOpError', () => {
     { what: 'IndexKeySpecsConflict', err: { code: 86 }, code: 'CONFLICT' },
     { what: 'UserNotFound', err: { code: 11 }, code: 'NOT_FOUND' },
     { what: 'UserAlreadyExists', err: { code: 51003 }, code: 'CONFLICT' },
+    { what: 'RoleAlreadyExists', err: { code: 51002 }, code: 'CONFLICT' },
     { what: 'RoleNotFound', err: { code: 31 }, code: 'VALIDATION' },
     { what: 'NamespaceExists', err: { code: 48 }, code: 'CONFLICT' },
     { what: 'NamespaceNotFound', err: { code: 26 }, code: 'NOT_FOUND' },
@@ -45,6 +46,12 @@ describe('classifyMongoOpError', () => {
     // Network errors — classified by name, not code.
     { what: 'MongoNetworkError', err: { name: 'MongoNetworkError' }, code: 'NETWORK' },
     { what: 'MongoNetworkTimeoutError', err: { name: 'MongoNetworkTimeoutError' }, code: 'NETWORK' },
+
+    // An operation that found no server to run on (a read preference no
+    // member can serve) is not a query that ran too long: TIMEOUT would get
+    // QueryService's "stopped after N s, add an index" wording, and would
+    // stop the drawer's live count asking that collection again.
+    { what: 'MongoServerSelectionError', err: { name: 'MongoServerSelectionError' }, code: 'MONGO_ERROR' },
 
     { what: 'anything unrecognized', err: { code: 999999 }, code: 'MONGO_ERROR' },
   ];
@@ -69,6 +76,7 @@ describe('classifyMongoOpError', () => {
     { what: 'IndexNotFound (codeName alone)', codeName: 'IndexNotFound', code: 'NOT_FOUND' },
     { what: 'UserNotFound (codeName alone)', codeName: 'UserNotFound', code: 'NOT_FOUND' },
     { what: 'UserAlreadyExists (codeName alone)', codeName: 'UserAlreadyExists', code: 'CONFLICT' },
+    { what: 'RoleAlreadyExists (codeName alone)', codeName: 'RoleAlreadyExists', code: 'CONFLICT' },
     { what: 'RoleNotFound (codeName alone)', codeName: 'RoleNotFound', code: 'VALIDATION' },
     { what: 'DocumentValidationFailure (codeName alone)', codeName: 'DocumentValidationFailure', code: 'VALIDATION' },
     { what: 'NamespaceExists (codeName alone)', codeName: 'NamespaceExists', code: 'CONFLICT' },

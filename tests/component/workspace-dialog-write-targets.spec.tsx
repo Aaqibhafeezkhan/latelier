@@ -62,7 +62,7 @@ const DIALOG_NAME: Record<Kind, string | RegExp> = {
 /** Opens `kind`'s confirm dialog on the Focused Tab. */
 async function openDialog(kind: Kind) {
   if (kind === 'delete') {
-    fireEvent.click(screen.getByTitle('Delete document'));
+    fireEvent.click(screen.getByRole('button', { name: /^Delete document/ }));
   } else {
     fireEvent.click(screen.getByRole('button', { name: 'Documents' }));
     fireEvent.click(screen.getByText(kind === 'delete-all' ? 'Delete all matching…' : 'Update all matching…'));

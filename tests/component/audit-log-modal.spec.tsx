@@ -11,6 +11,13 @@ import { AuditLogModal } from '../../src/pages/AuditLogModal';
 import type { AuditEntry, AuditListInput, ConnectionSummary } from '../../shared/types';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { invalidateSampleSchemaCache } from '../../src/features/fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
+
+// Spied so each write path can be checked for dropping the cached enum suggestions.
+vi.mock('../../src/features/fieldSuggestions/sources/schemaEnumSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/features/fieldSuggestions/sources/schemaEnumSource')>()),
+  invalidateSchemaEnumCache: vi.fn(),
+}));
 
 // Mocked at the exact module AuditLogModal imports; the rest stays real
 // because the palette tree reaches the suggestion sources through their barrel.
@@ -84,6 +91,7 @@ afterEach(() => {
   uninstallAtelierMock();
   vi.restoreAllMocks();
   vi.mocked(invalidateSampleSchemaCache).mockClear();
+  vi.mocked(invalidateSchemaEnumCache).mockClear();
 });
 
 describe('AuditLogModal', () => {
@@ -246,6 +254,7 @@ describe('AuditLogModal', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Revert' }));
 
       await waitFor(() => expect(invalidateSampleSchemaCache).toHaveBeenCalledExactlyOnceWith('c2'));
+      await waitFor(() => expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('c2'));
     });
 
     it('drops them when the Revert is refused as well: the request may have restored documents before failing, and an extra resample is harmless', async () => {
@@ -262,6 +271,7 @@ describe('AuditLogModal', () => {
 
       await screen.findByRole('alert');
       expect(invalidateSampleSchemaCache).toHaveBeenCalledExactlyOnceWith('c1');
+      expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('c1');
     });
 
     it('leaves them alone until a Revert is clicked', async () => {
@@ -271,6 +281,7 @@ describe('AuditLogModal', () => {
       await screen.findByRole('button', { name: 'Revert' });
 
       expect(invalidateSampleSchemaCache).not.toHaveBeenCalled();
+      expect(invalidateSchemaEnumCache).not.toHaveBeenCalled();
     });
 
     it('explains a refused Revert in words', async () => {

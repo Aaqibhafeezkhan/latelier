@@ -64,3 +64,24 @@ describe('PipelineOutline — stage row selection', () => {
     expect(row.tagName).toBe('BUTTON');
   });
 });
+
+describe('PipelineOutline — stage count', () => {
+  it('sets tabular numerals on the per-stage count', () => {
+    render(
+      <PipelineOutline
+        stages={[stage({ id: 3, op: '$sort' })]}
+        activeId={null}
+        collection="orders"
+        stageCounts={{ 3: 1234 }}
+        staleStageIds={new Set()}
+        outputCount={null}
+        outputStale={false}
+        darkMode={false}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const count = screen.getByText(/1,?234/);
+    expect(count.style.fontVariantNumeric).toBe('tabular-nums');
+  });
+});

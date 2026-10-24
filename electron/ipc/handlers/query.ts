@@ -3,8 +3,29 @@ import { IPC_CHANNELS } from '@shared/ipc';
 import type { Router } from '../router.ts';
 import { CollectionTargetSchema, NonEmpty, zodValidator } from '../validators.ts';
 import type { QueryService } from '../../mongo/QueryService.ts';
+import type { ReadPreferenceMode } from '@shared/types';
+
+const READ_PREFERENCES = [
+  'primary',
+  'primaryPreferred',
+  'secondary',
+  'secondaryPreferred',
+  'nearest',
+] as const satisfies readonly ReadPreferenceMode[];
+
+/**
+ * `FindMatchOptions` (W14 §9): collation and hint stay text here and are
+ * parsed main-side by `QueryService`, like `filter`/`sort`. Shared by every
+ * channel that must see the same documents as the find on screen.
+ */
+const MatchOptionsShape = {
+  collation: z.string().optional(),
+  hint: z.string().optional(),
+  readPreference: z.enum(READ_PREFERENCES).optional(),
+};
 
 export const FindInputSchema = CollectionTargetSchema.extend({
+  ...MatchOptionsShape,
   filter: NonEmpty,
   projection: z.string().optional(),
   sort: z.string().optional(),
@@ -15,9 +36,11 @@ export const FindInputSchema = CollectionTargetSchema.extend({
   skip: z.number().int().min(0).max(10_000_000),
   ejsonRelaxed: z.boolean().optional(),
   cancelToken: z.string().optional(),
+  maxTimeMS: z.number().int().min(1).optional(),
 });
 
-const CountInputSchema = CollectionTargetSchema.extend({
+export const CountInputSchema = CollectionTargetSchema.extend({
+  ...MatchOptionsShape,
   filter: NonEmpty,
   ejsonRelaxed: z.boolean().optional(),
 });
@@ -28,7 +51,8 @@ const FindOneInputSchema = CollectionTargetSchema.extend({
   sort: z.string().optional(),
 });
 
-const ExplainInputSchema = CollectionTargetSchema.extend({
+export const ExplainInputSchema = CollectionTargetSchema.extend({
+  ...MatchOptionsShape,
   filter: NonEmpty,
   projection: z.string().optional(),
   sort: z.string().optional(),
@@ -45,7 +69,8 @@ const ExportColumnSchema = z.object({
   path: NonEmpty,
 });
 
-const ExportInputSchema = CollectionTargetSchema.extend({
+export const ExportInputSchema = CollectionTargetSchema.extend({
+  ...MatchOptionsShape,
   filter: NonEmpty,
   sort: z.string().optional(),
   projection: z.string().optional(),

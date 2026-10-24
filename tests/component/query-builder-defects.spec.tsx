@@ -449,6 +449,19 @@ describe('W13 §7 — ⌘↵ runs from anywhere in the Documents view', () => {
     await waitFor(() => expect(screen.getByText('Not run: Invalid sort')).not.toBe(first));
   });
 
+  // W14 §9 — the shortcut's gate reads the find options too, or ⌘↵ would
+  // run a query the disabled Run button refuses.
+  it('refuses a find option that cannot run, and says so', async () => {
+    const { findSpy } = mountWith(
+      makeState({ builder: { projection: [], sort: '', limit: '', collation: 'en' } }),
+    );
+
+    fireEvent.keyDown(await screen.findByTestId('query-bar-collation'), cmdEnter);
+
+    expect(await screen.findByText('Not run: Invalid find option')).toBeTruthy();
+    expect(findSpy).not.toHaveBeenCalled();
+  });
+
   it('names a refused filter whose notice was already on screen', async () => {
     const { findSpy } = mountWith(makeState({ queryRaw: '[1,2]' }));
     const textarea = await screen.findByTestId('query-bar-input');

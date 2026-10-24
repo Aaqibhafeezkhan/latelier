@@ -7,6 +7,7 @@ import type {
   AggRunAndSaveInput,
   AggSaveCounts,
   AggStagePreview,
+  AggregationTabState,
   AuditEntry,
   AuditListInput,
   UndoResult,
@@ -31,6 +32,9 @@ import type {
   ConnectionSummary,
   ConnectionUpdate,
   CsvPreview,
+  CurrentOpInput,
+  CountInput,
+  CurrentOpSummary,
   DataImportInput,
   DataImportProgressEvent,
   DatabaseDropInput,
@@ -44,9 +48,14 @@ import type {
   ParsedUri,
   PreviewInput,
   ProbeResult,
+  ProfileLevel,
+  ProfileStatus,
   QueryExportInput,
   QueryExportResult,
+  RoleCreateInput,
+  RoleDropInput,
   RoleInfo,
+  RoleUpdateInput,
   UserCreateInput,
   UserDropInput,
   UserInfo,
@@ -189,6 +198,8 @@ export interface CollectionDetails {
     validator?: string;
     validationLevel?: ValidationLevel;
     validationAction?: ValidationAction;
+    /** A view's or collection's collation; EJSON canonical string. */
+    collation?: string;
   };
 }
 
@@ -197,6 +208,14 @@ export interface CollectionDetails {
  * Every method returns a resolved `T` (errors thrown as IpcError), never an
  * Envelope — the preload unwraps it.
  */
+/**
+ * Stages a `tabs.openAggregation` call seeds the Aggregation view with, in
+ * exactly the shape main's zod schema accepts: `stages` required, nothing
+ * else of `AggregationTabState`.
+ */
+export type AggregationSeed = Pick<AggregationTabState, 'stages'> &
+  Partial<Pick<AggregationTabState, 'activeStageId' | 'dirty'>>;
+
 export interface IpcApi {
   conn: {
     list: () => Promise<ConnectionSummary[]>;
@@ -228,6 +247,12 @@ export interface IpcApi {
      * location. Returns the chosen path, or `null` on user cancel.
      */
     diagnosticBundle: () => Promise<{ path: string | null }>;
+    /**
+     * Reports how much unsaved work one source holds, replacing its last
+     * report, so quitting can name it (F06). Main forgets every report when
+     * the page reloads, crashes or its window closes.
+     */
+    setUnsavedWork: (input: { source: UnsavedWorkSource; count: number }) => Promise<void>;
     /** Native File-menu commands pushed from main; returns the unsubscribe. */
     onMenuCommand: (cb: (command: MenuCommand) => void) => () => void;
   };
@@ -288,6 +313,28 @@ export interface IpcApi {
 
   role: {
     list: (input: { connectionId: string; dbName: string }) => Promise<RoleInfo[]>;
+    create: (input: RoleCreateInput) => Promise<{ ok: true }>;
+    update: (input: RoleUpdateInput) => Promise<{ ok: true }>;
+    drop: (input: RoleDropInput) => Promise<{ dropped: true }>;
+  };
+
+  /** Monitor tab (C06 §9): running ops, killOp and the database profiler. */
+  admin: {
+    currentOp: (input: CurrentOpInput) => Promise<{ ops: CurrentOpSummary[] }>;
+    killOp: (input: { connectionId: string; opid: string }) => Promise<{ ok: true }>;
+    profileStatus: (input: { connectionId: string; dbName: string }) => Promise<ProfileStatus>;
+    setProfileLevel: (input: {
+      connectionId: string;
+      dbName: string;
+      level: ProfileLevel;
+      slowms?: number;
+    }) => Promise<{ ok: true }>;
+    /** Latest `system.profile` rows, newest first, as canonical EJSON documents. */
+    profileTail: (input: {
+      connectionId: string;
+      dbName: string;
+      limit?: number;
+    }) => Promise<{ docs: unknown[] }>;
   };
 
   meta: {
@@ -325,7 +372,7 @@ export interface IpcApi {
 
   query: {
     find: (input: FindInput) => Promise<FindResult>;
-    count: (input: Omit<FindInput, 'limit' | 'skip' | 'projection' | 'sort' | 'cancelToken'>) => Promise<{ count: number }>;
+    count: (input: CountInput) => Promise<{ count: number }>;
     findOne: (input: Pick<FindInput, 'connectionId' | 'dbName' | 'collection' | 'filter' | 'projection' | 'sort'>) => Promise<{ document: unknown | null; durationMs: number }>;
     explain: (input: ExplainInput) => Promise<{ plan: unknown; verbosity: string }>;
     cancel: (input: { token: string }) => Promise<void>;
@@ -463,6 +510,7 @@ export interface IpcApi {
       collection: string;
       savedId?: string;
       name?: string;
+      initialState?: AggregationSeed;
     }) => Promise<CollectionTab>;
     openDefault: (input: {
       connectionId: string;
@@ -515,6 +563,7 @@ export const IPC_CHANNELS = {
   appOpenExternal: 'app:openExternal',
   appSaveFile:     'app:saveFile',
   appDiagnosticBundle: 'app:diagnosticBundle',
+  appSetUnsavedWork: 'app:setUnsavedWork',
 
   // Auto-update -----------------------------------------
   updatesGetState:   'updates:getState',
@@ -557,6 +606,16 @@ export const IPC_CHANNELS = {
   userUpdate: 'user:update', // SECRET_INPUT
   userDrop:   'user:drop',
   roleList:   'role:list',
+  roleCreate: 'role:create',
+  roleUpdate: 'role:update',
+  roleDrop:   'role:drop',
+
+  // Monitor (C06 §9) -------------------------------------
+  adminCurrentOp:       'admin:currentOp',
+  adminKillOp:          'admin:killOp',
+  adminProfileStatus:   'admin:profileStatus',
+  adminSetProfileLevel: 'admin:setProfileLevel',
+  adminProfileTail:     'admin:profileTail',
 
   // App state preferences ----------------------------------------
   prefsGet: 'prefs:get',
@@ -655,3 +714,6 @@ export const IPC_CHANNELS = {
 
 /** Allowed purposes for app:pickFile — restricts the file dialog filter. */
 export type PickFilePurpose = 'tls-ca' | 'tls-client-cert' | 'ssh-key' | 'data-import';
+
+/** Who reports unsaved work for the quit question: the connection form, or the workspace's dirty pipelines. */
+export type UnsavedWorkSource = 'connectionForm' | 'pipelines';

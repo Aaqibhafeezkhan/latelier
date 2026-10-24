@@ -1,6 +1,7 @@
 import React from 'react';
 import { Alert, Button, Group, Modal, Stack, Text, TextInput } from '@mantine/core';
 import { api, getErrorMessage } from '../../api/atelier';
+import { invalidateSchemaEnumCache } from '../../features/fieldSuggestions/sources/schemaEnumSource';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
 import { SubmitButton } from '../../components/SubmitButton';
 
@@ -47,6 +48,8 @@ export function DropCollectionConfirm({
     setError(null);
     try {
       await api.collection.drop({ connectionId, dbName, collection });
+      // A collection re-created under this name starts without the old rules.
+      invalidateSchemaEnumCache(connectionId, dbName, collection);
       finish();
     } catch (err) {
       setError(getErrorMessage(err, 'Drop failed'));

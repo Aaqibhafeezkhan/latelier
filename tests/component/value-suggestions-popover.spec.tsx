@@ -9,7 +9,11 @@ import { render, screen, fireEvent, waitFor } from '../helpers/render';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
-import { invalidateRecentValuesCache } from '../../src/features/fieldSuggestions/sources';
+import {
+  invalidateRecentValuesCache,
+  invalidateSampleSchemaCache,
+  invalidateSchemaEnumCache,
+} from '../../src/features/fieldSuggestions/sources';
 import type { CollectionTabState, WorkspaceTab } from '@shared/types';
 import type { IpcApi } from '@shared/ipc';
 
@@ -64,7 +68,10 @@ interface Row {
 }
 
 /** Renders the workspace and returns one freshly-added, pending condition row. */
-async function openConditionRow(valuesForField: ReturnType<typeof vi.fn>): Promise<Row> {
+async function openConditionRow(
+  valuesForField: ReturnType<typeof vi.fn>,
+  meta: Partial<IpcApi['meta']> = {},
+): Promise<Row> {
   const state = makeState();
   installAtelierMock({
     tabs: {
@@ -78,6 +85,7 @@ async function openConditionRow(valuesForField: ReturnType<typeof vi.fn>): Promi
       count: async () => ({ count: 0 }),
     },
     recent: { valuesForField: valuesForField as never } as never,
+    meta,
   });
   render(
     <MemoryRouter initialEntries={['/workspace']}>
@@ -98,6 +106,8 @@ afterEach(() => {
   // `recentValuesSource` caches per (conn, db, coll, field) at module scope —
   // clear it so the next test's `valuesForField` mock actually gets called.
   invalidateRecentValuesCache();
+  invalidateSampleSchemaCache();
+  invalidateSchemaEnumCache();
 });
 
 describe('Query Builder — value suggestions popover', () => {
@@ -146,6 +156,41 @@ describe('Query Builder — value suggestions popover', () => {
     fireEvent.change(valueInput, { target: { value: 's' } });
 
     expect(screen.queryByRole('listbox', { name: 'Value suggestions' })).toBeNull();
+  });
+
+  it('suggests a low-cardinality value from the collection sample', async () => {
+    const { fieldInput, valueInput } = await openConditionRow(vi.fn(async () => ({ values: [] })), {
+      sampleSchema: async () => ({ docs: [{ status: 'refunded' }] }),
+    });
+
+    fireEvent.change(fieldInput, { target: { value: 'status' } });
+    fireEvent.focus(valueInput);
+    fireEvent.change(valueInput, { target: { value: '' } });
+
+    const listbox = await screen.findByRole('listbox', { name: 'Value suggestions' });
+    await waitFor(() => expect(listbox.textContent).toContain('refunded'));
+  });
+
+  it("suggests a value from the validator's $jsonSchema enum", async () => {
+    const collectionDetails = vi.fn(async () => ({
+      name: 'users',
+      type: 'collection' as const,
+      capped: false,
+      options: {
+        validator: JSON.stringify({ $jsonSchema: { properties: { status: { enum: ['on_hold'] } } } }),
+      },
+    }));
+    const { fieldInput, valueInput } = await openConditionRow(vi.fn(async () => ({ values: [] })), {
+      collectionDetails,
+    });
+
+    fireEvent.change(fieldInput, { target: { value: 'status' } });
+    fireEvent.focus(valueInput);
+    fireEvent.change(valueInput, { target: { value: '' } });
+
+    const listbox = await screen.findByRole('listbox', { name: 'Value suggestions' });
+    await waitFor(() => expect(listbox.textContent).toContain('on_hold'));
+    expect(collectionDetails).toHaveBeenCalledWith({ connectionId: 'c1', dbName: 'mydb', collection: 'users' });
   });
 
   it('queries recorded values scoped to this field', async () => {

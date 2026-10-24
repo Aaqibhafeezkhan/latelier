@@ -38,6 +38,7 @@ The bottom panel of the aggregation tab. Shows the pipeline's final output in Tr
 
 ### Copy
 - Copies pretty-printed EJSON array of all rows (not EJSON relaxed) to clipboard.
+- Copies the output, not the pipeline: the pipeline itself is copied from the title bar's Copy menu (A01 §4).
 
 ### Save as collection
 - Opens A06 "Save as collection" modal — fills in `$out` stage and re-runs if allowed. See A06.

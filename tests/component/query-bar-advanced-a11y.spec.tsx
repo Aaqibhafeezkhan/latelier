@@ -110,6 +110,13 @@ describe('W15 §5 — the advanced row announces which field you are on', () => 
     expect(await screen.findByLabelText('Projection')).toBe(screen.getByTestId('fields-projection'));
   });
 
+  it('names the filter textarea (N5.1)', async () => {
+    mount();
+    expect(await screen.findByRole('textbox', { name: 'Query filter' })).toBe(
+      screen.getByTestId('query-bar-input'),
+    );
+  });
+
   it('names limit and skip too', async () => {
     mount();
     await screen.findByTestId('query-bar-limit');

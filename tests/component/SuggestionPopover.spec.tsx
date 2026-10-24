@@ -1,9 +1,10 @@
 import React from 'react';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '../helpers/render';
 import { SuggestionPopover } from '../../src/features/fieldSuggestions/SuggestionPopover';
 import type { Suggestion } from '../../src/features/fieldSuggestions/types';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
+import { HintsContext, type HintsContextValue } from '../../src/hints/HintsContext';
 
 function Harness({
   items,
@@ -261,5 +262,88 @@ describe('SuggestionPopover — Escape layering', () => {
     expect(anchor.getAttribute('data-mantine-stop-propagation')).toBe('true');
     rerender(<Harness items={ITEMS} open={false} />);
     expect(anchor.hasAttribute('data-mantine-stop-propagation')).toBe(false);
+  });
+});
+
+describe('SuggestionPopover — keyboard hint footer', () => {
+  const ITEMS: Suggestion[] = [
+    { kind: 'field', path: 'name', source: 'schema' },
+    { kind: 'field', path: 'age', source: 'schema' },
+  ];
+
+  function hintsStub(overrides: Partial<HintsContextValue> = {}): HintsContextValue {
+    return {
+      loaded: true,
+      settled: true,
+      isDismissed: () => false,
+      dismiss: vi.fn(),
+      reset: () => {},
+      registerCandidate: () => {},
+      unregisterCandidate: () => {},
+      visibleId: null,
+      recordSessionEvent: () => {},
+      getSessionEventCount: () => 0,
+      ...overrides,
+    };
+  }
+
+  function renderWithHints(hints: HintsContextValue, onSelect = vi.fn()) {
+    render(
+      <HintsContext.Provider value={hints}>
+        <Harness items={ITEMS} onSelect={onSelect} />
+      </HintsContext.Provider>,
+    );
+    return onSelect;
+  }
+
+  const footer = () => screen.queryByRole('note', { name: 'Navigate suggestions' });
+
+  it('shows the keys under the list, outside the listbox', () => {
+    renderWithHints(hintsStub());
+    const note = footer();
+    expect(note?.textContent).toBe('Tab inserts the highlighted item. ↑↓ to pick another, then Enter or Tab. Esc to close.');
+    expect(screen.getByRole('listbox').contains(note)).toBe(false);
+  });
+
+  it('dismisses the hint on the first pick by click, and still selects', () => {
+    const hints = hintsStub();
+    const onSelect = renderWithHints(hints);
+    fireEvent.click(screen.getByRole('option', { name: /age/ }));
+    expect(hints.dismiss).toHaveBeenCalledExactlyOnceWith('suggestions.keyboard');
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(ITEMS[1]);
+  });
+
+  it('dismisses the hint on a pick by Tab', () => {
+    const hints = hintsStub();
+    const onSelect = renderWithHints(hints);
+    fireEvent.keyDown(screen.getByTestId('anchor'), { key: 'Tab' });
+    expect(hints.dismiss).toHaveBeenCalledExactlyOnceWith('suggestions.keyboard');
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(ITEMS[0]);
+  });
+
+  it('shows no footer, and dismisses nothing, once the hint is dismissed', () => {
+    const hints = hintsStub({ isDismissed: (id) => id === 'suggestions.keyboard' });
+    renderWithHints(hints);
+    expect(footer()).toBeNull();
+    fireEvent.click(screen.getByRole('option', { name: /age/ }));
+    expect(hints.dismiss).not.toHaveBeenCalled();
+  });
+
+  it('shows no footer before the hint state has loaded', () => {
+    renderWithHints(hintsStub({ loaded: false }));
+    expect(footer()).toBeNull();
+  });
+
+  it('shows no footer without a hints provider', () => {
+    render(<Harness items={ITEMS} />);
+    expect(screen.getByRole('listbox')).toBeTruthy();
+    expect(footer()).toBeNull();
+  });
+
+  it('keeps a mousedown on the footer from blurring the input', () => {
+    renderWithHints(hintsStub());
+    const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    footer()!.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
   });
 });

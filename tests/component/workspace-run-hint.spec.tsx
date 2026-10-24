@@ -113,6 +113,38 @@ describe('Workspace — the run.execute hint fires on an edit past auto-run', ()
     expect(findSpy).toHaveBeenCalledTimes(1);
   });
 
+  // W14 §9 — the runner records its run key with the find options; the key
+  // the hint looks up has to carry them too, or a tab with a collation never
+  // reads as run and the hint asks for a Run that already happened.
+  it('stays hidden after the run of a query that carries find options', async () => {
+    const findSpy = vi.fn<IpcApi['query']['find']>(async () => ({
+      documents: [{ _id: { $oid: 'abc123abc123abc123abc123' }, name: 'Alice' }],
+      durationMs: 5,
+      hasMore: false,
+    }));
+    const collated = makeCollectionTab();
+    collated.state.builder = { ...collated.state.builder, collation: '{"locale":"en","strength":2}', maxTimeMS: '500' };
+
+    installAtelierMock({
+      tabs: {
+        list: async () => [collated],
+        setActive: async (id) => ({ id }),
+        update: async () => collated,
+      },
+      conn: { list: async () => connections },
+      query: { find: findSpy, count: async () => ({ count: 1 }) },
+    });
+
+    const { container } = mountWorkspace();
+    await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(1));
+    expect(findSpy.mock.calls[0]![0].collation).toBe('{"locale":"en","strength":2}');
+    await waitFor(() => expect(container.textContent).toContain('Alice'));
+
+    // Long enough to clear the hint's 1.5s post-mount settle window.
+    await new Promise((r) => setTimeout(r, 1800));
+    expect(screen.queryByRole('dialog', { name: /press run/i })).toBeNull();
+  });
+
   it('stays hidden while the filter is unparseable, even though it has never been run', async () => {
     const findSpy = vi.fn<IpcApi['query']['find']>(async () => ({
       documents: [{ _id: { $oid: 'abc123abc123abc123abc123' }, name: 'Alice' }],

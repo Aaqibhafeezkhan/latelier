@@ -22,7 +22,7 @@ function fakeLog() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } satisfies Logger;
 }
 
-const idle: RunningWork = { scripts: 0, shellCommands: 0, imports: 0, aggregations: 0 };
+const idle: RunningWork = { scripts: 0, shellCommands: 0, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 };
 
 function setup(
   opts: {

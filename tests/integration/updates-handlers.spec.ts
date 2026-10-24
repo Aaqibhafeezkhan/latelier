@@ -50,7 +50,7 @@ describe('updates:* handlers', () => {
     quitAnswer = true;
     shellCommands = 0;
     gate = createQuitGate({
-      counts: () => ({ scripts: 0, shellCommands, imports: 0, aggregations: 0 }),
+      counts: () => ({ scripts: 0, shellCommands, imports: 0, aggregations: 0, unsavedForms: 0, unsavedPipelines: 0 }),
       confirm: async () => quitAnswer,
     });
     svc = new UpdateService(async () => updater, log, () => {}, true, gate);

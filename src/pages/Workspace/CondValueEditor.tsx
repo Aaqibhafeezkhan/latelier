@@ -6,6 +6,7 @@ import { useSuggestions } from '../../features/fieldSuggestions/useSuggestions';
 import { SuggestionPopover } from '../../features/fieldSuggestions/SuggestionPopover';
 import { DEFAULT_VALUE_SOURCES } from '../../features/fieldSuggestions/sources';
 import type { SuggestionContext } from '../../features/fieldSuggestions/types';
+import { VALUE_SUGGESTION_OPS } from '../../features/fieldSuggestions/operators';
 import type { CondNode, ValType } from '@shared/types';
 import { ARRAY_VALUE_OPS, SIMPLE_OPS } from './filterTree';
 import {
@@ -19,8 +20,6 @@ import {
   valueFromChips,
 } from './condValue';
 
-/** The only ops the value popover offers suggestions for — mirrors `RECORDABLE_OPS` in `RecentFieldValueService`. */
-const VALUE_SUGGESTION_OPS = new Set(['$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin']);
 
 /**
  * Mongosh-flavored preview of the typed value the user just entered. Shown

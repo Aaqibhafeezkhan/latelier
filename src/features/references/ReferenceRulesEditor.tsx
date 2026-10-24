@@ -1,11 +1,11 @@
 import React from 'react';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
-import { Button, Modal } from '@mantine/core';
+import { ActionIcon, Button, Modal, Tooltip } from '@mantine/core';
 import { api, getErrorMessage, isIpcError } from '../../api/atelier';
 import { confirmDestructive } from '../../utils/confirm';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
-import { SubmitButton, submittingProps } from '../../components/SubmitButton';
+import { SubmitButton } from '../../components/SubmitButton';
 import { FieldAutocompleteInput } from '../fieldSuggestions/FieldAutocompleteInput';
 import type { SuggestionContext } from '../fieldSuggestions/types';
 import type {
@@ -397,75 +397,49 @@ export function ReferenceRulesEditor({
                   {confirmDeleteId === r.id ? (
                     <>
                       <span style={{ fontSize: 11, color: T.red }}>Delete?</span>
-                      <button
-                        onClick={() => void handleDelete(r.id)} // #91 — see SubmitButton.tsx
+                      <SubmitButton
+                        onClick={() => void handleDelete(r.id)}
                         aria-label="Confirm delete"
-                        {...submittingProps(deletingId === r.id)}
-                        style={{
-                          padding: '3px 8px',
-                          fontSize: 11,
-                          fontWeight: 600,
-                          border: `1px solid ${T.red}`,
-                          borderRadius: T.rx,
-                          background: T.red,
-                          color: '#fff',
-                          opacity: deletingId === r.id ? 0.6 : 1,
-                          cursor: deletingId === r.id ? 'not-allowed' : 'pointer',
-                        }}
+                        submitting={deletingId === r.id}
+                        color="red"
+                        size="compact-xs"
                       >
                         {deletingId === r.id ? 'Deleting…' : 'Delete'}
-                      </button>
-                      <button
+                      </SubmitButton>
+                      <Button
                         onClick={() => setConfirmDeleteId(null)}
                         aria-label="Cancel delete"
                         disabled={deletingId === r.id}
-                        style={{
-                          padding: '3px 8px',
-                          fontSize: 11,
-                          border: `1px solid ${T.border}`,
-                          borderRadius: T.rx,
-                          background: 'none',
-                          color: T.textMuted,
-                          cursor: deletingId === r.id ? 'not-allowed' : 'pointer',
-                        }}
+                        variant="default"
+                        size="compact-xs"
                       >
                         Cancel
-                      </button>
+                      </Button>
                     </>
                   ) : (
                     <>
-                      <button
-                        onClick={() => openForm(ruleToForm(r))}
-                        aria-label="Edit rule"
-                        style={{
-                          background: 'none',
-                          border: `1px solid ${T.border}`,
-                          borderRadius: T.rx,
-                          padding: '3px 6px',
-                          cursor: 'pointer',
-                          color: T.textMuted,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                        }}
-                      >
-                        {I.edit}
-                      </button>
-                      <button
-                        onClick={() => setConfirmDeleteId(r.id)}
-                        aria-label="Delete rule"
-                        style={{
-                          background: 'none',
-                          border: `1px solid ${T.border}`,
-                          borderRadius: T.rx,
-                          padding: '3px 6px',
-                          cursor: 'pointer',
-                          color: T.red,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                        }}
-                      >
-                        {I.trash}
-                      </button>
+                      <Tooltip label="Edit rule" withArrow openDelay={400}>
+                        <ActionIcon
+                          onClick={() => openForm(ruleToForm(r))}
+                          aria-label="Edit rule"
+                          variant="default"
+                          c={T.textMuted}
+                          size="sm"
+                        >
+                          {I.edit}
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label="Delete rule" withArrow openDelay={400}>
+                        <ActionIcon
+                          onClick={() => setConfirmDeleteId(r.id)}
+                          aria-label="Delete rule"
+                          variant="default"
+                          c={T.red}
+                          size="sm"
+                        >
+                          {I.trash}
+                        </ActionIcon>
+                      </Tooltip>
                     </>
                   )}
                 </div>

@@ -72,6 +72,17 @@ const UPDATE: readonly OperatorContext[] = ['update'];
 const DOCS = 'https://www.mongodb.com/docs/manual/reference/operator';
 
 /**
+ * The only operators a value is suggested after: the builder's value box and
+ * a `$match` stage body both gate on it. It mirrors `RECORDABLE_OPS` in
+ * `RecentFieldValueService`, the ops main records values for. Any other
+ * operator (`$regex`, `$type`, `$options`, `$exists`, ...) takes a value
+ * that is not one of the field's own.
+ */
+export const VALUE_SUGGESTION_OPS: ReadonlySet<string> = new Set([
+  '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin',
+]);
+
+/**
  * Names valid directly at a field's own operator position, `{ field: { $op:
  * value } }`. Strictly narrower than `validIn: matchKey` — that tag also
  * covers ~136 expression-class operators (`PROJECT_EXPR` includes `matchKey`)

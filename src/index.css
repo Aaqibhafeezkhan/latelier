@@ -100,18 +100,28 @@
   --atelier-shadow-lg:      0 8px 32px rgba(0,0,0,0.55);
   /* Number syntax color */
   --atelier-color-number:   #90caf9;
+  /* Editor syntax (editorTheme.ts). Each is held to 4.5:1 on --atelier-surface by
+     tests/unit/editor-theme-contrast.spec.ts; comments only need 3:1. */
+  --atelier-syn-keyword:    #c4a7ff;
+  --atelier-syn-string:     #8fd5a0;
+  --atelier-syn-property:   #7dd3c8;
+  --atelier-syn-comment:    #8b98a5;
+  --atelier-syn-punct:      #a9b4c0;
+  /* Selected editor text: opaque, because the translucent accent-soft left it at ~1.2:1
+     on the surface. Text on it is held to 3:1 by the same test. */
+  --atelier-editor-selection: #403a85;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; overflow: hidden; }
 body { font-family: "Inter", system-ui, sans-serif; }
-::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.2); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.35); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(128,128,128,0.5); }
 * { -webkit-font-smoothing: antialiased; }
 input, button, select, textarea { font-family: inherit; }
 a { text-decoration: none; }
-textarea { resize: none; }
 
 /* Disable browser scroll anchoring inside the document tree view. When the
    user expands a nested array, ~30 child rows appear in flow inside an
@@ -172,4 +182,15 @@ textarea { resize: none; }
 [data-separator='active'],
 [data-separator]:focus-visible {
   background: var(--atelier-accent);
+}
+
+/* 0.01ms, not 0: animationend / transitionend listeners still fire. !important
+   beats the inline `animation: spin …` on the connection and navigator spinners. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

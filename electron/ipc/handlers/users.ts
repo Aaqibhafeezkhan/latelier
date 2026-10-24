@@ -63,6 +63,31 @@ const DropInput = z.object({
   username: NonEmpty,
 });
 
+const RoleCreateInput = z.object({
+  connectionId: NonEmpty,
+  dbName: NonEmpty,
+  role: NonEmpty,
+  privileges: z.string(),
+  // A role, unlike a user, may inherit nothing.
+  roles: z.array(RoleRef),
+});
+
+const RoleUpdateInput = z.object({
+  connectionId: NonEmpty,
+  dbName: NonEmpty,
+  role: NonEmpty,
+  patch: z.object({
+    privileges: z.string().optional(),
+    roles: z.array(RoleRef).optional(),
+  }),
+});
+
+const RoleDropInput = z.object({
+  connectionId: NonEmpty,
+  dbName: NonEmpty,
+  role: NonEmpty,
+});
+
 export function registerUserChannels(router: Router, svc: UserService): void {
   router.register(IPC_CHANNELS.userList, zodValidator(ListInput), (input) => svc.list(input));
   router.register(IPC_CHANNELS.userGet, zodValidator(GetInput), (input) => svc.get(input));
@@ -77,5 +102,14 @@ export function registerUserChannels(router: Router, svc: UserService): void {
   router.register(IPC_CHANNELS.userDrop, zodValidator(DropInput), (input) => svc.drop(input));
   router.register(IPC_CHANNELS.roleList, zodValidator(RoleListInput), (input) =>
     svc.listRoles(input),
+  );
+  router.register(IPC_CHANNELS.roleCreate, zodValidator(RoleCreateInput), (input) =>
+    svc.createRole(input),
+  );
+  router.register(IPC_CHANNELS.roleUpdate, zodValidator(RoleUpdateInput), (input) =>
+    svc.updateRole(input),
+  );
+  router.register(IPC_CHANNELS.roleDrop, zodValidator(RoleDropInput), (input) =>
+    svc.dropRole(input),
   );
 }

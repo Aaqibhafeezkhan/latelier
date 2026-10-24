@@ -744,6 +744,23 @@ describe('useQueryRunner', () => {
       expect(explainSpy.mock.calls[1][0].collection).toBe('orders');
     });
 
+    // W14 §9 — a collation is part of the question the plan answers.
+    it('explains again for a page change once the collation has changed', async () => {
+      const { explainSpy, patch, target, result } = await runnerAfterFirstRun();
+      await waitFor(() => expect(planPatches(patch)).toHaveLength(1));
+
+      const collated = {
+        ...target,
+        state: { ...target.state, builder: { ...target.state.builder, collation: '{"locale":"en"}' } },
+      };
+      await act(async () => {
+        await result.current.run({ page: 1 }, collated);
+      });
+
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(2));
+      expect(explainSpy.mock.calls[1][0].collation).toBe('{"locale":"en"}');
+    });
+
     it('does not explain on the past-cap short-circuit', async () => {
       const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
       installAtelierMock({
@@ -803,6 +820,31 @@ describe('useQueryRunner', () => {
       });
 
       expect(explainSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // W14 §9 — the runner keeps its own gate: a Saved or Recent "Run here"
+  // reaches it without passing the Run button.
+  it('refuses a find option that cannot run, before any find', async () => {
+    const find = vi.fn<IpcApi['query']['find']>();
+    installAtelierMock({ query: { find } });
+    const patch = vi.fn();
+    const { result } = renderHook(() =>
+      useQueryRunner({
+        active: makeTarget({ builder: { projection: [], sort: '', limit: '', maxTimeMS: '0' } }),
+        patchCollectionState: patch,
+        loadingDelayMs: 0,
+      }),
+    );
+    await act(async () => {
+      await result.current.run();
+    });
+
+    expect(find).not.toHaveBeenCalled();
+    expect(patch).toHaveBeenCalledWith('t1', {
+      lastRun: expect.objectContaining({
+        error: { code: 'VALIDATION', message: 'maxTimeMS must be a whole number of milliseconds, at least 1.' },
+      }),
     });
   });
 

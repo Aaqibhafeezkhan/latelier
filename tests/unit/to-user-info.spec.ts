@@ -79,8 +79,27 @@ describe('toRoleInfo', () => {
       role: 'readWrite',
       db: 'admin',
       isBuiltin: true,
+      roles: [],
       inheritedRoles: [],
     });
+  });
+
+  it('keeps direct roles apart from the inherited closure and serializes privileges', () => {
+    const info = toRoleInfo({
+      role: 'app_admin',
+      db: 'myapp',
+      roles: [{ role: 'app_writer', db: 'myapp' }],
+      inheritedRoles: [
+        { role: 'app_writer', db: 'myapp' },
+        { role: 'read', db: 'myapp' },
+      ],
+      privileges: [{ resource: { db: 'myapp', collection: 'c' }, actions: ['find'] }],
+    });
+    expect(info.roles).toEqual([{ role: 'app_writer', db: 'myapp' }]);
+    expect(info.inheritedRoles).toHaveLength(2);
+    expect(JSON.parse(info.privileges!)).toEqual([
+      { resource: { db: 'myapp', collection: 'c' }, actions: ['find'] },
+    ]);
   });
 
   it('maps a custom role with inherited roles', () => {

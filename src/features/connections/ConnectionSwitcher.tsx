@@ -1,10 +1,13 @@
 import React from 'react';
+import { IconPinFilled } from '@tabler/icons-react';
 import { Button, Group, Kbd, Popover, Text, TextInput, VisuallyHidden } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
 import { STATUS_PRESENTATION, matchesConnectionQuery } from './connectionStatus';
 import { useRovingHighlight } from '../../hooks/useRovingHighlight';
 import { RowActionIcon } from './RowActionIcon';
+import { sortPinnedFirst } from '../../state/connectionPins';
+import { usePinnedConnections } from '../../state/usePinnedConnections';
 import { formatShortcut } from '../../commands/shortcutLabel';
 import { isMacRenderer } from '../../utils/platform';
 import type { ConnectionSummary } from '@shared/types';
@@ -119,6 +122,7 @@ function ConnectionRow({
   optionId,
   conn,
   isConnected,
+  isPinned,
   isHighlighted,
   onSelect,
   onHighlight,
@@ -131,6 +135,7 @@ function ConnectionRow({
   optionId: string;
   conn: ConnectionSummary;
   isConnected: boolean;
+  isPinned: boolean;
   isHighlighted: boolean;
   onSelect: (id: string) => void;
   onHighlight: () => void;
@@ -213,7 +218,7 @@ function ConnectionRow({
           `aria-describedby` can point at and that re-renders when a status
           event lands. */}
       <VisuallyHidden id={descriptionId}>
-        {`${conn.host}. ${presentation.spoken}${conn.readOnly ? '. Read-only connection' : ''}`}
+        {`${conn.host}. ${presentation.spoken}${conn.readOnly ? '. Read-only connection' : ''}${isPinned ? '. Pinned' : ''}`}
       </VisuallyHidden>
       <span
         aria-hidden
@@ -239,6 +244,21 @@ function ConnectionRow({
           {conn.host}
         </Text>
       </div>
+      {/* serverVersion is runtime-only and cleared on disconnect, so a stale
+          one can never show next to a dead connection. */}
+      {conn.status === 'connected' && conn.serverVersion && (
+        <span
+          title={`MongoDB ${conn.serverVersion}`}
+          style={{ fontSize: 10, color: T.textMuted, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}
+        >
+          v{conn.serverVersion}
+        </span>
+      )}
+      {isPinned && (
+        <span aria-hidden title="Pinned" style={{ display: 'flex', color: T.textMuted, flexShrink: 0 }}>
+          <IconPinFilled size={11} />
+        </span>
+      )}
       {conn.readOnly && (
         <span
           aria-hidden
@@ -355,9 +375,10 @@ export function ConnectionSwitcher({
     ? STATUS_PRESENTATION[focusedConnection.status]
     : null;
 
+  const { pinnedIds } = usePinnedConnections(connections);
   const filtered = React.useMemo(
-    () => connections.filter((c) => matchesConnectionQuery(c, query)),
-    [connections, query],
+    () => sortPinnedFirst(connections, pinnedIds).filter((c) => matchesConnectionQuery(c, query)),
+    [connections, pinnedIds, query],
   );
 
   // `useRovingHighlight` clamps at render — `connections` can shrink under a
@@ -777,6 +798,7 @@ export function ConnectionSwitcher({
                 optionId={optionId(c.id)}
                 conn={c}
                 isConnected={c.status === 'connected'}
+                isPinned={pinnedIds.has(c.id)}
                 isHighlighted={i === highlight}
                 onSelect={handleSelect}
                 onManage={handleManage}

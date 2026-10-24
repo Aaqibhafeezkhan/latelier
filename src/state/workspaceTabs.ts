@@ -4,12 +4,13 @@ import type {
   CollectionTab,
   CollectionTabState,
   CollectionView,
+  ResultViewMode,
   ScriptTab,
   ScriptTabState,
   WorkspaceTab,
 } from '@shared/types';
 import { DEFAULT_AGGREGATION_TAB_STATE } from '@shared/defaults';
-import type { IpcError } from '@shared/ipc';
+import type { AggregationSeed, IpcError } from '@shared/ipc';
 import { confirmDestructive } from '../utils/confirm';
 import { api, isIpcError } from '../api/atelier';
 import { notify } from '../theme/notifications';
@@ -38,6 +39,12 @@ export const DEFAULT_PAGE_SIZE_PREF_KEY = 'ui.workspace.defaultPageSize';
  */
 export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 250, 500] as const;
 
+/** Settings' "default result view": seeds a brand-new collection tab's `view`. */
+export const DEFAULT_VIEW_PREF_KEY = 'ui.workspace.defaultView';
+
+/** Result views, in the order Settings lists them. */
+export const RESULT_VIEW_OPTIONS = ['Table', 'Tree', 'JSON'] as const satisfies readonly ResultViewMode[];
+
 export interface WorkspaceTabsState {
   tabs: WorkspaceTab[];
   activeId: string | null;
@@ -51,9 +58,10 @@ export interface WorkspaceTabsState {
     reuseExisting?: boolean;
   }) => Promise<CollectionTab>;
   /**
-   * Opens the collection's Aggregation view. With a `savedId` or a `name`, main
-   * replaces the pipeline on the collection's open tab, so a tab with unsaved
-   * pipeline edits asks first; `null` when the user keeps them instead.
+   * Opens the collection's Aggregation view. With a `savedId`, a `name` or an
+   * `initialState`, main replaces the pipeline on the collection's open tab, so
+   * a tab with unsaved pipeline edits asks first; `null` when the user keeps
+   * them instead.
    */
   openAggregation: (input: {
     connectionId: string;
@@ -61,6 +69,7 @@ export interface WorkspaceTabsState {
     collection: string;
     savedId?: string;
     name?: string;
+    initialState?: AggregationSeed;
   }) => Promise<CollectionTab | null>;
   openScript: (input: {
     connectionId: string;
@@ -219,7 +228,7 @@ export function useWorkspaceTabs(): WorkspaceTabsState {
       // value can't seed a tab (and its find query's `limit`) with an
       // unbounded page size. An out-of-set value is treated the same as a
       // never-set pref: omit `initialState` and let the server default apply.
-      let initialState: { pageSize: number } | undefined;
+      const seed: Partial<Pick<CollectionTabState, 'pageSize' | 'view'>> = {};
       try {
         const pageSize = await api.prefs.get<number>(DEFAULT_PAGE_SIZE_PREF_KEY);
         if (
@@ -227,11 +236,21 @@ export function useWorkspaceTabs(): WorkspaceTabsState {
           Number.isFinite(pageSize) &&
           (PAGE_SIZE_OPTIONS as readonly number[]).includes(pageSize)
         ) {
-          initialState = { pageSize };
+          seed.pageSize = pageSize;
         }
       } catch {
         // best-effort; fall back to the server-side default.
       }
+      try {
+        // Same rule as the page size: a value outside the enum is a never-set pref.
+        const view = await api.prefs.get<string>(DEFAULT_VIEW_PREF_KEY);
+        if ((RESULT_VIEW_OPTIONS as readonly unknown[]).includes(view)) {
+          seed.view = view as ResultViewMode;
+        }
+      } catch {
+        // best-effort; fall back to the server-side default.
+      }
+      const initialState = Object.keys(seed).length > 0 ? seed : undefined;
       const tab = await api.tabs.openCollection({
         ...input,
         ...(initialState ? { initialState } : {}),
@@ -244,10 +263,11 @@ export function useWorkspaceTabs(): WorkspaceTabsState {
 
   const openAggregation: WorkspaceTabsState['openAggregation'] = useCallback(
     async (input) => {
-      // With a saved pipeline or a name, main replaces the aggregation on the
-      // collection's tab if one is open, so ask before losing its unsaved edits,
-      // as closing that tab does.
-      if (input.savedId || input.name) {
+      // With a saved pipeline, a name or seeded stages, main replaces the
+      // aggregation on the collection's tab if one is open, so ask before
+      // losing its unsaved edits, as closing that tab does.
+      const replaces = Boolean(input.savedId || input.name || input.initialState);
+      if (replaces) {
         const open = tabsRef.current.find(
           (t) =>
             t.kind === 'collection' &&
@@ -267,12 +287,12 @@ export function useWorkspaceTabs(): WorkspaceTabsState {
       const tab = await api.tabs.openAggregation(input);
       // Main just overwrote these on the tab, so a patch still in the debounce
       // would otherwise be layered back over it (and later flushed over it).
-      // Without a saved pipeline or name main keeps the persisted aggregation,
-      // so the pending one is newer and stays.
+      // Without a saved pipeline, name or seeded stages main keeps the
+      // persisted aggregation, so the pending one is newer and stays.
       const pending = pendingPatches.current.get(tab.id);
       if (pending) {
         delete pending.activeView;
-        if (input.savedId || input.name) delete pending.aggregation;
+        if (replaces) delete pending.aggregation;
       }
       await refresh();
       return tab;

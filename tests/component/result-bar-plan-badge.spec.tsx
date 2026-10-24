@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   render,
+  renderHook,
   screen,
   fireEvent,
   waitFor,
@@ -8,6 +9,7 @@ import {
   emptyWorkspaceMeta,
 } from '../helpers/render';
 import { ResultBar } from '../../src/pages/Workspace/ResultBar';
+import { useFindExplain } from '../../src/pages/Workspace/useFindExplain';
 import { CollectionWorkspaceProvider } from '../../src/pages/Workspace/CollectionWorkspaceProvider';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import type { CollectionTabState } from '@shared/types';
@@ -156,5 +158,30 @@ describe('ResultBar plan badge', () => {
         ],
       }),
     );
+  });
+});
+
+// W14 §9 — the plan badge's drawer re-asks the server with the tab's current
+// options. A half-typed one would come back as a server refusal; the
+// builder's own message names what to fix instead.
+describe('useFindExplain — find options that cannot run', () => {
+  it('refuses with the option problem and asks the server nothing', async () => {
+    const explain = vi.fn(async () => ({ plan: collscanPlan, verbosity: 'queryPlanner' }));
+    installAtelierMock({ query: { explain } });
+    const state = makeState(collscanPlan);
+    const { result } = renderHook(() => useFindExplain(() => state.queryRaw), {
+      wrapper: ({ children }) => (
+        <CollectionWorkspaceProvider
+          state={{ ...state, builder: { ...state.builder, collation: '{"locale":' } }}
+          actions={emptyWorkspaceActions()}
+          meta={emptyWorkspaceMeta()}
+        >
+          {children}
+        </CollectionWorkspaceProvider>
+      ),
+    });
+
+    await expect(result.current.runExplain('queryPlanner')).rejects.toThrow(/^Can't parse this collation/);
+    expect(explain).not.toHaveBeenCalled();
   });
 });

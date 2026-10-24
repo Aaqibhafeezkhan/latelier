@@ -3,6 +3,7 @@ import { Modal } from '@mantine/core';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
 import { confirmDestructive } from '../../utils/confirm';
 import { ConnectionForm } from './ConnectionForm';
+import { reportConnectionFormDirty } from './reportUnsavedForm';
 
 export interface ConnectionFormModalProps {
   connectionId?: string;
@@ -23,6 +24,12 @@ export function ConnectionFormModal({
 }: ConnectionFormModalProps) {
   const close = useDialogFocusReturn(onClose, returnFocusTo);
   const [dirty, setDirty] = React.useState(false);
+  // Stable identity: the form calls this from an effect keyed on it.
+  const onDirtyChange = React.useCallback((next: boolean) => {
+    setDirty(next);
+    reportConnectionFormDirty(next);
+  }, []);
+  React.useEffect(() => () => reportConnectionFormDirty(false), []);
 
   const requestClose = async () => {
     if (!dirty) return close();
@@ -35,9 +42,12 @@ export function ConnectionFormModal({
   };
 
   const sharedFormProps = {
-    onSaved,
+    onSaved: (id: string) => {
+      reportConnectionFormDirty(false);
+      onSaved(id);
+    },
     onCancel: () => void requestClose(),
-    onDirtyChange: setDirty,
+    onDirtyChange,
     embedded: true,
     initialFocus,
   };

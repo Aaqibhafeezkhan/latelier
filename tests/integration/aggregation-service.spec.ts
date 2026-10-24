@@ -15,11 +15,20 @@ describe('AggregationService', () => {
   const connId = 'agg-conn';
   const dbName = 'aggdb';
   const collName = 'transactions';
+  // A cancel test whose kill is refused lets its write run to completion,
+  // about 4.5s on an idle machine and longer on a busy one. The helper's 5s
+  // socket timeout would cut that socket before the server answers and report
+  // a network timeout instead of the write's own outcome, so these
+  // connections use the app's default socket timeout instead.
+  const slowWriteAdvanced = {
+    ...makeConnection('', { host: '', port: 0 }).advanced,
+    socketTimeoutMs: 30_000,
+  };
 
   beforeAll(async () => {
     const uri = getSharedMongoUri();
     const hp = { host: new URL(uri).hostname, port: Number(new URL(uri).port) };
-    const conn = makeConnection(connId, hp, { defaultDb: dbName });
+    const conn = makeConnection(connId, hp, { defaultDb: dbName, advanced: slowWriteAdvanced });
     pool = new MongoPool({
       repo: makeReader([conn]),
       vault: { get: () => null } as unknown as import('../../electron/secrets/SecretsVault').SecretsVault,
@@ -600,7 +609,6 @@ describe('AggregationService', () => {
 
     it('a cancelled read pipeline rejects at once and stops working on the server', async () => {
       const token = 'cancel-read-mid-pipeline';
-      const t0 = Date.now();
       const run = svc
         .run({
           connectionId: connId,
@@ -617,12 +625,17 @@ describe('AggregationService', () => {
           cancelToken: token,
         })
         .catch((e: unknown) => e);
-      setTimeout(() => svc.cancel(token), 300);
+      // Cancel once the read is on the server and time from there, so a slow
+      // connect or setup neither lands the cancel before the read starts nor
+      // counts against the budget.
+      await untilAggregateRunning(15_000);
+      const t0 = Date.now();
+      svc.cancel(token);
       const err = await run;
       const elapsed = Date.now() - t0;
 
       expect(err).toMatchObject({ message: 'cancelled' });
-      // The uncancelled run takes ~4.5s.
+      // The uncancelled read takes ~4.5s from here.
       expect(elapsed).toBeLessThan(2500);
       // Without the signal on the main aggregate or on the instrumentation
       // $facet, that aggregate keeps the server busy after the run has
@@ -676,7 +689,7 @@ describe('AggregationService', () => {
       const tight = makeConnection(
         tightId,
         { host: uri.hostname, port: Number(uri.port) },
-        { advanced: { ...makeConnection(tightId, { host: '', port: 0 }).advanced, maxPoolSize: 1 } },
+        { advanced: { ...slowWriteAdvanced, maxPoolSize: 1 } },
       );
       const tightPool = new MongoPool({
         repo: makeReader([tight]),

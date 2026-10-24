@@ -5,6 +5,7 @@ import { I } from '../../icons';
 import { api, getErrorMessage } from '../../api/atelier';
 import { SubmitButton } from '../../components/SubmitButton';
 import { ejsonParse, ejsonStringifyReadable, isEjsonDocument } from '../../utils/ejson';
+import { invalidateSchemaEnumCache } from '../../features/fieldSuggestions/sources/schemaEnumSource';
 import type { CollectionDetails } from '@shared/ipc';
 import type { ValidationAction, ValidationLevel } from '@shared/types';
 
@@ -68,6 +69,8 @@ export function ValidationSection({ connectionId, dbName, collection, details, o
         collection,
         options: { validator: nextRules, validationLevel: draftLevel, validationAction: draftAction },
       });
+      // The value popover's enum suggestions come from these rules.
+      invalidateSchemaEnumCache(connectionId, dbName, collection);
       // Leave edit mode only once the new details are in, so the old rules never flash back.
       await onSaved();
       setEditing(false);

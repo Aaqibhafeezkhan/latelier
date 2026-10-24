@@ -43,6 +43,22 @@ describe('ReferenceRulesEditor — delete confirm', () => {
     uninstallAtelierMock();
   });
 
+  it('shows the Delete rule tooltip when keyboard focus lands on the icon button', async () => {
+    render(
+      <ReferenceRulesEditor
+        connectionId="conn-1"
+        dbName="shop"
+        collection="orders"
+        onClose={() => {}}
+      />,
+    );
+
+    fireEvent.focus(await screen.findByLabelText('Delete rule'));
+
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toBe('Delete rule');
+  });
+
   it('does not delete on the first click — surfaces an inline confirm row', async () => {
     render(
       withTheme(

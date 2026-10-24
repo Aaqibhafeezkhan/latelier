@@ -75,6 +75,18 @@ Specific, typed helpers are exposed on `window.atelier.prefs`:
 - `toggle()` calls `api.prefs.setTheme(next)`. Main persists + broadcasts; the renderer updates on the broadcast.
 - Default on first run: `'system'`.
 
+### Settings
+
+The Settings modal exposes the stored mode as a Light / Dark / System segmented control. It reads and writes through `useThemeMode()` (`api.prefs.getTheme`, `onThemeChanged`, `setTheme`), so the header toggle and any other `useTheme()` caller follow it through the main-process broadcast. A rejected save reverts the control and shows a toast.
+
+Settings also holds three renderer preferences, each an allow-listed `prefs` key (`electron/ipc/prefKeys.ts`):
+
+| Key                            | Shape                           | Effect                                                           |
+| ------------------------------ | ------------------------------- | ---------------------------------------------------------------- |
+| `ui.workspace.defaultPageSize` | one of 10, 25, 50, 100, 250, 500 | seeds a new collection tab's page size                           |
+| `ui.workspace.defaultView`     | `'Table' \| 'Tree' \| 'JSON'`   | seeds a new collection tab's result view                         |
+| `ui.editor.fontSize`           | integer 10–20                   | read at boot and set live as `--atelier-editor-font-size` (px)   |
+
 ### Migration
 On first start after upgrade, if `localStorage['ml-theme']` exists, migrate it to `app_state['theme.mode']` and clear the localStorage key. (One-time in renderer code.)
 
@@ -96,6 +108,8 @@ On first start after upgrade, if `localStorage['ml-theme']` exists, migrate it t
 - Maximizing and quitting reopens maximized.
 - A bounds value that would place the window offscreen is discarded in favor of defaults.
 - No calls to `localStorage` remain in the renderer for theme.
+- Settings offers Light, Dark and System; choosing System persists across a relaunch.
+- A collection tab opened after changing the default page size or result view starts with those values; a stored value outside the allowed set is ignored.
 
 ## 7. Test cases
 
@@ -107,5 +121,5 @@ On first start after upgrade, if `localStorage['ml-theme']` exists, migrate it t
 - **bounds-offscreen.spec.ts**: stored bounds outside all displays → restored to defaults.
 
 ### E2E
-- **theme-persist.e2e.ts**: toggle to dark → quit → relaunch → dark still applied.
+- **theme-persist.e2e.ts**: toggle to dark → quit → relaunch → dark still applied. Pick System in Settings → quit → relaunch → still System.
 - **window-bounds.e2e.ts**: move + resize → quit → relaunch → same bounds.

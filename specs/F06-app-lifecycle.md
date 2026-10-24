@@ -116,14 +116,17 @@ app.on('before-quit', (e) => {
 - `db.close()` is last — once it returns, no more writes are possible.
 - On macOS, closing the last window does NOT quit (`window-all-closed` unless `process.platform !== 'darwin'`) — existing behavior. The app and its sessions keep running, so closing the window cuts off no work.
 
-### Quit with running work
+### Quit with running or unsaved work
 
-Before the sequence above starts, `before-quit` checks for work that quitting would kill:
+Before the sequence above starts, `before-quit` checks for work that quitting would kill or throw away:
 
 - **Counted:** script runs in flight (`ScriptService.runningCount()`), shell sessions with a command still running (`ShellService.busyCount()`, W11 section 3), imports in flight (`ImportService.runningCount()`) and aggregation runs in flight (`AggregationService.runningCount()`). An idle shell is not counted.
+- **Unsaved work, reported by the renderer:** the renderer has no say in quitting (`beforeunload` is cancelled silently by Electron), so it reports instead, through `app:setUnsavedWork` (`{ source: 'connectionForm' | 'pipelines', count }`), and each report replaces that source's last one. Main keeps the counts in a module-level store and zeroes both on a full page load (a main-frame `did-start-navigation` that is not same-document; the app's own hash-route changes are), on `render-process-gone` and on the window's `closed`, so a report never outlives the page that made it and a reloaded or crashed renderer cannot make every later quit ask.
+  - **Connection form:** the full-page form (`NewConnection`) and the modal (`ConnectionFormModal`) report 1 while the form is dirty, and 0 on unmount and after a successful save.
+  - **Pipelines:** the workspace reports how many collection tabs hold a pipeline with `aggregation.dirty`. Nothing is reported until the tabs have loaded, or when they failed to load, so an empty list never overwrites the last real count. They count only when `ui.workspace.restoreTabs` is explicitly `false`: with "Reopen tabs on launch" on (or unset), the tabs and their pipelines come back at the next launch, so nothing is lost.
 - **Not counted:** plain finds. They run in main with no handle the check can read, so quitting still cuts them off without asking.
 - **Where it is asked:** off macOS, closing the last window quits the app, so the window's `close` event is held and the question is asked there, before the window goes; a Cancel then leaves the window as it was. On macOS closing the window stops nothing, so it is not asked. Any other quit (`Cmd/Ctrl+Q`, `app.quit()`) is held in `before-quit` the same way. A Quit answer lets the close and the app quit that follows it through without a second question, and a quit or close requested while the question is open is not asked again. The decisions live in `createQuitGate` (`electron/quitGuard.ts`).
-- **Prompt:** when something is counted, the quit is held and a native warning dialog names what stops, for example `This will stop 1 running script and 2 running shell commands.` (three or more kinds read as a comma list), with `Cancel` (default) and `Quit`. Cancel leaves the app running. Quit quits again, past the check, into the sequence above. A second quit request while the dialog is open is the same question.
+- **Prompt:** when something is counted, the quit is held and a native warning dialog names what stops, for example `This will stop 1 running script and 2 running shell commands.` (three or more kinds read as a comma list), with `Cancel` (default) and `Quit`. Unsaved work adds a second sentence, for example `This will stop 1 running script. Unsaved changes in the connection form and 2 pipelines will be lost.`; with nothing running, the dialog carries only that second sentence. The dialog's detail line follows the same split (`describeQuitDetail`): cancelled work, unsaved changes that cannot be recovered, or both. Cancel leaves the app running. Quit quits again, past the check, into the sequence above. A second quit request while the dialog is open is the same question.
 - **Bypass:** a system shutdown, restart or log-off is not asked about, since the work goes with it either way: Electron's `powerMonitor` `shutdown` event (macOS and Linux) and the window's `session-end` event (Windows) set a flag that skips the check.
 
 ## 5. Restore on activate
@@ -155,6 +158,7 @@ Before the sequence above starts, `before-quit` checks for work that quitting wo
 - Second instance quits silently and focuses the primary.
 - On quit with a live MongoClient, the app exits within 8 seconds.
 - Quitting with a script or shell command running asks first, and Cancel keeps the app open; quitting with nothing running does not ask.
+- Quitting with a dirty connection form asks first and names the form; dirty pipelines are named only when "Reopen tabs on launch" is off. A reload or a renderer crash forgets every unsaved-work report.
 - A DB file that fails to open (corrupt) produces an error dialog naming the file path and tells the user how to reset.
 - `app:log` IPC entries appear in the log file with the correct process tag.
 
@@ -163,10 +167,11 @@ Before the sequence above starts, `before-quit` checks for work that quitting wo
 ### Integration
 - **boot-order.spec.ts** (with stubbed Electron `app`/`BrowserWindow`): assert registration order is DB → services → IPC → window.
 - **single-instance.spec.ts**: second `app.requestSingleInstanceLock` returns false → the test harness observes a quit call and a `second-instance` event emission on the first.
+- **app-unsaved-work.spec.ts**: `app:setUnsavedWork` sets its source in the store; zod rejects an unknown source and a count that is negative, fractional or over 1000.
 - **shutdown-budget.spec.ts**: stub `pool.disconnectAll` to hang; total shutdown time is ≤ 8s.
-- **quit-guard.spec.ts** (unit): the sentence for each mix of running scripts and shell commands, none when idle, and the gate: asked once per close, a request while the question is open, the shutdown bypass, and Cancel followed by a later quit asking again.
+- **quit-guard.spec.ts** (unit): the sentence for each mix of running scripts and shell commands, the unsaved-work sentence alone and after the running-work one, none when idle, a hold on unsaved work alone, and the gate: asked once per close, a request while the question is open, the shutdown bypass, and Cancel followed by a later quit asking again.
 
 ### E2E
 - **first-run.e2e.ts**: delete the userData dir; launch; assert the connections page renders empty state and the DB file exists on disk.
 - **crash-reload.e2e.ts**: force a renderer crash via `window.location = 'about:crash'`; assert the window reloads once.
-- **f06-quit-confirm.e2e.ts**: with the dialog stubbed in main, quitting idle exits without asking; with a script or a shell command running it asks, names it, stays open on Cancel and exits on Quit; off macOS, closing the window with work running asks once, keeps the window on Cancel and exits on Quit.
+- **f06-quit-confirm.e2e.ts**: with the dialog stubbed in main, quitting idle exits without asking; with a script or a shell command running it asks, names it, stays open on Cancel and exits on Quit; off macOS, closing the window with work running asks once, keeps the window on Cancel and exits on Quit; with text typed into a new connection form, quitting asks and names the form.

@@ -1,10 +1,10 @@
 import React from 'react';
-import { Modal } from '@mantine/core';
+import { Button, Modal } from '@mantine/core';
 import { themeVars } from '../../../theme/themeVars';
 import { api, isIpcError } from '../../../api/atelier';
 import { confirmDestructive } from '../../../utils/confirm';
 import { useDialogFocusReturn } from '../../../hooks/useDialogFocusReturn';
-import { submittingProps } from '../../../components/SubmitButton';
+import { SubmitButton } from '../../../components/SubmitButton';
 import type { SavedQuery, Stage } from '@shared/types';
 
 interface Props {
@@ -186,7 +186,7 @@ export function SavePipelineModal({
         </label>
 
         {err && (
-          <div role="alert" style={{ fontSize: 12, color: T.warn }}>
+          <div role="alert" style={{ fontSize: 12, color: T.red }}>
             {err}
           </div>
         )}
@@ -197,38 +197,17 @@ export function SavePipelineModal({
               Stated plainly because it was measured rather than assumed —
               deleting it does NOT break Enter, in jsdom or in Chromium. What
               carries Enter to Save is the form's `onSubmit`. */}
-          <button
-            type="button"
-            onClick={() => void requestClose()}
-            style={{
-              padding: '6px 14px',
-              fontSize: 12,
-              border: `1px solid ${T.border}`,
-              borderRadius: T.rs,
-              background: 'none',
-              color: T.textMuted,
-              cursor: 'pointer',
-            }}
-          >
+          <Button type="button" variant="default" size="xs" c={T.textMuted} onClick={() => void requestClose()}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <SubmitButton
             type="submit"
+            size="xs"
             disabled={!fieldsValid} // #91 — real disabled excludes `saving`, see SubmitButton.tsx
-            {...submittingProps(saving)}
-            style={{
-              padding: '6px 14px',
-              fontSize: 12,
-              fontWeight: 600,
-              border: 'none',
-              borderRadius: T.rs,
-              background: canSubmit ? T.accent : T.surfaceRaised,
-              color: canSubmit ? T.accentText : T.textGhost,
-              cursor: canSubmit ? 'pointer' : 'not-allowed',
-            }}
+            submitting={saving}
           >
             {saving ? 'Saving…' : 'Save'}
-          </button>
+          </SubmitButton>
         </div>
       </form>
     </Modal>

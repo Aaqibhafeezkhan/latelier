@@ -6,6 +6,7 @@ import Workspace from '../../src/pages/Workspace';
 import { StructureView } from '../../src/pages/Workspace/StructureView';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { notifyCollectionChanged } from '../../src/state/collectionChanges';
+import { schemaEnumSource } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
 import { DEFAULT_SCHEMA_TAB_STATE } from '@shared/defaults';
 import type { CollectionDetails } from '@shared/ipc';
 import { ejsonParse, ejsonStringify } from '../../src/utils/ejson';
@@ -484,6 +485,36 @@ describe('StructureView — validation rules', () => {
     await act(async () => resolveReload(withRules({ validator: RULES, validationLevel: 'moderate' })));
     expect(await within(validation).findByText('Level: moderate')).toBeTruthy();
     expect(within(validation).queryByLabelText('Validator')).toBeNull();
+  });
+
+  it('saving the rules drops the cached enum suggestions for the collection', async () => {
+    const enumRules = (values: string[]) =>
+      JSON.stringify({ $jsonSchema: { properties: { status: { enum: values } } } });
+    let current = enumRules(['old']);
+    installAtelierMock({
+      index: { list: async () => [] },
+      meta: {
+        collectionDetails: async () => withRules({ validator: current }),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+      collection: {
+        modify: async () => {
+          current = enumRules(['new']);
+          return { ok: true as const };
+        },
+      },
+    });
+    const target = { connectionId: 'c1', dbName: 'shop', collection: 'orders', target: { field: 'status' } };
+    const displays = async () => (await schemaEnumSource(target)).map((s) => s.display);
+    expect(await displays()).toEqual(['old']);
+
+    renderStructure();
+    const validation = await screen.findByRole('region', { name: 'Validation' });
+    await userEvent.click(await within(validation).findByRole('button', { name: 'Edit rules' }));
+    await userEvent.click(within(validation).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(within(validation).queryByLabelText('Validator')).toBeNull());
+
+    expect(await displays()).toEqual(['new']);
   });
 
   it('shows and edits rules as readable JSON, and saving them unchanged sends the same rules', async () => {

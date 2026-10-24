@@ -48,6 +48,13 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 function ErrorBoundaryFallback({ onReload }: { onReload: () => void }) {
   const [reporting, setReporting] = React.useState(false);
   const [reportMessage, setReportMessage] = React.useState<string | null>(null);
+  const headingRef = React.useRef<HTMLHeadingElement>(null);
+
+  // The fallback replaces the whole screen, so keyboard and screen-reader
+  // focus would otherwise be left on an unmounted node.
+  React.useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   const handleReport = async () => {
     setReporting(true);
@@ -62,8 +69,17 @@ function ErrorBoundaryFallback({ onReload }: { onReload: () => void }) {
   };
 
   return (
-    <Stack align="center" justify="center" gap="md" p="xl" style={{ minHeight: '100vh' }}>
-      <Title order={3}>Something went wrong</Title>
+    <Stack
+      align="center"
+      justify="center"
+      gap="md"
+      p="xl"
+      role="alert"
+      style={{ minHeight: '100vh' }}
+    >
+      <Title order={3} ref={headingRef} tabIndex={-1} style={{ outline: 'none' }}>
+        Something went wrong
+      </Title>
       <Text size="sm" c="dimmed" ta="center" maw={480}>
         Atelier hit an unexpected error and couldn't continue rendering this screen. You can
         reload the app, or export a diagnostic bundle to share with support. Details were logged

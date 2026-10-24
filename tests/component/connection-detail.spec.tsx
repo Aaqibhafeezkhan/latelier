@@ -3,6 +3,13 @@ import { render, screen, waitFor, fireEvent, within } from '../helpers/render';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ConnectionManager from '../../src/pages/ConnectionManager';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
+import { invalidateSchemaEnumCache } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
+
+// Spied so the write can be checked for dropping the cached enum suggestions.
+vi.mock('../../src/features/fieldSuggestions/sources/schemaEnumSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/features/fieldSuggestions/sources/schemaEnumSource')>()),
+  invalidateSchemaEnumCache: vi.fn(),
+}));
 import type { ConnectionSummary } from '@shared/types';
 
 function renderDetail(initial: string) {
@@ -32,6 +39,7 @@ function summary(overrides: Partial<ConnectionSummary>): ConnectionSummary {
 
 describe('ConnectionManager deep detail screen', () => {
   afterEach(() => {
+  vi.mocked(invalidateSchemaEnumCache).mockClear();
     uninstallAtelierMock();
   });
 
@@ -118,6 +126,7 @@ describe('ConnectionManager deep detail screen', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(del).toHaveBeenCalledWith('a'));
     await waitFor(() => expect(screen.getByText('workspace-route')).toBeTruthy());
+    expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('a');
   });
 
   /**

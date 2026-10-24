@@ -3,6 +3,18 @@ import { render, screen, waitFor, fireEvent, within } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import { ConnectionForm } from '../../src/features/connections/ConnectionForm';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
+import { invalidateSchemaEnumCache } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
+import { invalidateSampleSchemaCache } from '../../src/features/fieldSuggestions/sources/sampleSchemaSource';
+
+// Spied so an edit can be checked for dropping the cached enum and sample suggestions.
+vi.mock('../../src/features/fieldSuggestions/sources/sampleSchemaSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/features/fieldSuggestions/sources/sampleSchemaSource')>()),
+  invalidateSampleSchemaCache: vi.fn(),
+}));
+vi.mock('../../src/features/fieldSuggestions/sources/schemaEnumSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/features/fieldSuggestions/sources/schemaEnumSource')>()),
+  invalidateSchemaEnumCache: vi.fn(),
+}));
 import type { Connection } from '@shared/types';
 
 const CANNED_CONNECTION: Connection = {
@@ -33,6 +45,8 @@ const CANNED_CONNECTION: Connection = {
 };
 
 afterEach(() => {
+  vi.mocked(invalidateSchemaEnumCache).mockClear();
+  vi.mocked(invalidateSampleSchemaCache).mockClear();
   uninstallAtelierMock();
   vi.restoreAllMocks();
 });
@@ -55,6 +69,8 @@ describe('ConnectionForm (host-agnostic, no router)', () => {
 
     await waitFor(() => expect(createSpy).toHaveBeenCalled());
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith('new-id'));
+    expect(invalidateSchemaEnumCache).not.toHaveBeenCalled();
+    expect(invalidateSampleSchemaCache).not.toHaveBeenCalled();
   });
 
   it('edit mode: connectionId hydrates from conn.get and saving calls conn.update with that id, then onSaved', async () => {
@@ -77,6 +93,9 @@ describe('ConnectionForm (host-agnostic, no router)', () => {
 
     await waitFor(() => expect(updateSpy).toHaveBeenCalledWith('c1', expect.anything()));
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith('c1'));
+    // An edit can point the same id at another server, with other validators and fields.
+    expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('c1');
+    expect(invalidateSampleSchemaCache).toHaveBeenCalledExactlyOnceWith('c1');
   });
 
   it('edit mode: a legacy row stored with ssh.enabled loads as off and saves an explicit ssh.enabled=false', async () => {
@@ -669,5 +688,23 @@ describe('ConnectionForm fields are named by their visible label', () => {
     expect(password.type).toBe('text');
     const hide = screen.getByRole('button', { name: 'Hide password' });
     expect(hide.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('shows the Show password tooltip when keyboard focus lands on the toggle', async () => {
+    await mount();
+    await userEvent.click(screen.getByRole('tab', { name: 'Auth' }));
+    fireEvent.focus(screen.getByRole('button', { name: 'Show password' }));
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toBe('Show password');
+  });
+
+  it('text fields and the (revealed) password field opt out of spell checking', async () => {
+    await mount();
+    expect(byLabel('Hostname').getAttribute('spellcheck')).toBe('false');
+    expect(byLabel('Name').getAttribute('spellcheck')).toBe('false');
+    await userEvent.click(screen.getByRole('tab', { name: 'Auth' }));
+    expect(byLabel('Username').getAttribute('spellcheck')).toBe('false');
+    await userEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(byLabel('Password').getAttribute('spellcheck')).toBe('false');
   });
 });

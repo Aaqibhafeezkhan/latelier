@@ -191,11 +191,11 @@ export function SchemaView({
           >
             <thead>
               <tr style={{ position: 'sticky', top: 0, background: T.surface, zIndex: 1 }}>
-                <th style={cellHead(T)}>Field</th>
-                <th style={cellHead(T)}>Types</th>
-                <th style={{ ...cellHead(T), width: 90, textAlign: 'right' }}>Distinct</th>
-                <th style={cellHead(T)}>Range</th>
-                <th style={{ ...cellHead(T), width: 110, textAlign: 'right' }}>Frequency</th>
+                <th scope="col" style={cellHead(T)}>Field</th>
+                <th scope="col" style={cellHead(T)}>Types</th>
+                <th scope="col" style={{ ...cellHead(T), width: 90, textAlign: 'right' }}>Distinct</th>
+                <th scope="col" style={cellHead(T)}>Range</th>
+                <th scope="col" style={{ ...cellHead(T), width: 110, textAlign: 'right' }}>Frequency</th>
               </tr>
             </thead>
             <tbody>

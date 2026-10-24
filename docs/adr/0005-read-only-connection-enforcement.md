@@ -52,6 +52,8 @@ The script-pane allowlist rewrite touches the same `get` trap responsible for a 
 
 **A green typecheck does not prove a change to this surface landed.** Several test fake pools are cast `as unknown as MongoPool`, which launders the type — renaming a pool method compiles clean and fails only at test runtime. Recorded here because the same trap will catch the next person who changes it. For the same reason, the read-only integration tests assert the error *class* and not its message; a message regression passes them silently.
 
+**A control client sits beside the grant, not behind it.** `MonitorService.killOp` (and `AggregationService.killWrite` before it) takes `pool.write(id)` only for its synchronous refusal and then runs the kill over `pool.openControlClient(id)`, not over the grant's handle, because on the pooled client a kill queues behind the very op it targets when that op holds the pool's last connection. `MonitorService.currentOp` uses a control client for the same reason, as a read with no grant. The refusal still comes first, so a read-only connection never reaches the control client on the kill path; what this gives up is the "the grant is the only route to a writable handle" shape, for these two calls.
+
 **The channel-classification test is kept.** `tests/unit/read-only-channel-classification.spec.ts` answers "was this channel classified at all", which the handle does not. Retiring it would be a separate decision on separate evidence.
 
 ## Considered and rejected

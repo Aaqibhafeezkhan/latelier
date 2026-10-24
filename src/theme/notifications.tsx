@@ -1,5 +1,6 @@
 import { notifications } from '@mantine/notifications';
 import { Button, Group, Text } from '@mantine/core';
+import { recordActivity, type ActivityEntry } from './activityLog';
 
 // Project-conventions wrapper around Mantine notifications. Callers stay
 // explicit (per X12 resolved decision: no global auto-toast on IPC failures).
@@ -70,8 +71,14 @@ function show(
   return id;
 }
 
+// Errors and warnings also go to the activity log, which outlives the toast.
+function record(level: ActivityEntry['level'], message: string, options: NotifyOptions): void {
+  recordActivity({ id: crypto.randomUUID(), level, title: options.title, message, at: new Date().toISOString() });
+}
+
 export const notify = {
   error(message: string, options: NotifyOptions = {}) {
+    record('error', message, options);
     return show('red', 'Error', 6000, message, options);
   },
   success(message: string, options: NotifyOptions = {}) {
@@ -81,6 +88,7 @@ export const notify = {
     return show('blue', undefined, 4000, message, options);
   },
   warning(message: string, options: NotifyOptions = {}) {
+    record('warning', message, options);
     return show('orange', 'Warning', 4000, message, options);
   },
 };

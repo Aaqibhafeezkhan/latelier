@@ -81,6 +81,17 @@ test('Save as view from the builder, then Modify view from the navigator', async
       // Visible matches only: the orders tab opened earlier may keep its panel mounted.
       await expect(win.getByText('apple-001').filter({ visible: true })).toHaveCount(0);
       await expect(win.getByText('cherry-003').filter({ visible: true })).toHaveCount(0);
+
+      // --- Duplicate view: v1 (now the pending filter) copied to v1_copy ----
+      await ws.collectionRow('shop', 'v1').click({ button: 'right' });
+      await win.getByRole('menuitem', { name: 'Duplicate view…' }).click();
+      const dupDialog = win.getByRole('dialog', { name: 'Duplicate view' });
+      await expect(dupDialog).toBeVisible({ timeout: 5000 });
+      await expect(dupDialog.getByLabel('View name')).toHaveValue('v1_copy');
+      await dupDialog.getByRole('button', { name: 'Create view' }).click();
+      await expect(dupDialog).not.toBeVisible({ timeout: 5000 });
+      // The duplicate refreshes the navigator itself, unlike Save as view.
+      await expect(ws.collectionRow('shop', 'v1_copy')).toBeVisible({ timeout: 5000 });
     });
   });
 });

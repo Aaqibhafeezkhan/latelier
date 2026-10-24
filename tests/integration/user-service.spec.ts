@@ -165,6 +165,124 @@ describe('UserService', () => {
     expect(users.find((u) => u.username === 'lc_user')).toBeUndefined();
   });
 
+  describe('custom roles', () => {
+    const roleDb = 'role_lifecycle';
+    const findPriv = [{ resource: { db: roleDb, collection: 'orders' }, actions: ['find'] }];
+
+    afterEach(async () => {
+      const c = new MongoClient(getSharedMongoUri());
+      try {
+        await c.connect();
+        await c.db(roleDb).command({ dropAllRolesFromDatabase: 1 });
+      } finally {
+        await c.close();
+      }
+    });
+
+    it('create / update / drop round-trip; listRoles carries privileges and direct roles', async () => {
+      setup();
+      await svc.createRole({
+        connectionId: connId,
+        dbName: roleDb,
+        role: 'lc_role',
+        privileges: JSON.stringify(findPriv),
+        roles: [],
+      });
+      let roles = await svc.listRoles({ connectionId: connId, dbName: roleDb });
+      let mine = roles.find((r) => r.role === 'lc_role')!;
+      expect(mine.isBuiltin).toBe(false);
+      expect(mine.roles).toEqual([]);
+      expect(ejsonParse(mine.privileges!)).toEqual(findPriv);
+
+      await svc.updateRole({
+        connectionId: connId,
+        dbName: roleDb,
+        role: 'lc_role',
+        patch: { roles: [{ role: 'read', db: roleDb }], privileges: '[]' },
+      });
+      roles = await svc.listRoles({ connectionId: connId, dbName: roleDb });
+      mine = roles.find((r) => r.role === 'lc_role')!;
+      expect(mine.roles).toEqual([{ role: 'read', db: roleDb }]);
+      expect(ejsonParse(mine.privileges!)).toEqual([]);
+
+      await svc.dropRole({ connectionId: connId, dbName: roleDb, role: 'lc_role' });
+      roles = await svc.listRoles({ connectionId: connId, dbName: roleDb });
+      expect(roles.find((r) => r.role === 'lc_role')).toBeUndefined();
+    });
+
+    it('roles holds the direct parents while inheritedRoles holds the closure', async () => {
+      setup();
+      const base = { connectionId: connId, dbName: roleDb, privileges: '[]' };
+      await svc.createRole({ ...base, role: 'rc', roles: [] });
+      await svc.createRole({ ...base, role: 'rb', roles: [{ role: 'rc', db: roleDb }] });
+      await svc.createRole({ ...base, role: 'ra', roles: [{ role: 'rb', db: roleDb }] });
+      const ra = (await svc.listRoles({ connectionId: connId, dbName: roleDb })).find(
+        (r) => r.role === 'ra',
+      )!;
+      expect(ra.roles).toEqual([{ role: 'rb', db: roleDb }]);
+      expect(ra.inheritedRoles.map((r) => r.role).sort((a, b) => a.localeCompare(b))).toEqual([
+        'rb',
+        'rc',
+      ]);
+    });
+
+    it.each([
+      ['not EJSON', '[{'],
+      ['not an array', '{"resource":{}}'],
+    ])('createRole with privileges that are %s gives VALIDATION', async (_label, privileges) => {
+      setup();
+      await expect(
+        svc.createRole({ connectionId: connId, dbName: roleDb, role: 'bad_role', privileges, roles: [] }),
+      ).rejects.toMatchObject({ code: 'VALIDATION' });
+    });
+
+    it('createRole on an existing role name gives CONFLICT', async () => {
+      setup();
+      const input = { connectionId: connId, dbName: roleDb, role: 'dup_role', privileges: '[]', roles: [] };
+      await svc.createRole(input);
+      await expect(svc.createRole(input)).rejects.toMatchObject({ code: 'CONFLICT' });
+    });
+
+    it('updateRole with an empty patch gives VALIDATION', async () => {
+      setup();
+      await expect(
+        svc.updateRole({ connectionId: connId, dbName: roleDb, role: 'any', patch: {} }),
+      ).rejects.toMatchObject({ code: 'VALIDATION' });
+    });
+
+    it('a read-only connection refuses create, update and drop; the writable one succeeds', async () => {
+      tmp = createTempDb();
+      const vault = new SecretsVault(tmp.db, createSafeStorageMock());
+      pool = new MongoPool({
+        repo: makeReader([
+          makeConnection('role-rw', hp, { defaultDb: roleDb }),
+          makeConnection('role-ro', hp, { defaultDb: roleDb, readOnly: true }),
+        ]),
+        vault,
+      });
+      svc = new UserService(pool);
+      const input = { dbName: roleDb, role: 'ro_role', privileges: '[]', roles: [] };
+
+      await expect(svc.createRole({ ...input, connectionId: 'role-ro' })).rejects.toMatchObject({
+        code: 'READ_ONLY',
+      });
+      await svc.createRole({ ...input, connectionId: 'role-rw' });
+      await expect(
+        svc.updateRole({
+          connectionId: 'role-ro',
+          dbName: roleDb,
+          role: 'ro_role',
+          patch: { roles: [{ role: 'read', db: roleDb }] },
+        }),
+      ).rejects.toMatchObject({ code: 'READ_ONLY' });
+      await expect(
+        svc.dropRole({ connectionId: 'role-ro', dbName: roleDb, role: 'ro_role' }),
+      ).rejects.toMatchObject({ code: 'READ_ONLY' });
+      const roles = await svc.listRoles({ connectionId: 'role-rw', dbName: roleDb });
+      expect(roles.find((r) => r.role === 'ro_role')?.roles).toEqual([]);
+    });
+  });
+
   it('shows a Double past 2^53 in customData as a Double, not a rounded Long', async () => {
     setup();
     const customDb = 'user_custom_double';
@@ -365,7 +483,7 @@ describe('UserService', () => {
   // rejects) — the bound has to be a field on the command document itself, so
   // assert it landed there rather than in the options argument.
   describe('every admin command carries maxTimeMS', () => {
-    it('list/get/listRoles/create/update/drop all send maxTimeMS on the command document', async () => {
+    it('list/get/listRoles/create/update/drop and the role commands all send maxTimeMS on the command document', async () => {
       setup();
       const cmdDb = 'user_maxtimems_db';
       // Warm the connection first — connect()'s own buildInfo probe also
@@ -392,6 +510,14 @@ describe('UserService', () => {
         patch: { roles: [{ role: 'readWrite', db: cmdDb }] },
       });
       await svc.drop({ connectionId: connId, dbName: cmdDb, username: 'maxtimems_user' });
+      await svc.createRole({ connectionId: connId, dbName: cmdDb, role: 'mt_role', privileges: '[]', roles: [] });
+      await svc.updateRole({
+        connectionId: connId,
+        dbName: cmdDb,
+        role: 'mt_role',
+        patch: { roles: [{ role: 'read', db: cmdDb }] },
+      });
+      await svc.dropRole({ connectionId: connId, dbName: cmdDb, role: 'mt_role' });
 
       expect(commandSpy.mock.calls.length).toBeGreaterThan(0);
       for (const call of commandSpy.mock.calls) {

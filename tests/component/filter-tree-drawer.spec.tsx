@@ -889,7 +889,7 @@ describe('Filter drawer — a Saved or Recent load drops the draft', () => {
   it.each(['Saved', 'Recent'] as const)('Run here from %s writes filterDraft: undefined with the loaded queryRaw', async (tab) => {
     const updateSpy = mountLoading(tab);
 
-    fireEvent.click(await screen.findByTitle('Run here'));
+    fireEvent.click(await screen.findByRole('button', { name: /in this tab$/ }));
 
     await waitFor(() => expect(lastWrittenQueryRaw(updateSpy)).toBe('{"z":{"$eq":"loaded"}}'));
     expect(lastWrittenDraft(updateSpy)).toEqual({ found: true, draft: undefined });

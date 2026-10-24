@@ -242,6 +242,26 @@ describe('useWorkspaceTabs — a refresh inside the debounce window', () => {
     expect(a.state.aggregation?.stages).toEqual([stage]);
   });
 
+  it('openAggregation with seeded stages drops the pending aggregation main just replaced (#156)', async () => {
+    const stale = { id: 1, op: '$match', body: '{"x":1}', enabled: true };
+    const { result } = await mount(() => [collectionTab('a')], {
+      openAggregation: async () => collectionTab('a'),
+    });
+    act(() => {
+      result.current.patchAggregationState('a', { stages: [stale] });
+    });
+    await act(async () => {
+      await result.current.openAggregation({
+        connectionId: 'c1',
+        dbName: 'db',
+        collection: 'a',
+        initialState: { stages: [{ id: 1, op: '$limit', body: '5', enabled: true }] },
+      });
+    });
+    const a = result.current.tabs[0] as CollectionTab;
+    expect(a.state.aggregation?.stages).not.toEqual([stale]);
+  });
+
   it('openAggregation drops a pending activeView main just overwrote', async () => {
     const { result, update } = await mount(() => [collectionTab('a')], {
       openAggregation: async () => collectionTab('a'),

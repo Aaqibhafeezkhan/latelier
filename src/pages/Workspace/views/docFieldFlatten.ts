@@ -6,8 +6,8 @@ export interface FlatFieldRow {
    * state and its own `id` — an escaped identity key, not a raw dot-path
    * (see `fieldPathKey.ts`, #86). */
   path: string;
-  /** Whether this row can be expanded — an Enter/Space on a non-expandable
-   * active row is a no-op, same as clicking one (`FieldNode`'s `rowClickable`). */
+  /** Whether this row can be expanded — Enter/Space on an expandable active
+   * row toggles it; on a leaf it opens the full-value popover instead. */
   expandable: boolean;
   /** Dot-path of the field within the document (no docId prefix) — same
    * value `FieldNode` computes for itself as it recurses. Carried here too

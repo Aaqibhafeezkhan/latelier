@@ -67,7 +67,7 @@ function renderAccordion(stages: Stage[], overrides: Partial<AccordionProps> = {
         outputCount={null}
         stageCounts={overrides.stageCounts ?? {}}
         stageSamples={overrides.stageSamples ?? {}}
-        staleStageIds={new Set()}
+        staleStageIds={overrides.staleStageIds ?? new Set()}
         previewLoading={new Set()}
         darkMode={false}
         suggestionContext={null}
@@ -120,6 +120,15 @@ describe('StageAccordion — stage rendering and operations', () => {
     renderAccordion([stage({ id: 7, op: '$match', enabled: true })], { onToggleEnabled });
     fireEvent.click(screen.getByText('ON'));
     expect(onToggleEnabled).toHaveBeenCalledWith(7);
+  });
+
+  it('shows the Disable tooltip when keyboard focus lands on the ON/OFF toggle', async () => {
+    renderAccordion([stage({ id: 1, enabled: true })]);
+
+    fireEvent.focus(screen.getByRole('button', { name: 'Disable stage' }));
+
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toBe('Disable');
   });
 
   it('pressing Enter on a collapsed stage header expands it (keyboard equivalent of the click)', async () => {
@@ -331,6 +340,31 @@ describe('StageAccordion — editable stage operator (T2.1)', () => {
 
     // Custom mode closed, but the keydown never reached the parent.
     expect(screen.queryByLabelText('Custom stage operator')).toBeNull();
+    expect(onParentKeyDown).not.toHaveBeenCalled();
+  });
+
+  it('Escape in the search box closes the picker and clears the search for the next open', () => {
+    renderAccordion([stage({ id: 3, op: '$match' })]);
+
+    fireEvent.click(opTrigger());
+    fireEvent.change(screen.getByLabelText('Search stages'), { target: { value: 'sort' } });
+    fireEvent.keyDown(screen.getByLabelText('Search stages'), { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+
+    fireEvent.click(opTrigger());
+    expect((screen.getByLabelText('Search stages') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByLabelText('Custom stage operator')).toBeNull();
+  });
+
+  it('stops propagation of the Escape keydown that closes the picker from the search box', () => {
+    const onParentKeyDown = vi.fn();
+    renderWithParentHandlers([stage({ id: 3, op: '$match' })], { onParentKeyDown });
+
+    fireEvent.click(opTrigger());
+    onParentKeyDown.mockClear();
+    fireEvent.keyDown(screen.getByLabelText('Search stages'), { key: 'Escape' });
+
+    expect(screen.queryByRole('listbox')).toBeNull();
     expect(onParentKeyDown).not.toHaveBeenCalled();
   });
 
@@ -798,5 +832,114 @@ describe('StageAccordion — readable EJSON in the stage preview', () => {
 
     expect(container.textContent).toContain('9007199254740993');
     expect(container.textContent).not.toContain('9007199254740992');
+  });
+});
+
+describe('StageAccordion — expanded preview header (N5.8, N5.9)', () => {
+  it('shows a stale marker with an explanatory title when the stage was edited after the last run', () => {
+    renderAccordion([stage({ id: 7 })], {
+      activeId: 7,
+      stageCounts: { 7: 12 },
+      staleStageIds: new Set([7]),
+    });
+
+    const marker = screen.getByTitle('Stage edited after last run');
+    expect(marker.textContent).toContain('stale');
+  });
+
+  it('omits the marker for a fresh stage and sets tabular numerals on the doc count', () => {
+    renderAccordion([stage({ id: 7 })], { activeId: 7, stageCounts: { 7: 12 } });
+
+    expect(screen.queryByTitle('Stage edited after last run')).toBeNull();
+    const header = screen.getByText(/Stage preview/);
+    expect(header.textContent).toContain('12 docs');
+    expect(header.style.fontVariantNumeric).toBe('tabular-nums');
+  });
+});
+
+describe('StageAccordion — focus after adding or deleting a stage (N5.23)', () => {
+  // A real useState wrapper: the focus move only exists once the add/remove
+  // has round-tripped back into the `stages` prop.
+  function Harness({ initial, spy }: { initial: Stage[]; spy?: () => void }) {
+    const [stages, setStages] = React.useState(initial);
+    const nextId = React.useRef(100);
+    return (
+      <StageAccordion
+        stages={stages}
+        activeId={null}
+        collection="orders"
+        sourceCount={1}
+        outputCount={null}
+        stageCounts={{}}
+        stageSamples={{}}
+        staleStageIds={new Set()}
+        previewLoading={new Set()}
+        darkMode={false}
+        suggestionContext={null}
+        onAdd={(op) => {
+          spy?.();
+          setStages((prev) => [...prev, stage({ id: nextId.current++, op: op as Stage['op'] })]);
+        }}
+        onToggleActive={noop}
+        onToggleEnabled={noop}
+        onChangeOp={noop}
+        onBodyChange={noop}
+        onMoveUp={noop}
+        onMoveDown={noop}
+        onReorder={noop}
+        onRemove={(id) => setStages((prev) => prev.filter((s) => s.id !== id))}
+        onDuplicate={noop}
+        onRunToStage={noop}
+        onRefreshPreview={noop}
+      />
+    );
+  }
+
+  const summary = (id: number) =>
+    document.querySelector<HTMLElement>(`[data-stage-summary="${id}"]`) as HTMLElement;
+
+  it('focuses the new stage summary button after a stage is added', () => {
+    render(<Harness initial={[stage({ id: 1 })]} />);
+    expect(document.activeElement).toBe(document.body);
+
+    const pills = screen.getAllByRole('button', { name: /Add stage/ });
+    fireEvent.click(pills[pills.length - 1]!);
+    fireEvent.click(screen.getAllByRole('option').find((el) => el.textContent?.startsWith('$sort'))!);
+
+    expect(document.activeElement).toBe(summary(100));
+    expect(summary(100).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('focuses the neighbour that took the removed stage place', () => {
+    render(<Harness initial={[stage({ id: 1 }), stage({ id: 2 }), stage({ id: 3 })]} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete stage' })[1]!);
+
+    expect(document.querySelector('[data-stage-summary="2"]')).toBeNull();
+    expect(document.activeElement).toBe(summary(3));
+  });
+
+  it('focuses the previous stage when the last one is removed, and the add pill when none is left', () => {
+    render(<Harness initial={[stage({ id: 1 }), stage({ id: 2 })]} />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete stage' })[1]!);
+    expect(document.activeElement).toBe(summary(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete stage' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Add stage/ }));
+  });
+
+  it('leaves focus alone when it sits outside the accordion', () => {
+    render(
+      <>
+        <button>elsewhere</button>
+        <Harness initial={[stage({ id: 1 }), stage({ id: 2 })]} />
+      </>,
+    );
+    screen.getByText('elsewhere').focus();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete stage' })[0]!);
+
+    expect(document.activeElement).toBe(screen.getByText('elsewhere'));
   });
 });

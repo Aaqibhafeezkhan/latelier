@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Group, Modal, NativeSelect, SegmentedControl, Switch, Text, Textarea, TextInput } from '@mantine/core';
+import { ActionIcon, Button, Group, Modal, NativeSelect, SegmentedControl, Switch, Text, Textarea, TextInput } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { confirmDestructive } from '../../utils/confirm';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
@@ -264,15 +264,18 @@ function FieldRow({ ctx, segments }: { ctx: RowCtx; segments: string[] }) {
       >
         <div style={{ width: 180, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, paddingTop: 4 }}>
           {isContainer && (
-            <button
+            <ActionIcon
               type="button"
+              variant="subtle"
+              color="gray"
+              size="xs"
               aria-expanded={!isCollapsed}
               aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${dotted}`}
               onClick={() => ctx.toggleCollapsed(key)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, lineHeight: 1 }}
+              style={{ fontSize: 11 }}
             >
               {isCollapsed ? '▸' : '▾'}
-            </button>
+            </ActionIcon>
           )}
           <Text size="sm" ff="monospace" style={{ overflowWrap: 'anywhere' }}>
             {displayName}
