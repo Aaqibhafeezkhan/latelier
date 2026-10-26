@@ -91,7 +91,7 @@ jobs:
         run: |
           ver=$(node -p "require('./node_modules/electron/package.json').version")
           zip="electron-v${ver}-linux-x64.zip"
-          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 -o "/tmp/${zip}" \
+          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 --max-time 300 -o "/tmp/${zip}" \
             "https://github.com/electron/electron/releases/download/v${ver}/${zip}"
           rm -rf node_modules/electron/dist
           unzip -q "/tmp/${zip}" -d node_modules/electron/dist
@@ -201,7 +201,7 @@ jobs:
         run: |
           ver=$(node -p "require('./node_modules/electron/package.json').version")
           zip="electron-v${ver}-linux-x64.zip"
-          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 -o "/tmp/${zip}" \
+          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 --max-time 300 -o "/tmp/${zip}" \
             "https://github.com/electron/electron/releases/download/v${ver}/${zip}"
           rm -rf node_modules/electron/dist
           unzip -q "/tmp/${zip}" -d node_modules/electron/dist
@@ -210,8 +210,18 @@ jobs:
             && echo "electron binary OK ($ver)" \
             || { echo "::error::electron binary missing after unzip"; exit 1; }
 
+      # A healthy run of this step takes under a minute. When the Ubuntu mirror
+      # stalls, apt hangs until the 20-minute job limit cancels the whole shard
+      # before any test runs, so cap each attempt and retry instead. `timeout`
+      # signals the whole process group, so a stuck apt child dies with it.
       - name: Install Playwright system deps
-        run: ./node_modules/.bin/playwright install-deps
+        timeout-minutes: 12
+        run: |
+          for attempt in 1 2 3; do
+            timeout 240 ./node_modules/.bin/playwright install-deps && exit 0
+            echo "::warning::playwright install-deps attempt ${attempt} failed or timed out"
+          done
+          exit 1
 
       # The secrets-vault specs need a real OS keyring. A bare runner has no
       # session D-Bus and no secret service, so Chromium falls back to its
@@ -222,7 +232,15 @@ jobs:
         # `apt-get update` is explicit rather than inherited from the step
         # above. `dbus-daemon` ships `dbus-run-session` and `dbus-bin` ships
         # `dbus-send`, which the next step uses to check the keyring.
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-keyring libsecret-1-0 dbus-daemon dbus-bin
+        timeout-minutes: 12
+        run: |
+          for attempt in 1 2 3; do
+            timeout 240 sudo apt-get update \
+              && timeout 240 sudo apt-get install -y --no-install-recommends gnome-keyring libsecret-1-0 dbus-daemon dbus-bin \
+              && exit 0
+            echo "::warning::keyring install attempt ${attempt} failed or timed out"
+          done
+          exit 1
 
       - name: Run E2E
         env:
