@@ -55,7 +55,7 @@
     "better-sqlite3": "^13.0.3",
     "bson": "^7.3.1",
     "electron-updater": "6.8.9",
-    "mongodb": "^7.5.0",
+    "mongodb": "^7.7.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -85,7 +85,7 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.19.2",
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "@vitest/coverage-v8": "^4.1.11",
     "acorn": "^8.18.0",
@@ -103,7 +103,7 @@
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react-dom": "^19.3.1",
     "react-resizable-panels": "^4.14.1",
     "react-router-dom": "^7.18.3",
     "react-window": "^2.3.3",
@@ -111,7 +111,7 @@
     "typescript-eslint": "^8.71.0",
     "vite": "^8.3.5",
     "vite-plugin-electron": "^1.1.1",
-    "vite-plugin-electron-renderer": "^0.14.7",
+    "vite-plugin-electron-renderer": "^1.0.0",
     "vitest": "^4.1.10"
   },
   "overrides": {
