@@ -212,13 +212,18 @@ jobs:
 
       # A healthy run of this step takes under a minute. When the Ubuntu mirror
       # stalls, apt hangs until the 20-minute job limit cancels the whole shard
-      # before any test runs, so cap each attempt and retry instead. `timeout`
-      # signals the whole process group, so a stuck apt child dies with it.
+      # before any test runs, so cap each attempt and retry instead. Run as
+      # root: Playwright then calls apt-get directly instead of through its own
+      # `sudo`, so apt stays in `timeout`'s process group and `--kill-after`
+      # reaches it. Started as the runner user, a timed-out attempt killed only
+      # Playwright and left apt-get holding the dpkg lock, so every retry failed
+      # at once with "Could not get lock". `env PATH` keeps setup-node's `node`,
+      # which sudo's secure_path would drop.
       - name: Install Playwright system deps
         timeout-minutes: 12
         run: |
           for attempt in 1 2 3; do
-            timeout 240 ./node_modules/.bin/playwright install-deps && exit 0
+            sudo env "PATH=$PATH" timeout --kill-after=10 240 ./node_modules/.bin/playwright install-deps && exit 0
             echo "::warning::playwright install-deps attempt ${attempt} failed or timed out"
           done
           exit 1
