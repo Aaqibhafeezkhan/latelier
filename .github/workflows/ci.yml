@@ -219,11 +219,16 @@ jobs:
       # Playwright and left apt-get holding the dpkg lock, so every retry failed
       # at once with "Could not get lock". `env PATH` keeps setup-node's `node`,
       # which sudo's secure_path would drop.
+      #
+      # `chromium` only: every spec drives Electron, which runs on Chromium's
+      # system libraries. A bare `install-deps` also pulls Firefox and WebKit's
+      # (gstreamer, codecs, GTK 4): about 185 packages and 139 MB on this runner,
+      # which a slow mirror cannot deliver inside the 12-minute step budget.
       - name: Install Playwright system deps
         timeout-minutes: 12
         run: |
           for attempt in 1 2 3; do
-            sudo env "PATH=$PATH" timeout --kill-after=10 240 ./node_modules/.bin/playwright install-deps && exit 0
+            sudo env "PATH=$PATH" timeout --kill-after=10 240 ./node_modules/.bin/playwright install-deps chromium && exit 0
             echo "::warning::playwright install-deps attempt ${attempt} failed or timed out"
           done
           exit 1

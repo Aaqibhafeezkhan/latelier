@@ -275,7 +275,9 @@ describe('MongoShellPane', () => {
     outputCb!({ sessionId: 's1', kind: 'stdout', data: 'more output\n' });
 
     await waitFor(() => expect(output.textContent).toContain('more output'));
-    expect(output.scrollTop).toBe(600);
+    // The follow-scroll runs in a passive effect, after the text is already in
+    // the DOM, so a check made the moment the text appears can still read 300.
+    await waitFor(() => expect(output.scrollTop).toBe(600));
   });
 
   it('leaves scrollTop unchanged when the user has scrolled up', async () => {

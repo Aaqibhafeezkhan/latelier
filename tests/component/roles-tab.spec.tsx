@@ -50,7 +50,10 @@ function setup(over: {
   update?: (input: RoleUpdateInput) => Promise<{ ok: true }>;
   drop?: (input: RoleDropInput) => Promise<{ dropped: true }>;
 } = {}) {
-  const list = vi.fn(over.list ?? (async () => [BUILTIN, CUSTOM]));
+  // The tab lists `admin` before the saved pref resolves to `myapp`. Answering
+  // only `myapp` keeps `appAdmin` off screen until that second load, so a test
+  // waiting for it cannot run ahead of the pref on a slow CI runner.
+  const list = vi.fn(over.list ?? (async ({ dbName }: { dbName: string }) => (dbName === 'myapp' ? [BUILTIN, CUSTOM] : [])));
   installAtelierMock({
     meta: {
       listDatabases: async () => [
