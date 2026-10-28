@@ -167,6 +167,10 @@ jobs:
     # not for comfort: shard 3 draws the heavy specs today and a new spec file
     # lands wherever the split puts it.
     timeout-minutes: 20
+    env:
+      # Read by both the keyring install and the apt cache key, so the cache
+      # rolls over when the list changes.
+      KEYRING_PKGS: gnome-keyring libsecret-1-0 dbus-daemon dbus-bin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -190,6 +194,41 @@ jobs:
       # runner.
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # The two apt steps below download ~33 MB of .deb files from the Ubuntu
+      # mirror, which has taken up to 10 minutes when the mirror is slow. Cache
+      # the .deb files so a warm run fetches nothing but the package indexes.
+      # The key changes with the Playwright version (its dependency list), the
+      # keyring list and the runner image (its package versions); bump the `v1`
+      # to drop the cache by hand. The image version comes last so the prefix
+      # before it is a restore key: a new image, which rolls out every week or
+      # so and can land on some shards of a run and not others, starts from the
+      # previous image's files and downloads only the packages that changed.
+      # `ImageOS`/`ImageVersion` are runner environment variables, not workflow
+      # `env`, so the key is built in shell, where an unset one fails the step.
+      - name: Compute apt cache key
+        id: apt-key
+        run: |
+          : "${ImageOS:?}" "${ImageVersion:?}"
+          pw=$(node -p "require('./package-lock.json').packages['node_modules/playwright-core'].version")
+          prefix="apt-v1-${ImageOS}-pw${pw}-${KEYRING_PKGS// /+}-"
+          echo "prefix=${prefix}" >> "$GITHUB_OUTPUT"
+          echo "key=${prefix}${ImageVersion}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore apt package cache
+        id: apt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-debs
+          key: ${{ steps.apt-key.outputs.key }}
+          restore-keys: ${{ steps.apt-key.outputs.prefix }}
+
+      # apt-get takes a .deb already in its archive directory instead of
+      # downloading it, once its checksum matches the package index; a stale
+      # one from an older image is simply downloaded again.
+      - name: Seed apt archives from the cache
+        if: steps.apt-cache.outputs.cache-matched-key != ''
+        run: sudo cp ~/apt-debs/*.deb /var/cache/apt/archives/
 
       # electron's bundled installer downloads the release zip fine, but its
       # extract-zip step silently no-ops on this runner (Node 24 / ubuntu-latest):
@@ -246,11 +285,38 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             timeout 240 sudo apt-get update \
-              && timeout 240 sudo apt-get install -y --no-install-recommends gnome-keyring libsecret-1-0 dbus-daemon dbus-bin \
+              && timeout 240 sudo apt-get install -y --no-install-recommends $KEYRING_PKGS \
               && exit 0
             echo "::warning::keyring install attempt ${attempt} failed or timed out"
           done
           exit 1
+
+      # The archive directory is root-owned, but the .deb files in it are
+      # world-readable, so they are copied out to a runner-owned directory the
+      # cache action can save. `apt-get` keeps what it downloads unless an
+      # apt.conf.d hook deletes it (Docker images ship `docker-clean` for
+      # that); the runner image has none, and an empty copy fails here rather
+      # than saving an empty cache. Saved before `Run E2E`, so a red shard
+      # still warms the next run. On a cold run all four shards try to save
+      # the same key; the losers log "Unable to reserve cache" as a warning.
+      # After a restore from an older image, `autoclean` drops the .deb files
+      # whose versions the package index no longer lists, so the cache holds
+      # what this image installs instead of growing with every image.
+      - name: Collect downloaded .deb files
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get autoclean
+          rm -rf ~/apt-debs
+          mkdir -p ~/apt-debs
+          cp /var/cache/apt/archives/*.deb ~/apt-debs/
+          echo "collected $(find ~/apt-debs -name '*.deb' | wc -l) .deb files, $(du -sh ~/apt-debs | cut -f1)"
+
+      - name: Save apt package cache
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-debs
+          key: ${{ steps.apt-key.outputs.key }}
 
       - name: Run E2E
         env:
