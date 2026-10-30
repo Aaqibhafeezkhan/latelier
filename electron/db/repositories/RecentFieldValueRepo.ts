@@ -1,6 +1,9 @@
 import type { Database, Statement } from 'better-sqlite3';
 import type { ValType } from '@shared/types';
 import { rethrowMissingConnection } from '../sqliteErrors.ts';
+import type { ColumnCipher } from '../columnCipher.ts';
+import { openListedCell } from './listedCell.ts';
+import type { Logger } from '../../log.ts';
 
 export interface RecentFieldValueRow {
   id: string;
@@ -43,8 +46,13 @@ export interface RecentFieldValueEvict {
 
 const DEFAULT_LIST_LIMIT = 20;
 
+/** The columns `list` reads; `value` is the sealed BLOB. `value_mac` stays in SQL. */
+type StoredRow = Omit<RecentFieldValueRow, 'value'> & { value: Buffer | string };
+
 export class RecentFieldValueRepo {
   private db: Database;
+  private cipher: ColumnCipher;
+  private log?: Pick<Logger, 'warn'>;
   private upsertStmt: Statement;
   private listStmt: Statement<[string, string, string, string, number]>;
   private evictStmt: Statement<[string, string, string, string, string, string, string, string, number]>;
@@ -52,23 +60,30 @@ export class RecentFieldValueRepo {
   private clearAllStmt: Statement;
   private deleteOlderThanStmt: Statement<[number]>;
 
-  constructor(db: Database) {
+  constructor(db: Database, cipher: ColumnCipher, log?: Pick<Logger, 'warn'>) {
     this.db = db;
+    this.cipher = cipher;
+    this.log = log;
     // `id` is inert on the UPDATE branch — a conflict keeps the row's
-    // original id and only bumps use_count/last_used_at/val_type.
+    // original id and only bumps use_count/last_used_at/val_type. `value`
+    // is never rewritten on conflict either, so a stored cell stays bound to
+    // the id it was sealed with. `value_mac` is the keyed hash of the value
+    // within its (connection, db, collection, field) scope: the ciphertext
+    // carries a random nonce, so equality has to be decided on the hash.
     this.upsertStmt = db.prepare(`
       INSERT INTO recent_field_values
-        (id, connection_id, db_name, collection, field, value, val_type, last_used_at, use_count)
+        (id, connection_id, db_name, collection, field, value, value_mac, val_type, last_used_at, use_count)
       VALUES
-        (@id, @connection_id, @db_name, @collection, @field, @value, @val_type, @last_used_at, 1)
-      ON CONFLICT(connection_id, db_name, collection, field, value)
+        (@id, @connection_id, @db_name, @collection, @field, @value, @value_mac, @val_type, @last_used_at, 1)
+      ON CONFLICT(value_mac)
       DO UPDATE SET
         last_used_at = excluded.last_used_at,
         val_type = excluded.val_type,
         use_count = use_count + 1
     `);
     this.listStmt = db.prepare(`
-      SELECT * FROM recent_field_values
+      SELECT id, connection_id, db_name, collection, field, value, val_type, last_used_at, use_count
+      FROM recent_field_values
       WHERE connection_id = ? AND db_name = ? AND collection = ? AND field = ?
       ORDER BY last_used_at DESC
       LIMIT ?
@@ -109,7 +124,8 @@ export class RecentFieldValueRepo {
         db_name: row.dbName,
         collection: row.collection,
         field: row.field,
-        value: row.value,
+        value: this.cipher.seal('recent_field_values', 'value', row.id, row.value),
+        value_mac: this.cipher.blind([row.connectionId, row.dbName, row.collection, row.field], row.value),
         val_type: row.valType,
         last_used_at: row.lastUsedAt,
       });
@@ -119,13 +135,18 @@ export class RecentFieldValueRepo {
   }
 
   list(q: RecentFieldValueQuery): RecentFieldValueRow[] {
-    return this.listStmt.all(
+    const rows = this.listStmt.all(
       q.connectionId,
       q.dbName,
       q.collection,
       q.field,
       q.limit ?? DEFAULT_LIST_LIMIT,
-    ) as RecentFieldValueRow[];
+    ) as StoredRow[];
+    // Skipped: an empty suggestion would be offered as a real value.
+    return rows.flatMap((r) => {
+      const value = openListedCell(this.cipher, this.log, 'recent_field_values', 'value', r.id, r.value);
+      return value === null ? [] : [{ ...r, value }];
+    });
   }
 
   /** Trims a `(conn, db, coll, field)` bucket to its `keep` most-recent rows. */

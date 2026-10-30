@@ -63,6 +63,22 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     };
   }, []);
 
+  // Null until main answers; the row stays hidden rather than guess.
+  const [columnKeyProtected, setColumnKeyProtected] = React.useState<boolean | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    api.secrets
+      .status()
+      .then(({ columnKeyProtected: isProtected }) => {
+        if (!cancelled) setColumnKeyProtected(isProtected);
+      })
+      .catch((err) => notify.error(getErrorMessage(err, 'Failed to read the local data protection status.')));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleRestoreTabs = async (next: boolean) => {
     setRestoreTabs(next);
     try {
@@ -340,6 +356,20 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             {clearingValues ? 'Clearing…' : 'Clear value history'}
           </Button>
         </Group>
+
+        {columnKeyProtected !== null && (
+          <Stack gap={2}>
+            <Text size="sm" fw={600}>
+              Local data protection
+            </Text>
+            {/* Never calls the data encrypted when the key sits beside it: that would oversell it. */}
+            <Text size="xs" c="dimmed" data-testid="local-data-protection">
+              {columnKeyProtected
+                ? 'Saved queries, query history, value suggestions, the audit log and open tabs are encrypted on disk with a key held by the OS keychain.'
+                : 'No OS keychain is available, so the key for saved queries, query history, value suggestions, the audit log and open tabs is stored unprotected next to them. Anyone who can read your user data folder can read them.'}
+            </Text>
+          </Stack>
+        )}
 
         <Group justify="flex-end">
           <Button variant="subtle" size="compact-xs" onClick={close}>

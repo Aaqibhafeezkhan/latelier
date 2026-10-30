@@ -27,15 +27,22 @@ export interface DiagnosticBundle {
     lastUsedAt: string | null;
   }>;
   /** Present only when the service was given a `secretsStatus` probe. */
-  secrets?: { encryptionAvailable: boolean; backend: string | null };
+  secrets?: SecretsStatus;
   logs: Record<string, string>;
+}
+
+export interface SecretsStatus {
+  encryptionAvailable: boolean;
+  backend: string | null;
+  /** False when the column key is stored unwrapped because no usable keychain exists. */
+  columnKeyProtected: boolean;
 }
 
 export interface DiagnosticServiceOpts {
   userDataDir: string;
   connRepo: ConnectionReader;
   /** Reports whether secrets get real encryption and which keychain backend serves them. */
-  secretsStatus?: () => { encryptionAvailable: boolean; backend: string | null };
+  secretsStatus?: () => SecretsStatus;
   /** Number of most recent log files to include. Defaults to 7. */
   maxLogFiles?: number;
   /** Cap each log file at this many bytes (most recent slice). Defaults to 1 MiB. */

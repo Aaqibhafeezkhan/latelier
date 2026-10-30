@@ -69,7 +69,8 @@ describe('migration 013 — recent field values', () => {
 
   it('rejects a second row for the same (connection, db, collection, field, value)', () => {
     db = open();
-    runMigrations(db, loadMigrationsFromDisk());
+    // Pinned to 013's own schema: 016 rebuilds this table around value_mac.
+    runMigrations(db, loadMigrationsFromDisk().filter((m) => m.version <= 13));
     insertConnection(db, 'c1');
     const now = new Date().toISOString();
     const insert = () =>
@@ -84,7 +85,8 @@ describe('migration 013 — recent field values', () => {
 
   it('cascades on connection delete', () => {
     db = open();
-    runMigrations(db, loadMigrationsFromDisk());
+    // Pinned to 013's own schema: 016 rebuilds this table around value_mac.
+    runMigrations(db, loadMigrationsFromDisk().filter((m) => m.version <= 13));
     insertConnection(db, 'c1');
     const now = new Date().toISOString();
     db.prepare(

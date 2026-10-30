@@ -16,10 +16,19 @@ import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import type { Database } from 'better-sqlite3';
-import { openDatabase, closeDatabase, truncateWal, adoptLegacyDatabase, DB_FILENAME } from './db/sqlite.ts';
+import { openDatabase, closeDatabase, truncateWal, adoptLegacyDatabase, resetDatabaseInPlace, DB_FILENAME } from './db/sqlite.ts';
 import { AppStateRepo } from './db/repositories/AppStateRepo.ts';
 import { AppStateService } from './services/AppStateService.ts';
-import { SecretsVault } from './secrets/SecretsVault.ts';
+import { SecretsVault, type SafeStorageLike } from './secrets/SecretsVault.ts';
+import { ColumnCipher } from './db/columnCipher.ts';
+import {
+  columnKeyDialogCopy,
+  encryptLegacyRows,
+  loadOrCreateColumnKeys,
+  resetProtectedData,
+  type LoadedColumnKeys,
+} from './db/columnKeyStore.ts';
+import { AppError } from './errors.ts';
 import { MongoPool } from './mongo/MongoPool.ts';
 import { ConnectionRepo } from './db/repositories/ConnectionRepo.ts';
 import {
@@ -554,29 +563,30 @@ app.on('before-quit', (e) => {
 
 function registerDevResetShortcut(): void {
   // Same reason as the logger level: a NODE_ENV check never fires in a shipped
-  // build, so this destructive shortcut — it deletes the database — was live
+  // build, so this destructive shortcut — it empties the database — was live
   // for every user. `app.isPackaged` is the signal that is actually set.
   if (app.isPackaged) return;
   const accelerator =
     process.platform === 'darwin' ? 'Command+Shift+Alt+R' : 'Control+Shift+Alt+R';
   globalShortcut.register(accelerator, () => {
-    if (!win || !db) return;
+    if (!win || !db || !appState || !log) return;
+    // In place on the live handle: every service, the vault and the cipher
+    // keep working, and the Vite dev server (which exits with Electron)
+    // stays up for the reload.
     try {
-      closeDatabase(db);
-    } catch {
-      // ignore
+      resetDatabaseInPlace(db, log);
+    } catch (err) {
+      log.error('dev', 'DB reset failed', { message: String(err) });
+      return;
     }
-    const userDataDir = resolveUserDataDir();
-    for (const suffix of ['', '-wal', '-shm']) {
-      fs.rmSync(path.join(userDataDir, dbFilename + suffix), { force: true });
-    }
-    db = openDatabase({ userDataDir, filename: dbFilename, log: log ?? undefined });
-    appState = new AppStateService(new AppStateRepo(db));
+    appState.reset();
+    // Shell sessions belong to the connections just deleted.
+    void mshellSvc?.disposeAll();
     if (pool) {
       void pool.disconnectAll();
     }
     win.reload();
-    log?.info('dev', 'DB reset');
+    log.info('dev', 'DB reset');
   });
 }
 
@@ -602,6 +612,40 @@ function reportFatalAndExit(kind: string, err: unknown): void {
 
 process.on('uncaughtException', (err) => reportFatalAndExit('Uncaught exception', err));
 process.on('unhandledRejection', (reason) => reportFatalAndExit('Unhandled rejection', reason));
+
+// Column key loss -------------------------------------------------------------
+
+/**
+ * Loads the column key, asking the user what to do when the keychain will not
+ * unwrap it. Never generates a replacement on its own: that would orphan every
+ * sealed cell without a word. Null means the user chose to quit.
+ */
+function loadColumnKey(database: Database, crypto: SafeStorageLike, logger: Logger): LoadedColumnKeys | null {
+  try {
+    return loadOrCreateColumnKeys(database, crypto, logger);
+  } catch (err) {
+    if (!(err instanceof AppError && err.code === 'COLUMN_KEY_UNREADABLE')) throw err;
+    logger.error('boot', 'column key unreadable', { message: err.message, details: err.details });
+  }
+  const copy = columnKeyDialogCopy(crypto.isEncryptionAvailable(), process.platform);
+  // Quit is the default and the cancel answer: Reset destroys data.
+  const choice = dialog.showMessageBoxSync({
+    type: 'error',
+    buttons: ['Quit', 'Reset protected data'],
+    defaultId: 0,
+    cancelId: 0,
+    title: "L'Atelier can't read its data key",
+    message: copy.message,
+    detail: copy.detail,
+  });
+  if (choice !== 1) {
+    logger.info('boot', 'quit at the column key dialog', { kind: copy.kind });
+    return null;
+  }
+  resetProtectedData(database, logger);
+  logger.warn('boot', 'protected data reset after an unreadable column key');
+  return loadOrCreateColumnKeys(database, crypto, logger);
+}
 
 // Boot sequence --------------------------------------------------------------
 
@@ -681,6 +725,16 @@ app.whenReady().then(() => {
     },
   );
 
+  // 3b. Column encryption: the key is unwrapped by the same keychain gate, and
+  // plaintext left by an older version is sealed before any repo reads it.
+  const columnKey = loadColumnKey(db, vaultCrypto, log);
+  if (!columnKey) {
+    app.exit(0);
+    return;
+  }
+  const cipher = new ColumnCipher(columnKey.keys);
+  encryptLegacyRows(db, cipher, log);
+
   // 4. Connection repo + Mongo pool
   const connRepo = new ConnectionRepo(db);
   pool = new MongoPool({
@@ -728,7 +782,7 @@ app.whenReady().then(() => {
   // this point, so the trusted frame is read through a closure rather than
   // captured — and it is re-read per message, which is what keeps it correct
   // across a reload.
-  const auditRepo = new AuditRepo(db);
+  const auditRepo = new AuditRepo(db, cipher, log);
   const auditSvc = new AuditService(auditRepo, pool, new UndoStore(), log);
   const router = createRouter(
     ipcMain,
@@ -736,16 +790,16 @@ app.whenReady().then(() => {
     log,
     auditSvc,
   );
-  const savedRepo = new SavedQueryRepo(db);
+  const savedRepo = new SavedQueryRepo(db, cipher, log);
   const savedSvc = new SavedQueryService(savedRepo);
   // Workspace tabs; opening a saved pipeline reads its stored stages.
-  const tabsRepo = new WorkspaceTabRepo(db);
+  const tabsRepo = new WorkspaceTabRepo(db, cipher, log);
   const tabsSvc = new WorkspaceStateService(tabsRepo, savedSvc);
   applyRestoreTabsPref(appState, tabsSvc);
 
-  const recentRepo = new RecentQueryRepo(db);
+  const recentRepo = new RecentQueryRepo(db, cipher, log);
   const recentSvc = new RecentQueryService(recentRepo, log);
-  const recentFieldValueRepo = new RecentFieldValueRepo(db);
+  const recentFieldValueRepo = new RecentFieldValueRepo(db, cipher, log);
   const recentFieldValueSvc = new RecentFieldValueService(recentFieldValueRepo);
   const querySvc = new QueryService(pool, recentSvc, DEFAULT_EXPORT_CAP, log);
   docSvc = new DocumentService(pool, { log });
@@ -773,6 +827,7 @@ app.whenReady().then(() => {
     secretsStatus: () => ({
       encryptionAvailable: vaultCrypto.isEncryptionAvailable(),
       backend: selectedBackend(safeStorage, process.platform),
+      columnKeyProtected: columnKey.protected,
     }),
   });
 
@@ -808,7 +863,7 @@ app.whenReady().then(() => {
       ? dialog.showMessageBox(win, options)
       : dialog.showMessageBox(options));
     return result.response === 1;
-  });
+  }, () => ({ columnKeyProtected: columnKey.protected }));
   registerTabsChannels(router, tabsSvc);
   // Same window-lookup + `saveFilters` pattern as `app.ts`'s `saveFile`,
   // kept as a closure here rather than an import into query.ts so that file

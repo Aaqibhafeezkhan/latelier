@@ -141,6 +141,7 @@ describe('IPC channel registration — full router coverage', () => {
       router,
       stubSvc<Parameters<typeof registerSecretsChannels>[1]>(),
       async () => false,
+      () => ({ columnKeyProtected: true }),
     );
     registerTabsChannels(router, stubSvc<Parameters<typeof registerTabsChannels>[1]>());
     registerQueryChannels(

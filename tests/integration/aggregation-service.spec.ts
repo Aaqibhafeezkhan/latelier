@@ -5,7 +5,7 @@ import { MongoPool } from '../../electron/mongo/MongoPool';
 import { AggregationService } from '../../electron/mongo/AggregationService';
 import { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher } from '../helpers/db';
 import { getSharedMongoUri, makeConnection, makeReader } from '../helpers/mongo';
 
 describe('AggregationService', () => {
@@ -51,7 +51,7 @@ describe('AggregationService', () => {
       )
     `).run(connId, hp.host, hp.port, new Date().toISOString(), new Date().toISOString());
 
-    const recentRepo = new RecentQueryRepo(tmp.db);
+    const recentRepo = new RecentQueryRepo(tmp.db, createTempCipher());
     const recentSvc = new RecentQueryService(recentRepo);
     svc = new AggregationService(pool, recentSvc);
 
@@ -392,7 +392,7 @@ describe('AggregationService', () => {
           )
           .run(id, `AggGuardTest-${id}`, host, port, new Date().toISOString(), new Date().toISOString());
       }
-      const recentRepo = new RecentQueryRepo(guardTmp.db);
+      const recentRepo = new RecentQueryRepo(guardTmp.db, createTempCipher());
       const recentSvc = new RecentQueryService(recentRepo);
       guardSvc = new AggregationService(guardPool, recentSvc);
     });
@@ -697,7 +697,7 @@ describe('AggregationService', () => {
       });
       const tightSvc = new AggregationService(
         tightPool,
-        new RecentQueryService(new RecentQueryRepo(tmp.db)),
+        new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())),
       );
       try {
         const run = tightSvc
@@ -771,7 +771,7 @@ describe('AggregationService', () => {
       const warn = vi.fn();
       const logged = new AggregationService(
         pool,
-        new RecentQueryService(new RecentQueryRepo(tmp.db)),
+        new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())),
         { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
       );
       const run = logged.run({
@@ -928,7 +928,7 @@ describe('AggregationService — cancel during connection setup', () => {
       },
     } as unknown as MongoPool;
 
-    const recent = new RecentQueryService(new RecentQueryRepo(tmp.db));
+    const recent = new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher()));
     const svc = new AggregationService(fakePool, recent);
     const token = 'cancel-during-connect';
 
@@ -988,7 +988,7 @@ describe('AggregationService — a write stage rejected by a validator', () => {
       vault: { get: () => null } as unknown as import('../../electron/secrets/SecretsVault').SecretsVault,
     });
     tmp = createTempDb();
-    svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)));
+    svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())));
 
     const client = await pool.write(connId).client();
     const db = client.db(dbName);
@@ -1075,7 +1075,7 @@ describe('AggregationService.runningCount', () => {
       isReadOnly: () => false,
       readDb: async () => ({ collection: () => coll }),
     } as unknown as MongoPool;
-    const svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)));
+    const svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())));
     return { svc, finish, started };
   }
 
@@ -1132,7 +1132,7 @@ describe('AggregationService.runningCount', () => {
         throw new Error('connect failed');
       },
     } as unknown as MongoPool;
-    const svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)));
+    const svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())));
     await expect(svc.run(input('tok'))).rejects.toThrow('connect failed');
     expect((svc as unknown as { active: Map<string, unknown> }).active.size).toBe(0);
     expect(svc.runningCount()).toBe(0);

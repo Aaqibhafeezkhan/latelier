@@ -8,7 +8,7 @@ import { QueryService } from '../../electron/mongo/QueryService';
 import { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo';
 import { ValidationError } from '../../electron/errors';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher } from '../helpers/db';
 import { getSharedMongoUri, makeConnection, makeReader } from '../helpers/mongo';
 import { repairToCanonicalEjson } from '../../src/utils/shellSyntax';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -52,7 +52,7 @@ describe('QueryService', () => {
       )
     `).run(connId, hp.host, hp.port, new Date().toISOString(), new Date().toISOString());
 
-    const recentRepo = new RecentQueryRepo(tmp.db);
+    const recentRepo = new RecentQueryRepo(tmp.db, createTempCipher());
     const recentSvc = new RecentQueryService(recentRepo);
     svc = new QueryService(pool, recentSvc);
 
@@ -523,7 +523,7 @@ describe('QueryService', () => {
   // of an `INTERNAL` byte count or a raw driver "MaxTimeMS" message.
   describe('caps explain themselves', () => {
     const limited = (limits: { maxFindBytes?: number; queryTimeoutMs?: number }) =>
-      new QueryService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)), undefined, undefined, limits);
+      new QueryService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())), undefined, undefined, limits);
 
     it('a result over the byte cap is refused as VALIDATION with what to change', async () => {
       const client = await pool.write(connId).client();

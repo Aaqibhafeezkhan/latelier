@@ -8,7 +8,7 @@ import { SavedQueryRepo } from '../../electron/db/repositories/SavedQueryRepo';
 import { SavedQueryService } from '../../electron/services/SavedQueryService';
 import { WorkspaceTabRepo } from '../../electron/db/repositories/WorkspaceTabRepo';
 import { WorkspaceStateService } from '../../electron/services/WorkspaceStateService';
-import { createTempDb, insertConnectionRow, type TempDb } from '../helpers/db';
+import { createTempDb, insertConnectionRow, type TempDb, createTempCipher } from '../helpers/db';
 import { createIpcShim } from '../helpers/ipcShim';
 import { testSenderCheck } from '../helpers/ipcSender';
 
@@ -57,9 +57,9 @@ describe('tabs:openAggregation with a savedId, via router', () => {
     insertConnectionRow(tmp.db, CONN);
     shim = createIpcShim();
     const router = createRouter(shim.ipcMain, testSenderCheck);
-    const savedSvc = new SavedQueryService(new SavedQueryRepo(tmp.db));
+    const savedSvc = new SavedQueryService(new SavedQueryRepo(tmp.db, createTempCipher()));
     registerSavedChannels(router, savedSvc);
-    registerTabsChannels(router, new WorkspaceStateService(new WorkspaceTabRepo(tmp.db), savedSvc));
+    registerTabsChannels(router, new WorkspaceStateService(new WorkspaceTabRepo(tmp.db, createTempCipher()), savedSvc));
   });
 
   afterEach(() => {

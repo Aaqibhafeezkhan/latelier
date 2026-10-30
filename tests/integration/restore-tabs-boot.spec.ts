@@ -8,7 +8,7 @@ import {
   WorkspaceStateService,
   applyRestoreTabsPref,
 } from '../../electron/services/WorkspaceStateService';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher } from '../helpers/db';
 
 const RESTORE_KEY = 'ui.workspace.restoreTabs';
 
@@ -27,8 +27,8 @@ describe('applyRestoreTabsPref (boot)', () => {
       )
       .run(now, now);
     tabs = new WorkspaceStateService(
-      new WorkspaceTabRepo(tmp.db),
-      new SavedQueryService(new SavedQueryRepo(tmp.db)),
+      new WorkspaceTabRepo(tmp.db, createTempCipher()),
+      new SavedQueryService(new SavedQueryRepo(tmp.db, createTempCipher())),
     );
     appState = new AppStateService(new AppStateRepo(tmp.db));
     const a = tabs.openCollection({ connectionId: 'conn', dbName: 'd', collection: 'a' });

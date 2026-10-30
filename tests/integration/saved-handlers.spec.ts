@@ -10,7 +10,7 @@ import { createRouter } from '../../electron/ipc/router';
 import { registerSavedChannels } from '../../electron/ipc/handlers/saved';
 import { SavedQueryRepo } from '../../electron/db/repositories/SavedQueryRepo';
 import { SavedQueryService } from '../../electron/services/SavedQueryService';
-import { createTempDb, insertConnectionRow, type TempDb } from '../helpers/db';
+import { createTempDb, insertConnectionRow, type TempDb, createTempCipher } from '../helpers/db';
 import { createIpcShim } from '../helpers/ipcShim';
 import { testSenderCheck } from '../helpers/ipcSender';
 import { expectSchemaReject } from '../helpers/ipcAssert';
@@ -84,7 +84,7 @@ describe('saved:* channels via router', () => {
     shim = createIpcShim();
     registerSavedChannels(
       createRouter(shim.ipcMain, testSenderCheck),
-      new SavedQueryService(new SavedQueryRepo(tmp.db)),
+      new SavedQueryService(new SavedQueryRepo(tmp.db, createTempCipher())),
     );
   });
 
@@ -590,7 +590,7 @@ describe('saved:* channels via router', () => {
     ] as const;
 
     beforeEach(() => {
-      const repo = new SavedQueryRepo(tmp.db);
+      const repo = new SavedQueryRepo(tmp.db, createTempCipher());
       for (const [id, kind, name, payload] of rows) {
         repo.insert({
           id,

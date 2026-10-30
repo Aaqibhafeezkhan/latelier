@@ -12,7 +12,7 @@ import { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo';
 import { SecretsVault } from '../../electron/secrets/SecretsVault';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher } from '../helpers/db';
 import { makeConnection, makeReader, uriToHostPort } from '../helpers/mongo';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
 
@@ -78,7 +78,7 @@ describe('a driver error reaches the renderer classified, not as INTERNAL', () =
 
     const svc = new QueryService(
       pool,
-      new RecentQueryService(new RecentQueryRepo(tmp.db)),
+      new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())),
     );
     handlers = new Map();
     const router = createRouter(

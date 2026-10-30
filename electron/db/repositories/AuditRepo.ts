@@ -1,5 +1,8 @@
 import type { Database, Statement } from 'better-sqlite3';
 import type { AuditOp, AuditOutcome } from '@shared/types';
+import type { ColumnCipher } from '../columnCipher.ts';
+import { openListedCell } from './listedCell.ts';
+import type { Logger } from '../../log.ts';
 
 /**
  * Every column except `undo_json`, which is always NULL: Pre-images live in
@@ -46,13 +49,17 @@ const LISTED_COLUMNS = `id, connection_id, db_name, collection, op, summary_json
 
 export class AuditRepo {
   private db: Database;
+  private cipher: ColumnCipher;
+  private log?: Pick<Logger, 'warn'>;
   private insertStmt: Statement;
   private deleteOlderThanStmt: Statement<[number]>;
   private findForUndoStmt: Statement<[string]>;
   private markUndoneStmt: Statement<[string, string]>;
 
-  constructor(db: Database) {
+  constructor(db: Database, cipher: ColumnCipher, log?: Pick<Logger, 'warn'>) {
     this.db = db;
+    this.cipher = cipher;
+    this.log = log;
     this.insertStmt = db.prepare(`
       INSERT INTO audit_log
         (id, connection_id, db_name, collection, op, summary_json, outcome,
@@ -75,7 +82,10 @@ export class AuditRepo {
   }
 
   insert(row: AuditRow): void {
-    this.insertStmt.run(row);
+    this.insertStmt.run({
+      ...row,
+      summary_json: this.cipher.seal('audit_log', 'summary_json', row.id, row.summary_json),
+    });
   }
 
   findForUndo(id: string): AuditUndoRow | undefined {
@@ -105,12 +115,17 @@ export class AuditRepo {
       conditions.push('ran_at < ?');
       params.push(filter.before);
     }
-    return this.db
+    const rows = this.db
       .prepare(
         `SELECT ${LISTED_COLUMNS} FROM audit_log WHERE ${conditions.join(' AND ')}
          ORDER BY ran_at DESC, rowid DESC LIMIT ?`,
       )
-      .all(...params, filter.limit) as AuditRow[];
+      .all(...params, filter.limit) as Array<Omit<AuditRow, 'summary_json'> & { summary_json: string | Buffer }>;
+    // Skipped: the service parses every summary and has no fallback for an empty one.
+    return rows.flatMap((r) => {
+      const summary = openListedCell(this.cipher, this.log, 'audit_log', 'summary_json', r.id, r.summary_json);
+      return summary === null ? [] : [{ ...r, summary_json: summary }];
+    });
   }
 
   /** Delete audit rows older than `days` days. Returns the rows affected. */

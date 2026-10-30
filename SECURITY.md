@@ -118,18 +118,57 @@ the two ever disagree.
 
 Everything lives in the Electron `userData` directory, named for the app
 (`~/Library/Application Support/L'Atelier` on macOS). L'Atelier does not encrypt
-this directory; rely on OS disk encryption (FileVault, BitLocker, LUKS).
+the directory as a whole; rely on OS disk encryption (FileVault, BitLocker,
+LUKS) for that. It does encrypt the database columns that hold values taken from
+your MongoDB data, described below.
 
 | What | Where | Retention |
 | --- | --- | --- |
 | Connection settings (host, port, auth mechanism and username, TLS options and file paths, read-only flag). Secrets are in their own table, see above. | `connections` in `latelier.db` ([001-init.sql](electron/db/migrations/001-init.sql)) | Until the connection is deleted; its secrets, saved and recent queries, audit rows and tabs go with it (`ON DELETE CASCADE`) |
 | Saved queries and scripts | `saved_queries` | Until the user deletes them; no expiry |
 | Recent queries (filter or pipeline text, duration, result count; no result documents) | `recent_queries` ([RecentQueryRepo.ts](electron/db/repositories/RecentQueryRepo.ts)) | Newest 200 per connection ([RecentQueryService.ts](electron/services/RecentQueryService.ts)) and 30 days ([MaintenanceService.ts](electron/services/MaintenanceService.ts)) |
-| Recent filter values (values typed into the query builder for suggestions; never recorded for secret-named fields) | `recent_field_values` ([013-recent-field-values.sql](electron/db/migrations/013-recent-field-values.sql), [RecentFieldValueService.ts](electron/services/RecentFieldValueService.ts)) | Newest 50 per field and 30 days; "clear all" is available |
+| Recent filter values (values typed into the query builder for suggestions; never recorded for secret-named fields) | `recent_field_values` ([016-column-cipher.sql](electron/db/migrations/016-column-cipher.sql), [RecentFieldValueService.ts](electron/services/RecentFieldValueService.ts)) | Newest 50 per field and 30 days; "clear all" is available |
 | Workspace tab layout (builder, query and script text, pagination, column widths) | `workspace_tabs.state_json` | Until the tab is closed; result documents are stripped before every write ([tabStateResults.ts](electron/services/tabStateResults.ts)) and were scrubbed from existing rows by [014-strip-persisted-results.sql](electron/db/migrations/014-strip-persisted-results.sql) |
 | Operation audit log (which write ran, on what, when, how it ended; update and delete rows include the filter text, import rows the file name) | `audit_log` ([012-audit-log.sql](electron/db/migrations/012-audit-log.sql), [AuditService.ts](electron/services/AuditService.ts)) | 90 days ([MaintenanceService.ts](electron/services/MaintenanceService.ts)) |
 | UI preferences, window bounds, reference rules | `app_state`, `reference_rules` | Until changed or the user resets them |
+| The key that encrypts the columns described below, wrapped by the OS keychain | `column_keys` ([016-column-cipher.sql](electron/db/migrations/016-column-cipher.sql)) | Until "Reset protected data" |
 
+- **Values from your MongoDB data are encrypted at rest.** Five columns — saved
+  queries (`saved_queries.payload_json`), recent queries
+  (`recent_queries.payload_json`), recent filter values
+  (`recent_field_values.value`), audit rows (`audit_log.summary_json`) and tab
+  state (`workspace_tabs.state_json`) — are stored as AES-256-GCM cells, each
+  bound to its table, column and row so a cell moved elsewhere fails to decrypt
+  ([electron/db/columnCipher.ts](electron/db/columnCipher.ts)). Recent filter
+  values are padded so a short literal's length does not show, and are
+  deduplicated on a keyed hash rather than the value. The key is in the
+  `column_keys` table, wrapped by the OS keychain through the same `safeStorage`
+  gate as connection passwords
+  ([electron/db/columnKeyStore.ts](electron/db/columnKeyStore.ts)). Plaintext
+  left by an older version is sealed on the first start after the upgrade,
+  followed by a `VACUUM`; `temp_store = MEMORY` keeps that VACUUM's working
+  copy off disk
+  ([specs/X21-encryption-at-rest.md](specs/X21-encryption-at-rest.md)).
+  If the keychain can no longer unwrap the key, startup stops with a dialog
+  offering Quit or "Reset protected data" (deletes those five tables' rows and
+  the key, keeps connections); a new key is never generated silently.
+
+  What this does **not** cover:
+  - **Code running as you.** Any process in your session can ask the keychain
+    for the key, exactly as it can for the connection passwords.
+  - **Backups taken before the upgrade** keep their plaintext. The upgrade
+    erases it from the live file only; copies in Time Machine, File History or
+    a copied `userData` folder are out of reach.
+  - **Schema names.** Database, collection and field names, reference rules
+    and schema paths inside tab state stay plaintext: they are what lookups
+    filter on.
+  - **Linux without a usable keychain.** With no keyring (or only the
+    `basic_text` backend), the key is stored unwrapped next to the data, so the
+    data is obfuscated, not protected. Settings says so; the key is wrapped on
+    the first start where a keychain is available.
+  - The WAL truncate after the upgrade sets the file length to zero without
+    overwriting the freed blocks; a filesystem snapshot taken in that window
+    can keep them.
 - **Query results are not persisted.** They live in renderer memory only
   (see the tab-layout row above); exports and imports write or read only the
   files the user picks.

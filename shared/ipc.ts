@@ -98,6 +98,9 @@ export type IpcErrorCode =
   | 'DB_ERROR'
   | 'SECRETS_UNAVAILABLE'
   | 'SECRET_DECRYPT_FAILED'
+  // Encrypted local columns: a cell that fails to open, a column key the keychain will not unwrap.
+  | 'COLUMN_DECRYPT_FAILED'
+  | 'COLUMN_KEY_UNREADABLE'
   | 'BAD_PASSPHRASE'
   | 'READ_ONLY'
   | 'AUDIT_NOT_REVERSIBLE'
@@ -368,6 +371,12 @@ export interface IpcApi {
      * value now in force, so a cancelled enable comes back `{ enabled: false }`.
      */
     setPlaintextFallback: (enabled: boolean) => Promise<{ enabled: boolean }>;
+    /**
+     * Whether the key that encrypts saved queries, history, the audit log and
+     * tab state is wrapped by the OS keychain. False means it is stored
+     * unprotected beside the data, so that data is obfuscated, not protected.
+     */
+    status: () => Promise<{ columnKeyProtected: boolean }>;
   };
 
   query: {
@@ -626,6 +635,7 @@ export const IPC_CHANNELS = {
 
   // Secrets settings (main-confirmed) -----------------------------
   secretsSetPlaintextFallback: 'secrets:set-plaintext-fallback',
+  secretsStatus: 'secrets:status',
 
   // Query runner -----------------------------------------
   queryFind:             'query:find',

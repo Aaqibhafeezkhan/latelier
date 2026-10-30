@@ -19,7 +19,7 @@ import type { Logger } from '../../electron/log';
 import { IPC_CHANNELS, type Envelope } from '../../shared/ipc';
 import type { AuditEntry, ImportReport, UndoResult } from '../../shared/types';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher } from '../helpers/db';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
 import { getSharedMongoUri, uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
 
@@ -48,15 +48,18 @@ describe('data:import via the router', () => {
   const invokeUndo = async (entryId: string): Promise<Envelope<UndoResult>> =>
     (await handlers.get(IPC_CHANNELS.auditUndo)!(invokeEvent, { entryId })) as Envelope<UndoResult>;
 
+  // The stored summary is sealed; the plaintext check runs on what it decrypts to.
+  const summaryText = (r: Record<string, unknown>): string =>
+    createTempCipher().open('audit_log', 'summary_json', r.id as string, r.summary_json as Buffer);
   const rows = (): AuditEntry[] =>
     (tmp.db.prepare('SELECT * FROM audit_log').all() as Record<string, unknown>[]).map((r) => ({
       op: r.op,
       outcome: r.outcome,
       errorCode: r.error_code,
       collection: r.collection,
-      summary: JSON.parse(r.summary_json as string),
+      summary: JSON.parse(summaryText(r)),
       reversible: r.reversible === 1,
-      raw: r.summary_json,
+      raw: summaryText(r),
     }) as unknown as AuditEntry);
 
   beforeAll(async () => {
@@ -83,7 +86,7 @@ describe('data:import via the router', () => {
       vault: new SecretsVault(tmp.db, createSafeStorageMock()),
     });
     const log: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    auditRepo = new AuditRepo(tmp.db);
+    auditRepo = new AuditRepo(tmp.db, createTempCipher());
     undoStore = new UndoStore();
     const auditSvc = new AuditService(auditRepo, pool, undoStore, log);
     handlers.clear();
@@ -230,7 +233,7 @@ describe('data:import via the router', () => {
     // inside the progress event, before `data:import`'s own promise settles.
     const localHandlers = new Map<string, Handler>();
     const log: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const auditSvc = new AuditService(new AuditRepo(tmp.db), pool, undoStore, log);
+    const auditSvc = new AuditService(new AuditRepo(tmp.db, createTempCipher()), pool, undoStore, log);
     const router = createRouter(
       { handle: (channel: string, fn: Handler) => void localHandlers.set(channel, fn) },
       testSenderCheck,
@@ -253,7 +256,7 @@ describe('data:import via the router', () => {
     expect(env).toMatchObject({ ok: true, data: { inserted: 5, cancelled: true } });
     const [row] = tmp.db.prepare('SELECT * FROM audit_log').all() as Record<string, unknown>[];
     expect(row).toMatchObject({ outcome: 'partial', reversible: 1 });
-    expect(JSON.parse(row!.summary_json as string)).toMatchObject({ cancelled: true, insertedCount: 5 });
+    expect(JSON.parse(summaryText(row!))).toMatchObject({ cancelled: true, insertedCount: 5 });
   });
 
   describe('undo', () => {
@@ -288,7 +291,7 @@ describe('data:import via the router', () => {
     it('is not offered above the capture ceiling — reversible is false and there is no auditId to undo', async () => {
       const localHandlers = new Map<string, Handler>();
       const log: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-      const auditSvc = new AuditService(new AuditRepo(tmp.db), pool, undoStore, log);
+      const auditSvc = new AuditService(new AuditRepo(tmp.db, createTempCipher()), pool, undoStore, log);
       const router = createRouter(
         { handle: (channel: string, fn: Handler) => void localHandlers.set(channel, fn) },
         testSenderCheck,
@@ -327,7 +330,7 @@ describe('data:import via the router', () => {
     it('stays undoable for the batches that fully landed when a later batch fails outright', async () => {
       const localHandlers = new Map<string, Handler>();
       const log: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-      const auditSvc = new AuditService(new AuditRepo(tmp.db), pool, undoStore, log);
+      const auditSvc = new AuditService(new AuditRepo(tmp.db, createTempCipher()), pool, undoStore, log);
       const router = createRouter(
         { handle: (channel: string, fn: Handler) => void localHandlers.set(channel, fn) },
         testSenderCheck,
@@ -369,7 +372,7 @@ describe('data:import via the router', () => {
     it('is not undoable when an import fails before any batch landed', async () => {
       const localHandlers = new Map<string, Handler>();
       const log: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-      const auditSvc = new AuditService(new AuditRepo(tmp.db), pool, undoStore, log);
+      const auditSvc = new AuditService(new AuditRepo(tmp.db, createTempCipher()), pool, undoStore, log);
       const router = createRouter(
         { handle: (channel: string, fn: Handler) => void localHandlers.set(channel, fn) },
         testSenderCheck,

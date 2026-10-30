@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SavedQueryRepo } from '../../electron/db/repositories/SavedQueryRepo';
 import { SavedQueryService } from '../../electron/services/SavedQueryService';
 import { ConflictError, NotFoundError } from '../../electron/errors';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher, cellType } from '../helpers/db';
 import type { SavedFindPayload } from '@shared/types';
 
 const CONNECTION_ID = 'conn-1';
@@ -28,7 +28,7 @@ describe('SavedQueryService', () => {
 
   beforeEach(() => {
     tmp = createTempDb();
-    repo = new SavedQueryRepo(tmp.db);
+    repo = new SavedQueryRepo(tmp.db, createTempCipher());
     svc = new SavedQueryService(repo);
 
     // Insert a real connection row so FK constraint passes
@@ -72,6 +72,7 @@ describe('SavedQueryService', () => {
     const fetched = svc.get(created.id);
     expect(fetched.id).toBe(created.id);
     expect(fetched.name).toBe('My Query');
+    expect(cellType(tmp.db, 'saved_queries', 'payload_json', created.id)).toBe('blob');
   });
 
   it('list returns created queries', () => {
@@ -117,6 +118,7 @@ describe('SavedQueryService', () => {
     expect(updated.name).toBe('Renamed');
     expect((updated.payload as SavedFindPayload).queryRaw).toBe('{"active":true}');
     expect(updated.updatedAt >= created.updatedAt).toBe(true);
+    expect(cellType(tmp.db, 'saved_queries', 'payload_json', created.id)).toBe('blob');
   });
 
   it('update keeps the stored description when the new payload names none', () => {

@@ -29,7 +29,7 @@ import type { Logger } from '../../electron/log';
 import { IPC_CHANNELS, type Envelope } from '../../shared/ipc';
 import type { AuditEntry, UndoResult } from '../../shared/types';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher } from '../helpers/db';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
 import { getSharedMongoUri, uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
 
@@ -107,7 +107,7 @@ describe('audit log via the router', () => {
     logSpy = silentLogger();
     docSvc = new DocumentService(pool, { log: logSpy.log });
     scriptSvc = new ScriptService({ pool, spawner: createTestSpawner() });
-    auditRepo = new AuditRepo(tmp.db);
+    auditRepo = new AuditRepo(tmp.db, createTempCipher());
     undoStore = new UndoStore();
     shim = createShim();
     const auditSvc = new AuditService(auditRepo, pool, undoStore, logSpy.log);
@@ -117,7 +117,7 @@ describe('audit log via the router', () => {
     registerAuditChannels(router, auditSvc);
     registerQueryChannels(
       router,
-      new QueryService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db))),
+      new QueryService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher()))),
       async () => null,
     );
     registerIndexChannels(router, new IndexService(pool));
@@ -230,6 +230,7 @@ describe('audit log via the router', () => {
       .prepare('SELECT id, db_name, collection, op, summary_json, outcome, error_code, ran_at FROM audit_log')
       .all();
     expect(JSON.stringify(raw)).not.toContain(BODY_MARKER);
+    expect(tmp.db.prepare('SELECT DISTINCT typeof(summary_json) AS t FROM audit_log').all()).toEqual([{ t: 'blob' }]);
     expect(JSON.stringify(envelopes)).not.toContain(BODY_MARKER);
     expect(JSON.stringify(await list())).not.toContain(BODY_MARKER);
     expect(JSON.stringify(raw)).not.toContain(confirmToken);

@@ -3,7 +3,7 @@ import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo'
 import { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { NotFoundError } from '../../electron/errors';
 import type { Logger } from '../../electron/log';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher, cellType } from '../helpers/db';
 import type { FindInput } from '@shared/types';
 
 const CONNECTION_ID = 'conn-1';
@@ -46,7 +46,7 @@ describe('RecentQueryService', () => {
       )
     `).run(CONNECTION_ID, new Date().toISOString(), new Date().toISOString());
 
-    repo = new RecentQueryRepo(tmp.db);
+    repo = new RecentQueryRepo(tmp.db, createTempCipher());
     svc = new RecentQueryService(repo);
   });
 
@@ -91,6 +91,7 @@ describe('RecentQueryService', () => {
 
     const fetched = svc.get(item.id);
     expect(fetched.id).toBe(item.id);
+    expect(cellType(tmp.db, 'recent_queries', 'payload_json', item.id)).toBe('blob');
   });
 
   // Codex review on the W15 base → `main` PR. `recordFind` wrote a hardcoded

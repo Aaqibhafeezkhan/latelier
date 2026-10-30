@@ -59,6 +59,7 @@
     "src/theme/activityLog.ts",
     "electron/utils/privateFs.ts",
     "electron/secrets/keychainAvailability.ts",
+    "electron/db/columnCipher.ts",
     "electron/ipc/envelope.ts",
     "electron/ipc/auditChannels.ts",
     "electron/mongo/undo.ts",

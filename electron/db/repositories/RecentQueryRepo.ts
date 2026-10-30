@@ -1,6 +1,9 @@
 import type { Database, Statement } from 'better-sqlite3';
 import type { RecentKind } from '@shared/types';
 import { rethrowMissingConnection } from '../sqliteErrors.ts';
+import type { ColumnCipher } from '../columnCipher.ts';
+import { openListedCell } from './listedCell.ts';
+import type { Logger } from '../../log.ts';
 
 export interface RecentQueryRow {
   id: string;
@@ -14,6 +17,9 @@ export interface RecentQueryRow {
   result_count: number | null;
   error_code: string | null;
 }
+
+/** `payload_json` as SQLite returns it: a sealed BLOB, or text from before encryption. */
+type StoredRow = Omit<RecentQueryRow, 'payload_json'> & { payload_json: string | Buffer };
 
 export interface RecentQueryFilter {
   connectionId?: string;
@@ -46,6 +52,8 @@ export interface RecentDeleteFilter {
 
 export class RecentQueryRepo {
   private db: Database;
+  private cipher: ColumnCipher;
+  private log?: Pick<Logger, 'warn'>;
   private insertStmt: Statement;
   private findByIdStmt: Statement<[string]>;
   private countByConnectionStmt: Statement<[string]>;
@@ -56,8 +64,10 @@ export class RecentQueryRepo {
   // the same millisecond share `ran_at`, and without a tiebreaker their
   // order (and which of them eviction keeps) depends on the query plan. The
   // later insert, with the higher rowid, counts as newer.
-  constructor(db: Database) {
+  constructor(db: Database, cipher: ColumnCipher, log?: Pick<Logger, 'warn'>) {
     this.db = db;
+    this.cipher = cipher;
+    this.log = log;
     this.insertStmt = db.prepare(`
       INSERT INTO recent_queries
         (id, connection_id, db_name, collection, kind, payload_json, ran_at, duration_ms, result_count, error_code)
@@ -96,15 +106,18 @@ export class RecentQueryRepo {
 
   insert(row: RecentQueryRow): void {
     try {
-      this.insertStmt.run(row);
+      this.insertStmt.run({
+        ...row,
+        payload_json: this.cipher.seal('recent_queries', 'payload_json', row.id, row.payload_json),
+      });
     } catch (err) {
       rethrowMissingConnection(err, row.connection_id);
     }
   }
 
   findById(id: string): RecentQueryRow | null {
-    const row = this.findByIdStmt.get(id) as RecentQueryRow | undefined;
-    return row ?? null;
+    const row = this.findByIdStmt.get(id) as StoredRow | undefined;
+    return row ? this.opened(row) : null;
   }
 
   list(filter: RecentQueryFilter = {}): RecentQueryRow[] {
@@ -130,9 +143,17 @@ export class RecentQueryRepo {
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limitClause = filter.limit !== undefined ? `LIMIT ${filter.limit}` : '';
-    return this.db.prepare(
+    return (this.db.prepare(
       `SELECT * FROM recent_queries ${where} ORDER BY ran_at DESC, rowid DESC ${limitClause}`
-    ).all(...params) as RecentQueryRow[];
+    ).all(...params) as StoredRow[]).flatMap((r) => {
+      // Skipped: the service parses every payload and has no fallback for an empty one.
+      const payload = openListedCell(this.cipher, this.log, 'recent_queries', 'payload_json', r.id, r.payload_json);
+      return payload === null ? [] : [{ ...r, payload_json: payload }];
+    });
+  }
+
+  private opened(row: StoredRow): RecentQueryRow {
+    return { ...row, payload_json: this.cipher.open('recent_queries', 'payload_json', row.id, row.payload_json) };
   }
 
   deleteByFilter(filter: RecentDeleteFilter): number {

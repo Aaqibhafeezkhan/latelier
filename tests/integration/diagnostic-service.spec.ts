@@ -85,15 +85,17 @@ describe('DiagnosticService', () => {
     const svc = new DiagnosticService({
       userDataDir,
       connRepo: { list: () => [] },
-      secretsStatus: () => ({ encryptionAvailable: false, backend: 'basic_text' }),
+      secretsStatus: () => ({ encryptionAvailable: false, backend: 'basic_text', columnKeyProtected: false }),
     });
     expect((await svc.build()).secrets).toEqual({
       encryptionAvailable: false,
       backend: 'basic_text',
+      columnKeyProtected: false,
     });
     expect(JSON.parse(await svc.serialize()).secrets).toEqual({
       encryptionAvailable: false,
       backend: 'basic_text',
+      columnKeyProtected: false,
     });
   });
 

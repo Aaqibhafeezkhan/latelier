@@ -10,7 +10,7 @@ import { WorkspaceStateService as RealWorkspaceStateService } from '../../electr
 import { WorkspaceTabRepo } from '../../electron/db/repositories/WorkspaceTabRepo';
 import { SavedQueryRepo } from '../../electron/db/repositories/SavedQueryRepo';
 import { SavedQueryService } from '../../electron/services/SavedQueryService';
-import { createTempDb, insertConnectionRow, type TempDb } from '../helpers/db';
+import { createTempDb, insertConnectionRow, type TempDb, createTempCipher } from '../helpers/db';
 import { createIpcShim } from '../helpers/ipcShim';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
 
@@ -238,8 +238,13 @@ describe('tabs:update — the filter draft, via router and SQLite', () => {
 
   const storedState = () =>
     JSON.parse(
-      (tmp.db.prepare('SELECT state_json FROM workspace_tabs WHERE id = ?').get(tabId) as { state_json: string })
-        .state_json,
+      createTempCipher().open(
+        'workspace_tabs',
+        'state_json',
+        tabId,
+        (tmp.db.prepare('SELECT state_json FROM workspace_tabs WHERE id = ?').get(tabId) as { state_json: Buffer })
+          .state_json,
+      ),
     ) as Record<string, unknown>;
   const update = (state: Record<string, unknown>) => shim.invoke(IPC_CHANNELS.tabsUpdate, { id: tabId, patch: { state } });
 
@@ -250,7 +255,7 @@ describe('tabs:update — the filter draft, via router and SQLite', () => {
     const router = createRouter(shim.ipcMain, testSenderCheck);
     registerTabsChannels(
       router,
-      new RealWorkspaceStateService(new WorkspaceTabRepo(tmp.db), new SavedQueryService(new SavedQueryRepo(tmp.db))),
+      new RealWorkspaceStateService(new WorkspaceTabRepo(tmp.db, createTempCipher()), new SavedQueryService(new SavedQueryRepo(tmp.db, createTempCipher()))),
     );
     const env = await shim.invoke<CollectionTab>(IPC_CHANNELS.tabsOpenCollection, {
       connectionId: CONN,
@@ -308,7 +313,7 @@ describe('tabs:openAggregation — initialState, via router and SQLite', () => {
     const router = createRouter(shim.ipcMain, testSenderCheck);
     registerTabsChannels(
       router,
-      new RealWorkspaceStateService(new WorkspaceTabRepo(tmp.db), new SavedQueryService(new SavedQueryRepo(tmp.db))),
+      new RealWorkspaceStateService(new WorkspaceTabRepo(tmp.db, createTempCipher()), new SavedQueryService(new SavedQueryRepo(tmp.db, createTempCipher()))),
     );
   });
 

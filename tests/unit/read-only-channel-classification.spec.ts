@@ -117,6 +117,7 @@ const NON_MONGO_CHANNELS = new Set<string>([
   IPC_CHANNELS.updatesRestart,
   IPC_CHANNELS.updatesStateEvent,
   IPC_CHANNELS.secretsSetPlaintextFallback,
+  IPC_CHANNELS.secretsStatus,
   IPC_CHANNELS.savedList,
   IPC_CHANNELS.savedGet,
   IPC_CHANNELS.savedCreate,

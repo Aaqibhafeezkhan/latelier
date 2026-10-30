@@ -41,7 +41,7 @@ describe('prefs key allowlist and the main-confirmed plaintext switch', () => {
     tmp = null;
   });
 
-  function setup(confirmAnswer = true) {
+  function setup(confirmAnswer = true, columnKeyProtected = false) {
     tmp = createTempDb();
     const appState = new AppStateService(new AppStateRepo(tmp.db));
     const handlers = new Map<string, Handler>();
@@ -51,7 +51,7 @@ describe('prefs key allowlist and the main-confirmed plaintext switch', () => {
     );
     const confirm = vi.fn(async () => confirmAnswer);
     registerPrefsChannels(router, appState, () => null);
-    registerSecretsChannels(router, appState, confirm);
+    registerSecretsChannels(router, appState, confirm, () => ({ columnKeyProtected }));
     const invoke = async <T>(ch: string, payload?: unknown): Promise<Envelope<T>> =>
       (await handlers.get(ch)!(invokeEvent, payload)) as Envelope<T>;
     return { appState, invoke, confirm };
@@ -162,6 +162,12 @@ describe('prefs key allowlist and the main-confirmed plaintext switch', () => {
     expect(
       (await invoke(IPC_CHANNELS.prefsSet, { key, value: Array.from({ length: 500 }, () => UUID) })).ok,
     ).toBe(true);
+  });
+
+  it.each([true, false])('secrets:status reports columnKeyProtected = %s as main computed it at boot', async (columnKeyProtected) => {
+    const { invoke } = setup(true, columnKeyProtected);
+    const env = await invoke<{ columnKeyProtected: boolean }>(IPC_CHANNELS.secretsStatus, undefined);
+    expect(env.ok && env.data).toEqual({ columnKeyProtected });
   });
 
   describe('secrets:set-plaintext-fallback', () => {
