@@ -1251,6 +1251,40 @@ describe('Filter drawer — type-aware value editors', () => {
 
     await waitFor(() => expect(screen.queryByPlaceholderText('value')).toBeNull());
   });
+
+  it('the mongosh preview sits on its own line, and gives way to a value error rather than stacking with it', async () => {
+    mountWith(makeState());
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add condition' }));
+    fireEvent.change(await screen.findByPlaceholderText('field'), { target: { value: 'o' } });
+    await setValueType('objectid');
+    const value = screen.getByPlaceholderText('value');
+    fireEvent.change(value, { target: { value: 'abc' } });
+
+    await waitFor(() => expect(descriptionOf(value)).toBe('ObjectId must be 24 hex characters'));
+    expect(screen.queryByText('ObjectId("abc")')).toBeNull();
+
+    fireEvent.change(value, { target: { value: OID } });
+
+    const preview = await screen.findByText(`ObjectId("${OID}")`);
+    expect(preview.getAttribute('aria-hidden')).toBe('true');
+    // Beside the input it took the width the input needed; under it, it takes none.
+    const inputRow = preview.previousElementSibling;
+    expect(inputRow?.contains(value)).toBe(true);
+    expect(inputRow?.contains(preview)).toBe(false);
+  });
+});
+
+describe('Filter drawer — a canonical EJSON date', () => {
+  it('pasted as {$date:{$numberLong}} is an editable raw row, not a condition on "$date"', async () => {
+    const src = '{"d":{"$date":{"$numberLong":"1700000000000"}}}';
+    mountWith(makeState({ queryRaw: src }));
+
+    const rawBox = (await screen.findByRole('textbox', { name: 'Raw clause 1' })) as HTMLTextAreaElement;
+    expect(rawBox.value).toBe(src);
+    expect(screen.queryByText(/is not encodable/)).toBeNull();
+    expect(screen.queryByPlaceholderText('value')).toBeNull();
+  });
 });
 
 describe('Filter drawer — a value whose type disagrees with the sample', () => {

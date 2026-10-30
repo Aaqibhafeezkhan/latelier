@@ -20,6 +20,7 @@ import {
   compileFindOptions,
   effectivePageLimit,
   findProblem,
+  requireFilterJson,
   FIELD_OPS,
   DRAGGED_FIELD_MIME,
   condFromDragged,
@@ -86,6 +87,13 @@ interface BuilderPaneProps {
   onOpenInTab: (saved: SavedQuerySummary) => void;
   /** Opens this query, as stages, in the collection's Aggregation view. */
   onOpenAsPipeline: (stages: Stage[]) => void;
+  /**
+   * Counts the loads that replaced the query wholesale — Reset, Saved and
+   * Recent run-here. Owned by the parent so QueryBar sees the same count.
+   */
+  loadGen: number;
+  /** Called after each of those loads, alongside its patch. */
+  onLoaded: () => void;
 }
 
 const VAL_TYPES: ValType[] = ['string', 'number', 'long', 'decimal', 'boolean', 'date', 'null', 'regex', 'objectid', 'array'];
@@ -688,7 +696,7 @@ function CondRow({
               window.setTimeout(() => setFieldPopoverOpen(false), 100);
             }}
             size="xs"
-            style={{ flex: 1 }}
+            style={{ flex: 1, minWidth: 96 }}
           />
           <SuggestionPopover
             open={fieldPopoverOpen}
@@ -737,6 +745,10 @@ function CondRow({
             items={opSuggestionItems}
             anchorRef={opInputRef}
             label="Operator suggestions"
+            // Headers only over the unfiltered catalog. Focusing the box puts
+            // the committed op in the token, which filters the list, so the
+            // grouped view shows on a blank row or once the box is cleared.
+            groupOperators={opValue.trim() === ''}
             onSelect={(s) => {
               if (s.kind === 'operator') {
                 // The popover blurs the input on its way out, so the blur
@@ -1761,6 +1773,8 @@ function BuilderPaneInner({
   savedRefreshKey,
   onOpenInTab,
   onOpenAsPipeline,
+  loadGen,
+  onLoaded,
 }: BuilderPaneProps) {
   const T = themeVars;
   const { state, actions, meta } = useCollectionWorkspace();
@@ -1768,13 +1782,12 @@ function BuilderPaneInner({
   const onPatch = actions.patch;
   const onRun = actions.run;
 
-  // Bumped on Reset / Saved-run / Recent-run — the external-edit triggers of
-  // §5.3 that may (coincidentally) write the same `queryRaw` text the drawer
-  // already holds, which the drawer's own text-diff reconcile can't detect.
-  // Folded into FilterDrawer's `key` (with the tab id, §5.6) so these always
-  // force a fresh seed + drop any pending rows, the same as a genuine text
-  // change would.
-  const [loadGen, setLoadGen] = React.useState(0);
+  // `loadGen` is bumped on Reset / Saved-run / Recent-run — the external-edit
+  // triggers of §5.3 that may (coincidentally) write the same `queryRaw` text
+  // the drawer already holds, which the drawer's own text-diff reconcile
+  // can't detect. Folded into FilterDrawer's `key` (with the tab id, §5.6) so
+  // these always force a fresh seed + drop any pending rows, the same as a
+  // genuine text change would.
 
   const activeTab = state.activeBuilderTab;
 
@@ -1827,19 +1840,22 @@ function BuilderPaneInner({
       );
       return;
     }
-    // `findProblem` passing means every clause is already strict JSON, so
-    // there is no Shell Syntax left to repair here. Canonical EJSON is still
+    // `findProblem` passing means every clause is already strict JSON — the
+    // filter once trimmed of the Unicode spaces the gate allows around it,
+    // which `requireFilterJson` does — so there is no Shell Syntax left to
+    // repair here. Canonical EJSON is still
     // not shell syntax (`{"$oid": …}` pasted into mongosh is an unknown
     // operator): `findCode` routes such a document through EJSON.parse.
     //
     // A clause the gates above let through but `findCode` cannot write is a
     // bug in one of the two; from a menu click it would otherwise surface as
     // an uncaught page error with nothing copied and nothing said.
+    const filter = requireFilterJson(state);
     let code: string;
     try {
       code = findCode(lang, {
         collection,
-        filter: state.queryRaw,
+        filter,
         projection: opts.projection,
         sort: opts.sort,
         collation: opts.collation,
@@ -1891,7 +1907,7 @@ function BuilderPaneInner({
       if (!proceed) return;
       const empty: BuilderState = emptyBuilder();
       onPatch({ builder: empty, queryRaw: '{}', filterDraft: undefined });
-      setLoadGen((g) => g + 1);
+      onLoaded();
     });
   };
 
@@ -1975,7 +1991,7 @@ function BuilderPaneInner({
       // The draft belongs to the filter being replaced: drop it with it.
       onPatch({ ...patch, filterDraft: undefined });
       onRun(patch);
-      setLoadGen((g) => g + 1);
+      onLoaded();
     }
   };
 
@@ -1984,7 +2000,7 @@ function BuilderPaneInner({
       const patch = hydrateFindPayload(recent.payload as unknown as LegacySavedFindPayload);
       onPatch({ ...patch, filterDraft: undefined });
       onRun(patch);
-      setLoadGen((g) => g + 1);
+      onLoaded();
     }
   };
 

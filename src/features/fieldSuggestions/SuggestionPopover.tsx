@@ -5,6 +5,7 @@ import { useHints } from '../../hints/HintsContext';
 import { HINT_REGISTRY } from '../../hints/registry';
 import { CLASS_BADGE, findOperatorDocs } from './operators';
 import { OperatorDocPanel } from './OperatorDocPanel';
+import { groupOperatorRows } from './operatorGroups';
 import { OPERATOR_PANEL_SIZE, placeFloatingPanel } from './placement';
 import type { Suggestion } from './types';
 
@@ -46,6 +47,14 @@ interface Props {
   open: boolean;
   /** #130 — the listbox's accessible name; the builder's operator box passes its own. */
   label?: string;
+  /**
+   * Lay operator rows out under a header per operator class (Comparison,
+   * Logical, ...). Opt-in: the caller decides when grouping makes sense, which
+   * is only while the list is the unfiltered catalog. A typed token ranks the
+   * list by relevance, and headers over a relevance order would mislead.
+   * Highlight, Enter and ARIA selection stay flat across the groups.
+   */
+  groupOperators?: boolean;
 }
 
 const KEYBOARD_HINT = HINT_REGISTRY['suggestions.keyboard'];
@@ -58,6 +67,7 @@ export function SuggestionPopover({
   onClose,
   open,
   label = 'Field suggestions',
+  groupOperators = false,
 }: Props) {
   const T = themeVars;
   // A footer line, not a floating hint: `useFeatureHint` would compete for
@@ -79,6 +89,11 @@ export function SuggestionPopover({
   const [panelPos, setPanelPos] = React.useState<{ top: number; left: number } | null>(null);
   const listboxRef = React.useRef<HTMLDivElement>(null);
   const panelId = React.useId();
+  const groupIdBase = React.useId();
+  const groups = React.useMemo(
+    () => (groupOperators ? groupOperatorRows(items) : []),
+    [groupOperators, items],
+  );
 
   // Whether the user has actually walked the list with the arrow keys.
   //
@@ -211,6 +226,115 @@ export function SuggestionPopover({
 
   if (!open || items.length === 0 || !pos) return null;
 
+  const renderRow = (s: Suggestion, i: number) => {
+    const label = labelFor(s);
+    const name = nameFor(s);
+    const badge = badgeFor(s);
+    const active = i === highlight;
+    const describedBy =
+      active && showPanel && s.kind === 'operator' ? panelId : undefined;
+    return (
+      <div
+        key={`${s.kind}:${label}:${i}`}
+        role="option"
+        // Same reasoning as the listbox above: rows are never a tab
+        // stop, only ever reached via aria-activedescendant.
+        tabIndex={-1}
+        // W15 §5 — `aria-selected` follows what Enter will do,
+        // not what is tinted. Enter was made to refuse an auto-highlight
+        // the user never chose, but every row still announced itself as
+        // selected, so a screen-reader user was told an option was
+        // selected while Enter deliberately passed it by. The
+        // background stays on the highlighted row regardless — it means
+        // "Enter would land here if you chose it", which is true — but
+        // the ARIA state is only claimed once `engaged` makes it so.
+        // Hovering sets `highlight` and not `engaged` on purpose:
+        // making hover engage would re-arm Enter and undo that fix, so a
+        // hovered row reads unselected while a click still selects it.
+        aria-selected={active && engaged}
+        aria-describedby={describedBy}
+        onMouseEnter={() => setHighlight(i)}
+        onClick={() => onSelect(s)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          padding: '4px 10px',
+          fontSize: 11,
+          fontFamily: 'monospace',
+          background: active ? T.accentSoft : 'transparent',
+          color: T.text,
+          cursor: 'pointer',
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {label}
+        </span>
+        {name && (
+          <span
+            style={{
+              fontSize: 10,
+              color: T.textMuted,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              marginLeft: 'auto',
+            }}
+          >
+            {name}
+          </span>
+        )}
+        {badge && (
+          <span
+            style={{
+              fontSize: 9,
+              color: T.textGhost,
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              flexShrink: 0,
+            }}
+          >
+            {badge}
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  // Flat list, or the same rows folded under their class headers. The row
+  // index `i` is the position in `items` either way, so the highlight and
+  // Enter never see the grouping.
+  const rows: React.ReactNode[] = [];
+  for (let i = 0; i < items.length; ) {
+    const gi = groups.findIndex((g) => g.start === i);
+    if (gi === -1) {
+      rows.push(renderRow(items[i]!, i));
+      i += 1;
+      continue;
+    }
+    const g = groups[gi]!;
+    const headerId = `${groupIdBase}-group-${gi}`;
+    rows.push(
+      <div key={headerId} role="group" aria-labelledby={headerId}>
+        <div
+          id={headerId}
+          style={{
+            padding: '4px 10px 2px',
+            fontSize: 9,
+            color: T.textGhost,
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+          }}
+        >
+          {g.label}
+        </div>
+        {items.slice(g.start, g.end).map((row, k) => renderRow(row, g.start + k))}
+      </div>,
+    );
+    i = g.end;
+  }
+
   return (
     <>
       <div
@@ -252,81 +376,7 @@ export function SuggestionPopover({
             padding: '2px 0',
           }}
         >
-          {items.map((s, i) => {
-            const label = labelFor(s);
-            const name = nameFor(s);
-            const badge = badgeFor(s);
-            const active = i === highlight;
-            const describedBy =
-              active && showPanel && s.kind === 'operator' ? panelId : undefined;
-            return (
-              <div
-                key={`${s.kind}:${label}:${i}`}
-                role="option"
-                // Same reasoning as the listbox above: rows are never a tab
-                // stop, only ever reached via aria-activedescendant.
-                tabIndex={-1}
-                // W15 §5 — `aria-selected` follows what Enter will do,
-                // not what is tinted. Enter was made to refuse an auto-highlight
-                // the user never chose, but every row still announced itself as
-                // selected, so a screen-reader user was told an option was
-                // selected while Enter deliberately passed it by. The
-                // background stays on the highlighted row regardless — it means
-                // "Enter would land here if you chose it", which is true — but
-                // the ARIA state is only claimed once `engaged` makes it so.
-                // Hovering sets `highlight` and not `engaged` on purpose:
-                // making hover engage would re-arm Enter and undo that fix, so a
-                // hovered row reads unselected while a click still selects it.
-                aria-selected={active && engaged}
-                aria-describedby={describedBy}
-                onMouseEnter={() => setHighlight(i)}
-                onClick={() => onSelect(s)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                  padding: '4px 10px',
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                  background: active ? T.accentSoft : 'transparent',
-                  color: T.text,
-                  cursor: 'pointer',
-                }}
-              >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {label}
-                </span>
-                {name && (
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: T.textMuted,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      marginLeft: 'auto',
-                    }}
-                  >
-                    {name}
-                  </span>
-                )}
-                {badge && (
-                  <span
-                    style={{
-                      fontSize: 9,
-                      color: T.textGhost,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {badge}
-                  </span>
-                )}
-              </div>
-            );
-          })}
+          {rows}
         </div>
         {showKeyboardHint && (
           <div

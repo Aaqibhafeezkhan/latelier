@@ -5,6 +5,7 @@ import { confirmDestructive } from '../../utils/confirm';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
 import { SubmitButton } from '../../components/SubmitButton';
 import { api, getErrorMessage } from '../../api/atelier';
+import { logFailure } from '../../utils/rendererLog';
 import { ejsonParse, ejsonStringify, ejsonStringifyReadable, isPlainDocument } from '../../utils/ejson';
 import { refusalMessage, repairOnCommit, repairToCanonicalEjson } from '../../utils/shellSyntax';
 import { classifyInsertPayload, type InsertPayloadClassification } from '../../utils/insertPayload';
@@ -857,8 +858,8 @@ export function DocumentEditor(props: DocumentEditorProps) {
       .then((v) => {
         if (live && isEditorSize(v)) setSize(v);
       })
-      // An unreadable pref leaves the default size, which is all it can mean.
-      .catch(() => undefined);
+      // An unreadable pref leaves the default size; the log keeps the cause.
+      .catch((err) => logFailure(`reading preference ${SIZE_PREF_KEY}`, err));
     return () => {
       live = false;
     };
@@ -883,7 +884,9 @@ export function DocumentEditor(props: DocumentEditorProps) {
       clearTimeout(timer);
       timer = setTimeout(() => {
         // Losing a remembered size costs nothing but the next open's width.
-        void api.prefs.set(SIZE_PREF_KEY, { width, height }).catch(() => undefined);
+        void api.prefs
+          .set(SIZE_PREF_KEY, { width, height })
+          .catch((err) => logFailure(`saving preference ${SIZE_PREF_KEY}`, err));
       }, 300);
     });
     observer.current.observe(el);

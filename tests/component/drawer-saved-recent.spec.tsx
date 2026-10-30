@@ -2,7 +2,7 @@
 // labels, a query you can identify, copy actions that report, and chrome
 // that survives loading and error.
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '../helpers/render';
+import { render, screen, waitFor, fireEvent, act } from '../helpers/render';
 import { SavedTab } from '../../src/pages/Workspace/views/SavedTab';
 import { RecentTab } from '../../src/pages/Workspace/views/RecentTab';
 import { notifications } from '@mantine/notifications';
@@ -294,6 +294,38 @@ describe('W15 §13.5 — Saved and Recent keep their chrome through loading and 
     await waitFor(() => expect(screen.queryByText('Loading…')).toBeNull());
     expect(screen.getByText(/Saved ·/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Refresh saved queries' })).toBeTruthy();
+  });
+
+  // jsdom never blurs an element that goes `disabled`, and the e2e suite cannot
+  // inject IPC latency, so the focus drop itself is unobservable here; what the
+  // fix guarantees (and what is asserted) is that Refresh never takes the real
+  // `disabled` attribute, which is what makes Chromium blur it.
+  it.each([
+    ['Recent', 'Refresh recent queries', 'recent', renderRecent],
+    ['Saved', 'Refresh saved queries', 'saved', renderSaved],
+  ] as const)('%s keeps Refresh focusable while loading and swallows a second click', async (_tab, name, ns, renderTab) => {
+    let lists = 0;
+    let finish: (rows: never[]) => void = () => {};
+    installAtelierMock({
+      [ns]: {
+        list: (() => {
+          lists += 1;
+          return new Promise<never[]>((resolve) => { finish = resolve; });
+        }) as unknown as never,
+      },
+    });
+    renderTab();
+
+    const refresh = await screen.findByRole('button', { name });
+    await waitFor(() => expect(lists).toBe(1));
+    expect(refresh.hasAttribute('disabled')).toBe(false);
+    expect(refresh.getAttribute('aria-disabled')).toBe('true');
+
+    fireEvent.click(refresh);
+    expect(lists).toBe(1);
+
+    await act(async () => { finish([]); });
+    expect(screen.getByRole('button', { name }).hasAttribute('aria-disabled')).toBe(false);
   });
 
   it('Saved\'s icon-only delete has a real accessible name, not just a title', async () => {

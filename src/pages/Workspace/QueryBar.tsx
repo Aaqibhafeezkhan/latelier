@@ -2,7 +2,6 @@ import React, { memo } from 'react';
 import { Badge, Button, Group, Menu, Tooltip, VisuallyHidden } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
-import { isEjsonDocument } from '../../utils/ejson';
 import { useShellSyntaxField } from './useShellSyntaxField';
 import { useFindExplain } from './useFindExplain';
 import {
@@ -40,6 +39,11 @@ interface QueryBarProps {
    * what it does lives here, beside the drafts it has to flush first.
    */
   runShortcutRef?: React.Ref<() => void>;
+  /**
+   * Counts the loads that replaced the query wholesale (Reset, Saved and
+   * Recent run-here). A change re-derives the advanced row like a tab switch.
+   */
+  loadGen: number;
 }
 
 /**
@@ -89,6 +93,7 @@ function Notice({ id, children }: { id?: string; children: React.ReactNode }) {
 function QueryBarInner({
   suggestionContext,
   runShortcutRef,
+  loadGen,
 }: QueryBarProps) {
   const T = themeVars;
   const { state, actions, meta } = useCollectionWorkspace();
@@ -111,9 +116,9 @@ function QueryBarInner({
   // filter to reconcile against, so the bar only needs to know whether the
   // current text is runnable.
   // A filter must be a *document*, not merely parseable EJSON — `[1,2]` and
-  // `null` parse, and main refuses them. One rule with
-  // `currentFilterJson` and `findProblem`.
-  const isValid = React.useMemo(() => isEjsonDocument(queryRaw), [queryRaw]);
+  // `null` parse, and main refuses them. The same rule `currentFilterJson`
+  // and `findProblem` use.
+  const isValid = React.useMemo(() => filterProblem(queryRaw) === null, [queryRaw]);
 
   // W15 §3.1 — sort used to reach `QueryService.find` unvalidated and
   // come back as a `VALIDATION` pill after a round trip, one row below a
@@ -125,7 +130,7 @@ function QueryBarInner({
     [state.builder.limit],
   );
 
-  // W13 §7 — Run's enabled rule collapses to `isEjsonDocument(queryRaw)`. The
+  // W13 §7 — Run's enabled rule collapses to the filter's document rule. The
   // fail-open hazard can't recur through this button: `queryRaw` is the single
   // source of truth for the filter, and any op the old builder couldn't
   // compile (`$elemMatch`, `$text`, ...) is now a raw node the filter-tree
@@ -197,14 +202,12 @@ function QueryBarInner({
   // they call it, and a hook argument is evaluated during render — naming it
   // earlier is a temporal-dead-zone throw, not a lint nit.
   //
-  // **The repair cannot fire here today, and that is the point.** `canExplain`
-  // is `canRun`, which refuses anything `isEjsonDocument` refuses, and the
-  // transform returns `unchanged` for everything `JSON.parse` already accepts.
-  // So the two sets do not overlap: by the time Explain is reachable, the text
-  // is strict and the repair is a no-op. What this buys is that Explain no
-  // longer *depends* on that being true — the aggregation side repairs on its
-  // Run and Explain paths, and the one read surface that did not was
-  // the odd one out waiting for the gate to change under it.
+  // `canExplain` is `canRun`, which refuses Shell Syntax, so by the time
+  // Explain is reachable the text is strict JSON — save for padding with
+  // Unicode spaces (NBSP, BOM, em space) that the gate trims and `JSON.parse`
+  // refuses. The repair trims exactly that padding, so Explain sends the text
+  // `currentFilterJson` would; strict text with ordinary spacing comes back
+  // `unchanged` and is sent as typed.
   const onExplain = (verbosity: ExplainVerbosity) => {
     const { text, outcome } = filterField.commitNow();
     if (outcome.kind === 'failed') return;
@@ -367,9 +370,13 @@ function QueryBarInner({
   // the first tab looked like: QueryBar has no `key` at its mount site and
   // never remounts. Resync during render (React's "adjust state when a prop
   // changes"), deliberately asymmetric:
-  //   - tab switch (`tabId` changes)  → re-derive in both directions;
-  //   - same tab, hasAdvanced false→true (a Saved/Recent load, a quick-sort
-  //     from the table header) → open;
+  //   - tab switch (`tabId` changes), or a load that replaced the query
+  //     (`loadGen` changes) → re-derive in both directions. A Saved or Recent
+  //     load into a tab whose row already held values and was collapsed
+  //     never changes `hasAdvanced`, so only the load count can open it;
+  //     Reset empties the values, so it collapses the row;
+  //   - same tab, hasAdvanced false→true (a quick-sort from the table
+  //     header) → open;
   //   - same tab, true→false → leave it alone.
   // The last rule is the point: a symmetric resync would yank the row shut
   // under a user who just deleted the last character of `sort`, and a bare
@@ -379,19 +386,21 @@ function QueryBarInner({
   const [advancedSync, setAdvancedSync] = React.useState({
     tabId: meta.tabId,
     hasAdvanced,
+    loadGen,
   });
-  if (advancedSync.tabId !== meta.tabId) {
-    setAdvancedSync({ tabId: meta.tabId, hasAdvanced });
+  if (advancedSync.tabId !== meta.tabId || advancedSync.loadGen !== loadGen) {
+    setAdvancedSync({ tabId: meta.tabId, hasAdvanced, loadGen });
     setAdvancedOpen(hasAdvanced);
     // X14 §5 — the held messages are QueryBar-local and QueryBar never
-    // remounts, so tab A's complaint would
-    // otherwise sit under tab B's query. `onChange`'s argument is unused by
-    // the hook — this leans on it purely for the clear.
+    // remounts, so tab A's complaint would otherwise sit under tab B's
+    // query, and a replaced query's complaint under the one that replaced
+    // it. `onChange`'s argument is unused by the hook — this leans on it
+    // purely for the clear.
     filterField.onChange('');
     sortField.onChange('');
     setRunBlocked(null);
   } else if (advancedSync.hasAdvanced !== hasAdvanced) {
-    setAdvancedSync({ tabId: meta.tabId, hasAdvanced });
+    setAdvancedSync({ tabId: meta.tabId, hasAdvanced, loadGen });
     if (hasAdvanced) setAdvancedOpen(true);
   }
   const toggleAdvanced = () => setAdvancedOpen((o) => !o);

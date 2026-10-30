@@ -5,8 +5,21 @@ import { I } from '../../icons';
 import { api, getErrorMessage } from '../../api/atelier';
 import type { ShellOutputEvent } from '@shared/types';
 import { useLatest } from '../../commands/useLatest';
+import { logToMain } from '../../utils/rendererLog';
 
 const MAX_BUFFER_BYTES = 200_000;
+
+// A session that would not stop is a leaked child process, so a failed stop
+// goes to the log file. Main rejects with a plain `{ code, message }`, which
+// has no stack; an Error thrown on this side does.
+function logStopFailure(what: string, err: unknown): void {
+  logToMain('warn', `${what}: ${getErrorMessage(err, 'stop failed')}`, 'component', err instanceof Error ? err.stack : undefined);
+}
+
+// A stop during cleanup has no pane left to report to; the log is all there is.
+function logCleanupStopFailure(err: unknown): void {
+  logStopFailure('mshell stop failed during cleanup', err);
+}
 
 interface Props {
   connectionId: string;
@@ -154,7 +167,7 @@ export function MongoShellPane({ connectionId, connectionName, dbName, height, o
       try {
         const info = await api.mshell.start({ connectionId, dbName: dbNameRef.current });
         if (cancelled) {
-          void api.mshell.stop({ sessionId: info.sessionId }).catch(() => {});
+          void api.mshell.stop({ sessionId: info.sessionId }).catch(logCleanupStopFailure);
           return;
         }
         sessionIdRef.current = info.sessionId;
@@ -172,7 +185,7 @@ export function MongoShellPane({ connectionId, connectionName, dbName, height, o
       cancelled = true;
       const id = sessionIdRef.current;
       sessionIdRef.current = null;
-      if (id) void api.mshell.stop({ sessionId: id }).catch(() => {});
+      if (id) void api.mshell.stop({ sessionId: id }).catch(logCleanupStopFailure);
     };
   }, [connectionId, restartNonce, dbNameRef]);
 
@@ -247,7 +260,14 @@ export function MongoShellPane({ connectionId, connectionName, dbName, height, o
 
   const handleStop = async () => {
     const id = sessionIdRef.current;
-    if (id) await api.mshell.stop({ sessionId: id }).catch(() => {});
+    if (!id) return;
+    try {
+      await api.mshell.stop({ sessionId: id });
+    } catch (err) {
+      const message = getErrorMessage(err, 'stop failed');
+      append(`\n[could not stop the shell: ${message}]\n`);
+      logStopFailure('mshell stop failed', err);
+    }
   };
 
   // The call being waited on cannot be cancelled inside the session, so

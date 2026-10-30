@@ -1,4 +1,5 @@
 import { api } from '../../api/atelier';
+import { logFailure } from '../../utils/rendererLog';
 
 /**
  * Tells main whether the connection form holds unsaved changes, so quitting
@@ -6,5 +7,7 @@ import { api } from '../../api/atelier';
  * costs that question, so it is logged, not surfaced.
  */
 export function reportConnectionFormDirty(dirty: boolean): void {
-  api.app.setUnsavedWork({ source: 'connectionForm', count: dirty ? 1 : 0 }).catch(console.warn);
+  api.app
+    .setUnsavedWork({ source: 'connectionForm', count: dirty ? 1 : 0 })
+    .catch((err) => logFailure('reporting the connection form as unsaved', err));
 }

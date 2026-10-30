@@ -1,5 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
-import { confirmQuit, createQuitGate, describeQuitDetail, describeRunningWork, runTeardown, type RunningWork } from '../../electron/quitGuard';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import {
+  awaitRendererFlush,
+  confirmQuit,
+  createBeforeQuitHandler,
+  createQuitGate,
+  describeQuitDetail,
+  describeRunningWork,
+  resetUnsavedWork,
+  runTeardown,
+  type RendererFlushOutcome,
+  type RunningWork,
+  type UnsavedWorkStore,
+} from '../../electron/quitGuard';
 
 describe('describeRunningWork', () => {
   it('is null when nothing is running', () => {
@@ -270,5 +282,126 @@ describe('runTeardown', () => {
     const onError = vi.fn();
     await runTeardown([['a', () => {}]], onError);
     expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe('resetUnsavedWork', () => {
+  it('forgets the form report and takes the pipeline count from the saved tabs', () => {
+    const store: UnsavedWorkStore = { connectionForm: 1, pipelines: 5 };
+    resetUnsavedWork(store, () => 2);
+    expect(store).toEqual({ connectionForm: 0, pipelines: 2 });
+  });
+
+  it('zeroes the pipelines when no saved tab is dirty', () => {
+    const store: UnsavedWorkStore = { connectionForm: 0, pipelines: 3 };
+    resetUnsavedWork(store, () => 0);
+    expect(store).toEqual({ connectionForm: 0, pipelines: 0 });
+  });
+});
+
+describe('awaitRendererFlush', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The outcome so far, or 'pending', read after letting microtasks run. */
+  async function settled(promise: Promise<RendererFlushOutcome>): Promise<RendererFlushOutcome | 'pending'> {
+    return Promise.race([promise, Promise.resolve().then(() => 'pending' as const)]);
+  }
+
+  it('sends the request once, and answers no-window at once, with no timer, when there is no window', async () => {
+    vi.useFakeTimers();
+    const send = vi.fn(() => false);
+    const { promise, ack } = awaitRendererFlush({ send, timeoutMs: 1500 });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    ack();
+    expect(await promise).toBe('no-window');
+  });
+
+  it('answers flushed on the ack and clears its timer', async () => {
+    vi.useFakeTimers();
+    const send = vi.fn(() => true);
+    const { promise, ack } = awaitRendererFlush({ send, timeoutMs: 1500 });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1);
+    expect(await settled(promise)).toBe('pending');
+    ack();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(await promise).toBe('flushed');
+    ack();
+    expect(await promise).toBe('flushed');
+  });
+
+  it('waits the whole timeout, then answers timeout, and a late ack changes nothing', async () => {
+    vi.useFakeTimers();
+    const { promise, ack } = awaitRendererFlush({ send: () => true, timeoutMs: 1500 });
+    await vi.advanceTimersByTimeAsync(1499);
+    expect(await settled(promise)).toBe('pending');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await settled(promise)).toBe('timeout');
+    ack();
+    expect(await promise).toBe('timeout');
+  });
+});
+
+describe('createBeforeQuitHandler', () => {
+  function setup(check: 'allow' | 'hold', answer: Promise<boolean> = Promise.resolve(true)) {
+    const gate = { check: vi.fn(() => check), ask: vi.fn(() => answer) };
+    const deps = { gate, quit: vi.fn(), shutdown: vi.fn(), onAskError: vi.fn() };
+    const event = () => ({ preventDefault: vi.fn() });
+    return { deps, handler: createBeforeQuitHandler(deps), event };
+  }
+
+  it('holds the quit and starts the teardown once when the gate allows', () => {
+    const { deps, handler, event } = setup('allow');
+    expect(handler.isShuttingDown()).toBe(false);
+    const e = event();
+    handler.handle(e);
+    expect(e.preventDefault).toHaveBeenCalledTimes(1);
+    expect(deps.shutdown).toHaveBeenCalledTimes(1);
+    expect(handler.isShuttingDown()).toBe(true);
+    expect(deps.gate.ask).not.toHaveBeenCalled();
+  });
+
+  it('holds a second quit during the teardown without starting it again or asking', () => {
+    const { deps, handler, event } = setup('allow');
+    handler.handle(event());
+    deps.gate.check.mockReturnValue('hold');
+    const second = event();
+    handler.handle(second);
+    expect(second.preventDefault).toHaveBeenCalledTimes(1);
+    expect(deps.shutdown).toHaveBeenCalledTimes(1);
+    expect(deps.gate.ask).not.toHaveBeenCalled();
+  });
+
+  it('over held work, asks instead of shutting down, and quits again on a yes', async () => {
+    const { deps, handler, event } = setup('hold', Promise.resolve(true));
+    const e = event();
+    handler.handle(e);
+    expect(e.preventDefault).toHaveBeenCalledTimes(1);
+    expect(deps.shutdown).not.toHaveBeenCalled();
+    expect(handler.isShuttingDown()).toBe(false);
+    expect(deps.gate.ask).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(deps.quit).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not quit on a no, and a later allowed quit still shuts down', async () => {
+    const { deps, handler, event } = setup('hold', Promise.resolve(false));
+    handler.handle(event());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(deps.quit).not.toHaveBeenCalled();
+    deps.gate.check.mockReturnValue('allow');
+    handler.handle(event());
+    expect(deps.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands a failed question to onAskError', async () => {
+    const boom = new Error('no dialog');
+    const { deps, handler, event } = setup('hold', Promise.reject(boom));
+    handler.handle(event());
+    await vi.waitFor(() => expect(deps.onAskError).toHaveBeenCalledWith(boom));
+    expect(deps.quit).not.toHaveBeenCalled();
   });
 });

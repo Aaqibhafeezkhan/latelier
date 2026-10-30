@@ -282,15 +282,15 @@ export function IndexesTab({
           + New index
         </Button>
 
-        <Button
+        <SubmitButton
           size="compact-xs"
           variant="subtle"
           onClick={() => void loadIndexes(target)}
           leftSection={I.sync}
-          disabled={loadingIndexes}
+          submitting={loadingIndexes}
         >
           Refresh
-        </Button>
+        </SubmitButton>
       </div>
 
       <div

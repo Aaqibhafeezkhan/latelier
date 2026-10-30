@@ -10,6 +10,7 @@ import type {
   ReferenceRule,
   WorkspaceTab,
 } from '@shared/types';
+import { logToMain } from '../../utils/rendererLog';
 
 export interface ReferenceDrawerState {
   refStack: ReferenceFrame[];
@@ -77,7 +78,10 @@ export function useReferenceDrawer(
           label: p.label,
         });
       } catch {
-        // skip — frame is unrecoverable, but the rest of the stack is fine.
+        // Skip: the frame is unrecoverable, but the rest of the stack is fine.
+        // The parse error is left out of the line, because it can quote the
+        // stored value; the rule id is enough to find the frame.
+        logToMain('warn', `restoring a reference frame failed: stored value is not valid EJSON (rule ${p.rule.id})`, 'component');
       }
     }
     setRefStack(restored);

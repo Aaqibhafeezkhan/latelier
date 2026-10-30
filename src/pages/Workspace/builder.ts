@@ -366,17 +366,26 @@ export function findProblem(state: CollectionTabState): string | null {
   );
 }
 
+/**
+ * Why the filter text cannot run, or null when it can. The one runnability
+ * rule for the filter: `currentFilterJson` is defined from it, so the Run
+ * gate and the text the runner sends cannot disagree.
+ */
 export function filterProblem(queryRaw: string): string | null {
+  // Judged on the text `currentFilterJson` sends. `String.prototype.trim`
+  // strips Unicode spaces (NBSP, BOM, em space) that `JSON.parse` refuses, so
+  // checking the untrimmed text refused a filter the runner would have run.
+  const raw = queryRaw.trim();
   // A blank box is missing a filter, not holding one that fails to parse. It
   // stays a problem: this is also the Run gate, and a null here would enable
   // Run, Explain and delete-all on an empty filter.
-  if (queryRaw.trim() === '') {
+  if (raw === '') {
     return 'Enter a filter, like { "status": "active" }, or {} to match every document.';
   }
-  if (!isValidEjson(queryRaw)) {
+  if (!isValidEjson(raw)) {
     return 'Can\'t parse this filter. Expected EJSON like { "status": "active" }.';
   }
-  if (!isEjsonDocument(queryRaw)) {
+  if (!isEjsonDocument(raw)) {
     return 'A filter must be a document, like { "status": "active" }.';
   }
   return null;
@@ -401,14 +410,21 @@ export function isDefaultQueryState(state: CollectionTabState): boolean {
  * this to decide whether it has a filter to act on at all.
  */
 export function currentFilterJson(state: CollectionTabState): string | null {
-  const raw = state.queryRaw.trim();
-  // Stryker disable next-line ConditionalExpression,StringLiteral:
-  // isEjsonDocument('') starts with `if (!t) return false;` for a blank
-  // string, so whenever `raw === ''` this line's second disjunct is already
-  // true on its own — disabling (or misdirecting) the first disjunct can't
-  // change the result.
-  if (raw === '' || !isEjsonDocument(raw)) return null;
-  return raw;
+  return filterProblem(state.queryRaw) === null ? state.queryRaw.trim() : null;
+}
+
+/**
+ * `currentFilterJson` for a caller that has already passed `findProblem`, so
+ * a null is a bug in one of the two. Throws rather than widening to `{}`:
+ * every such caller sends the filter on (a pipeline, an export, a copied
+ * command), and `{}` there means the whole collection.
+ */
+export function requireFilterJson(state: CollectionTabState): string {
+  const filter = currentFilterJson(state);
+  if (filter === null) {
+    throw new Error(`No runnable filter after the Run gate passed: ${filterProblem(state.queryRaw)}`);
+  }
+  return filter;
 }
 
 /**

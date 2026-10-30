@@ -3,7 +3,7 @@ import { render, screen, waitFor, fireEvent } from '../helpers/render';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
-import type { CollectionTabState, SavedQuery, SavedQuerySummary, WorkspaceTab } from '@shared/types';
+import type { CollectionTabState, RecentQuery, SavedQuery, SavedQuerySummary, WorkspaceTab } from '@shared/types';
 import type { IpcApi } from '@shared/ipc';
 
 const now = '2026-08-04T12:00:00.000Z';
@@ -103,7 +103,7 @@ const RAW_PROJECTION_SAVED = {
   },
 } as unknown as SavedQuery;
 
-function mountWith(state: CollectionTabState, saved: SavedQuery = LEGACY_SAVED) {
+function mountWith(state: CollectionTabState, saved: SavedQuery = LEGACY_SAVED, recent: RecentQuery[] = []) {
   const findSpy = vi.fn<IpcApi['query']['find']>(async () => ({
     documents: [],
     durationMs: 3,
@@ -122,6 +122,7 @@ function mountWith(state: CollectionTabState, saved: SavedQuery = LEGACY_SAVED) 
       list: async () => [SAVED_SUMMARY],
       get: async () => saved,
     } as unknown as IpcApi['saved'],
+    recent: { list: async () => recent } as unknown as IpcApi['recent'],
     query: { find: findSpy, count: async () => ({ count: 0 }) },
   });
 
@@ -299,4 +300,42 @@ describe('saved find options survive Run here', () => {
     expect(call?.maxTimeMS).toBeUndefined();
     expect(call?.readPreference).toBeUndefined();
   });
+});
+
+// A Saved or Recent load into a tab whose advanced row already held a sort
+// and was collapsed leaves "has advanced values" true → true; only the load
+// count BuilderPane bumps tells QueryBar a different query arrived. Driven
+// through the real Workspace so dropping the bump from either Run here fails
+// here, not only in QueryBar's own harness.
+describe('Run here shows the loaded advanced values', () => {
+  const RECENT: RecentQuery = {
+    id: 'r1',
+    connectionId: 'c1',
+    dbName: 'mydb',
+    collection: 'users',
+    kind: 'find',
+    payload: { kind: 'find', builder: { projection: [], sort: '{"age":1}', limit: '' }, queryRaw: '{"a":1}' },
+    ranAt: now,
+    durationMs: 3,
+    resultCount: 1,
+  };
+
+  for (const list of ['Saved', 'Recent'] as const) {
+    it(`${list}: opens a row the user had collapsed over a sort of its own`, async () => {
+      mountWith(
+        makeState({ activeBuilderTab: list, builder: { projection: [], sort: '{"name":1}', limit: '' } }),
+        LEGACY_SAVED,
+        [RECENT],
+      );
+
+      await screen.findByTestId('query-bar-sort');
+      fireEvent.click(document.querySelector('[aria-controls="query-bar-advanced"]')!);
+      expect(document.getElementById('query-bar-advanced')).toBeNull();
+
+      fireEvent.click(await screen.findByRole('button', { name: /in this tab$/ }));
+
+      await waitFor(() => expect(document.getElementById('query-bar-advanced')).not.toBeNull());
+      expect((screen.getByTestId('query-bar-sort') as HTMLInputElement).value).toBe('{"age":1}');
+    });
+  }
 });

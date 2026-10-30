@@ -88,6 +88,7 @@
     "src/pages/Workspace/Aggregation/pipeline.ts",
     "src/pages/Workspace/Aggregation/saveResultMessage.ts",
     "src/features/fieldSuggestions/aggGrammar.ts",
+    "src/features/fieldSuggestions/operatorGroups.ts",
     "src/features/fieldSuggestions/fieldValueEntries.ts",
     "src/features/fieldSuggestions/sources/sampleValuesSource.ts",
     "src/features/fieldSuggestions/sources/schemaEnumSource.ts",

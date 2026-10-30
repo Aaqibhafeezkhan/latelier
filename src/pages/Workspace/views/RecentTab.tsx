@@ -6,6 +6,7 @@ import { copyToClipboard } from '../../../utils/clipboard';
 import { confirmDestructive } from '../../../utils/confirm';
 import { ActionIcon, Box, Button, Group, Text, Tooltip, VisuallyHidden } from '@mantine/core';
 import { themeVars } from '../../../theme/themeVars';
+import { SubmitButton } from '../../../components/SubmitButton';
 import type { RecentQuery } from '@shared/types';
 import { mergeConsecutive, type MergedRecentQuery } from './recentRuns';
 
@@ -144,7 +145,7 @@ export function RecentTab({ connectionId, dbName, collection, onRunHere }: Recen
         style={{ letterSpacing: 0.6, textTransform: 'uppercase' }}
       >
         <span style={{ flex: 1 }}>Recent · {collection}</span>
-        <Button
+        <SubmitButton
           variant="default"
           size="compact-xs"
           h={18}
@@ -152,11 +153,11 @@ export function RecentTab({ connectionId, dbName, collection, onRunHere }: Recen
           fz={10}
           c={loading ? undefined : T.textMuted}
           onClick={() => void load()}
-          disabled={loading}
+          submitting={loading}
           aria-label="Refresh recent queries"
         >
           Refresh
-        </Button>
+        </SubmitButton>
         {/* The accessible name deliberately differs from the confirm's
             "Clear history" label — otherwise both match the same role+name
             query and the dialog is unreachable by keyboard *and* by test. */}

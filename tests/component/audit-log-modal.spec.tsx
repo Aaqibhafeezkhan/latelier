@@ -156,6 +156,33 @@ describe('AuditLogModal', () => {
     expect(screen.getAllByRole('button').map((b) => b.textContent?.trim()).filter(Boolean)).toEqual(['Close']);
   });
 
+  it('words a collMod by the option groups it changed, in order', async () => {
+    mockApi([
+      {
+        ...ENTRY_BASE,
+        id: 'm1',
+        collection: 'orders',
+        op: 'collectionModify',
+        summary: { op: 'collectionModify', changed: ['validator', 'validationLevel', 'validationAction'] },
+        outcome: 'ok',
+        ranAt: '2026-09-02T10:00:00.000Z',
+      },
+      {
+        ...ENTRY_BASE,
+        id: 'm2',
+        collection: 'recent',
+        op: 'collectionModify',
+        summary: { op: 'collectionModify', changed: ['view'] },
+        outcome: 'ok',
+        ranAt: '2026-09-02T09:00:00.000Z',
+      },
+    ]);
+    render(<AuditLogModal initialConnectionId="c1" onClose={() => {}} />);
+
+    expect(await screen.findByText('changed validator, validation level, validation action')).toBeTruthy();
+    expect(screen.getByText('changed view definition')).toBeTruthy();
+  });
+
   it('surfaces a failed load instead of an empty log', async () => {
     installAtelierMock({
       conn: { list: async () => CONNECTIONS },

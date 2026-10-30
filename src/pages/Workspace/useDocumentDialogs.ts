@@ -2,7 +2,7 @@ import React from 'react';
 import { notify } from '../../theme/notifications';
 import { invalidateSampleSchemaCache } from '../../features/fieldSuggestions/sources/sampleSchemaSource';
 import { offerUndo } from './offerUndo';
-import { currentFilterJson } from './builder';
+import { filterProblem } from './builder';
 import { stripIdForDuplicate } from './views/docId';
 import type { CollectionTab } from '@shared/types';
 import type { RunnerTarget, UseQueryRunnerResult } from './useQueryRunner';
@@ -107,10 +107,11 @@ export function useDocumentDialogs(deps: {
   const openDeleteAllModal = React.useCallback(() => {
     const a = activeCollectionRef.current;
     if (!a) return;
-    if (currentFilterJson(a.state) === null) {
-      notify.error('Filter text is blank or not valid JSON', {
-        title: 'No runnable filter',
-      });
+    // The Run gate's own rule and message (`currentFilterJson` is null
+    // exactly when this is not), so the refusal names what to fix.
+    const problem = filterProblem(a.state.queryRaw);
+    if (problem !== null) {
+      notify.error(problem, { title: 'No runnable filter' });
       return;
     }
     setDeleteAllOpen(true);
@@ -118,10 +119,11 @@ export function useDocumentDialogs(deps: {
   const openUpdateAllModal = React.useCallback(() => {
     const a = activeCollectionRef.current;
     if (!a) return;
-    if (currentFilterJson(a.state) === null) {
-      notify.error('Filter text is blank or not valid JSON', {
-        title: 'No runnable filter',
-      });
+    // The Run gate's own rule and message (`currentFilterJson` is null
+    // exactly when this is not), so the refusal names what to fix.
+    const problem = filterProblem(a.state.queryRaw);
+    if (problem !== null) {
+      notify.error(problem, { title: 'No runnable filter' });
       return;
     }
     setUpdateAllOpen(true);

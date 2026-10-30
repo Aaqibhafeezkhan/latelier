@@ -6,6 +6,7 @@ import { I } from '../icons';
 import { ActionIcon, AppShell, Button, Tooltip } from '@mantine/core';
 import { useConnections } from '../state/connections';
 import { api, isIpcError } from '../api/atelier';
+import { logFailure } from '../utils/rendererLog';
 import { notify } from '../theme/notifications';
 import type { ConnectionSummary } from '@shared/types';
 import { invalidateSampleSchemaCache } from '../features/fieldSuggestions/sources/sampleSchemaSource';
@@ -184,7 +185,7 @@ export default function ConnectionManager() {
     try {
       const allTabs = await api.tabs.list();
       const toClose = allTabs.filter((t) => t.connectionId === id);
-      await Promise.all(toClose.map((t) => api.tabs.close(t.id).catch(() => { /* best-effort */ })));
+      await Promise.all(toClose.map((t) => api.tabs.close(t.id).catch((err) => logFailure('closing a tab', err))));
     } catch (err) {
       notify.error(isIpcError(err) ? err.message : String(err), {
         title: 'Disconnected, but its tabs could not be closed',

@@ -252,12 +252,28 @@ export interface IpcApi {
     diagnosticBundle: () => Promise<{ path: string | null }>;
     /**
      * Reports how much unsaved work one source holds, replacing its last
-     * report, so quitting can name it (F06). Main forgets every report when
-     * the page reloads, crashes or its window closes.
+     * report, so quitting can name it (F06). When the page reloads, crashes
+     * or its window closes, main forgets the form's report and recounts dirty
+     * pipelines from the saved tabs.
      */
     setUnsavedWork: (input: { source: UnsavedWorkSource; count: number }) => Promise<void>;
     /** Native File-menu commands pushed from main; returns the unsubscribe. */
     onMenuCommand: (cb: (command: MenuCommand) => void) => () => void;
+    /**
+     * Main is about to quit and asks the renderer to save its pending tab
+     * edits first (F06 §4); returns the unsubscribe. The renderer answers with
+     * `flushDone` once those saves have settled. A window close or a reload is
+     * not asked about: the page saves on its own `pagehide`.
+     */
+    onFlushRequest: (cb: () => void) => () => void;
+    /** The answer to a flush request: the pending tab edits have been sent. */
+    flushDone: () => Promise<void>;
+    /**
+     * Writes a renderer error to main's log file under the `renderer` tag
+     * (F06 §8). Main caps how many lines it takes per minute and drops the
+     * rest silently, still answering ok.
+     */
+    log: (input: RendererLogInput) => Promise<void>;
   };
 
   /** Auto-update: one state, one action. See specs/X20-auto-update.md. */
@@ -573,6 +589,9 @@ export const IPC_CHANNELS = {
   appSaveFile:     'app:saveFile',
   appDiagnosticBundle: 'app:diagnosticBundle',
   appSetUnsavedWork: 'app:setUnsavedWork',
+  appFlushRequestEvent: 'app:flush-request-event',
+  appFlushDone: 'app:flushDone',
+  appLog: 'app:log',
 
   // Auto-update -----------------------------------------
   updatesGetState:   'updates:getState',
@@ -727,3 +746,14 @@ export type PickFilePurpose = 'tls-ca' | 'tls-client-cert' | 'ssh-key' | 'data-i
 
 /** Who reports unsaved work for the quit question: the connection form, or the workspace's dirty pipelines. */
 export type UnsavedWorkSource = 'connectionForm' | 'pipelines';
+
+/** Where a renderer log line came from: a global handler, the error boundary, or a component's own catch. */
+export type RendererLogSource = 'window.error' | 'unhandledrejection' | 'errorBoundary' | 'component';
+
+/** One renderer line for `app:log`. Main refuses a message over 2000 or a stack over 8000 characters. */
+export interface RendererLogInput {
+  level: 'warn' | 'error';
+  message: string;
+  source: RendererLogSource;
+  stack?: string;
+}

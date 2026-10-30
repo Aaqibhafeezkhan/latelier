@@ -313,6 +313,19 @@ describe('W15 §4.2 — the limit says what it caps and what else stops a query'
 });
 
 describe('W15 §1.1 — Copy code reproduces the query as run', () => {
+  // NBSP padding passes the Run gate, which trims; `findCode` parses the text
+  // it is given, so it must be given the trimmed filter `find` sends.
+  it('copies and runs a filter padded with Unicode spaces as its trimmed text', async () => {
+    const { findSpy } = mountWith(makeState({ queryRaw: '\u00a0{"status":"active"}\u00a0' }));
+
+    await copyAs('mongosh');
+    expect(copiedText()).toBe('db.getCollection("users").find({"status":"active"}).limit(50)');
+
+    fireEvent.click(screen.getByTestId('query-run-btn'));
+    await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(1));
+    expect(findSpy.mock.calls[0]?.[0]?.filter).toBe('{"status":"active"}');
+  });
+
   it('emits the projection, sort, skip and limit useQueryRunner would send', async () => {
     // userLimit 120, pageSize 50, page 2 → skip 100, limit 20.
     const { findSpy } = mountWith(

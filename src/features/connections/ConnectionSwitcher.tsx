@@ -365,6 +365,7 @@ export function ConnectionSwitcher({
   const optionId = (connectionId: string) => `${baseId}-opt-${connectionId}`;
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
+  const manageRef = React.useRef<HTMLButtonElement>(null);
   const wasOpenRef = React.useRef(false);
   const keyboardMoveRef = React.useRef(false);
 
@@ -600,6 +601,21 @@ export function ConnectionSwitcher({
     if (document.activeElement === document.body) searchRef.current?.focus();
   }, [opened, connections, highlight]);
 
+  // Reopening inside the exit transition: Mantine keeps the dropdown mounted
+  // for those ~150ms, so `autoFocus` (a mount-time attribute) never runs again
+  // and focus stays on the trigger the reopening keypress or click came from —
+  // not `<body>`, so the effect above skips it too. Claim focus on every open,
+  // unconditionally. A fresh mount is covered twice, which is harmless; the
+  // close effect's pending 10ms trigger refocus is cleared by its cleanup
+  // when `opened` flips back, so it cannot steal this focus afterwards.
+  React.useLayoutEffect(() => {
+    if (!opened) return;
+    (addMode ? manageRef : searchRef).current?.focus();
+    // Only a transition of `opened` re-claims focus; `addMode` changing while
+    // open (the last Connection removed) is handled by the body-only effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opened]);
+
   return (
     <Popover
       opened={opened}
@@ -754,6 +770,7 @@ export function ConnectionSwitcher({
           variant="subtle"
           size="compact-xs"
           h={36}
+          ref={manageRef}
           autoFocus={addMode}
           onClick={handleExpand}
           onKeyDown={(e) => {

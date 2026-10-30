@@ -112,4 +112,46 @@ describe('router', () => {
     const env = await shim.invoke<{ done: boolean }>('test:async', {});
     expect(env).toEqual({ ok: true, data: { done: true } });
   });
+
+  describe('quiet channels', () => {
+    // Records every line by tag, so a test can see what the router itself wrote.
+    function recordingLogger() {
+      const lines: Array<{ level: string; tag: string; msg: string; data?: unknown }> = [];
+      const at = (level: string) => (tag: string, msg: string, data?: unknown) => void lines.push({ level, tag, msg, data });
+      return { lines, log: { debug: at('debug'), info: at('info'), warn: at('warn'), error: at('error') } };
+    }
+
+    function setup() {
+      const { lines, log } = recordingLogger();
+      const router = createRouter(shim.ipcMain, testSenderCheck, log);
+      const schema = zodValidator(z.object({ x: z.number() }).passthrough());
+      router.register('test:loud', schema, () => ({}));
+      router.register('test:quiet', schema, () => ({}), { quiet: true });
+      return lines;
+    }
+
+    it('writes no request or success line for a quiet channel; a normal one still writes both', async () => {
+      const lines = setup();
+      await shim.invoke('test:quiet', { x: 1 });
+      expect(lines).toEqual([]);
+      await shim.invoke('test:loud', { x: 1 });
+      expect(lines.map((l) => `${l.level} ${l.tag} ${l.msg}`)).toEqual([
+        'debug ipc.req test:loud',
+        'info ipc.ok test:loud',
+      ]);
+    });
+
+    it('still logs a refused quiet call, without any of its payload', async () => {
+      const lines = setup();
+      const payload = { x: 'nope', connectionId: 'c-secret', filter: { pw: 'f-secret' } };
+      await shim.invoke('test:quiet', payload);
+      await shim.invoke('test:loud', payload);
+      const errs = lines.filter((l) => l.tag === 'ipc.err');
+      expect(errs.map((l) => l.msg)).toEqual(['test:quiet', 'test:loud']);
+      expect(errs[0]!.data).toMatchObject({ code: 'VALIDATION' });
+      expect(JSON.stringify(errs[0]!.data)).not.toMatch(/secret/);
+      // The normal channel keeps its request summary on the error line.
+      expect(JSON.stringify(errs[1]!.data)).toContain('c-secret');
+    });
+  });
 });

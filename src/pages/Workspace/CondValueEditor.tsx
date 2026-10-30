@@ -194,117 +194,121 @@ export function CondValueEditor({
 
   const isDate = node.valType === 'date' && SIMPLE_OPS.has(node.op);
 
+  // The preview sits on its own line: beside the input it took the width the
+  // input and its error message needed once the pane was narrow.
   return (
-    <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start', flex: 1, minWidth: 0 }}>
-      <TextInput
-        ref={valueInputRef}
-        placeholder="value"
-        value={node.value}
-        disabled={readOnly}
-        onChange={(e) => {
-          if (isListOp) setListAsText(true);
-          onPatch({ value: e.target.value }, 'value');
-          if (!suggesting) setSuggesting(true);
-        }}
-        onFocus={() => setSuggesting(true)}
-        onBlur={() => {
-          window.setTimeout(() => setSuggesting(false), 100);
-        }}
-        error={problem}
-        size="xs"
-        style={{ flex: 1 }}
-        styles={{ input: { fontFamily: 'monospace' }, error: { fontSize: 10 } }}
-      />
-      {valueSuggestionsAllowed && (
-        <SuggestionPopover
-          open={suggesting}
-          items={valueSuggestionItems}
-          anchorRef={valueInputRef}
-          label="Value suggestions"
-          onSelect={(s) => {
-            if (s.kind === 'value') onPatch({ value: s.display });
-            setSuggesting(false);
-            valueInputRef.current?.blur();
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start', minWidth: 0 }}>
+        <TextInput
+          ref={valueInputRef}
+          placeholder="value"
+          value={node.value}
+          disabled={readOnly}
+          onChange={(e) => {
+            if (isListOp) setListAsText(true);
+            onPatch({ value: e.target.value }, 'value');
+            if (!suggesting) setSuggesting(true);
           }}
-          onClose={() => setSuggesting(false)}
+          onFocus={() => setSuggesting(true)}
+          onBlur={() => {
+            window.setTimeout(() => setSuggesting(false), 100);
+          }}
+          error={problem}
+          size="xs"
+          style={{ flex: 1, minWidth: 140 }}
+          styles={{ input: { fontFamily: 'monospace' }, error: { fontSize: 10 } }}
         />
+        {valueSuggestionsAllowed && (
+          <SuggestionPopover
+            open={suggesting}
+            items={valueSuggestionItems}
+            anchorRef={valueInputRef}
+            label="Value suggestions"
+            onSelect={(s) => {
+              if (s.kind === 'value') onPatch({ value: s.display });
+              setSuggesting(false);
+              valueInputRef.current?.blur();
+            }}
+            onClose={() => setSuggesting(false)}
+          />
+        )}
+        {isDate && (
+          <Popover opened={datePickerOpen} onChange={setDatePickerOpen} position="bottom-end" shadow="md" width={220}>
+            <Popover.Target>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                aria-label="Pick date"
+                aria-expanded={datePickerOpen}
+                disabled={readOnly}
+                onClick={() => setDatePickerOpen((o) => !o)}
+                style={{ marginTop: 2 }}
+              >
+                {I.clock}
+              </ActionIcon>
+            </Popover.Target>
+            <Popover.Dropdown aria-label="Pick date" style={{ padding: 6 }}>
+              <input
+                type="datetime-local"
+                aria-label="Date and time"
+                value={isoToLocalInput(node.value)}
+                onChange={(e) => {
+                  // Mid-edit the input reports '' until every segment is
+                  // filled; writing that would blank the value under it.
+                  const iso = localInputToIso(e.target.value);
+                  if (iso) onPatch({ value: iso }, 'date');
+                }}
+                style={{
+                  width: '100%',
+                  font: 'inherit',
+                  fontSize: 11,
+                  padding: '3px 4px',
+                  color: T.text,
+                  background: T.surface,
+                  border: `1px solid ${T.border}`,
+                  borderRadius: T.rs,
+                }}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', marginTop: 6 }}>
+                {DATE_PRESETS.map((p) => (
+                  <Button
+                    key={p.id}
+                    variant="subtle"
+                    color="gray"
+                    size="compact-xs"
+                    styles={{ inner: { justifyContent: 'flex-start' } }}
+                    onClick={() => {
+                      onPatch({ value: datePresetValue(p.id, new Date()) });
+                      setDatePickerOpen(false);
+                    }}
+                  >
+                    {p.label}
+                  </Button>
+                ))}
+              </div>
+            </Popover.Dropdown>
+          </Popover>
+        )}
+        {chips !== null && <ListToggle asText disabled={readOnly} onToggle={() => setListAsText(false)} />}
+      </div>
+      {!problem && (
+        <Tooltip label={formatCondPreview(node)} withArrow>
+          <span
+            aria-hidden="true"
+            style={{
+              fontSize: 9,
+              color: T.textGhost,
+              fontFamily: '"JetBrains Mono", monospace',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {formatCondPreview(node)}
+          </span>
+        </Tooltip>
       )}
-      {isDate && (
-        <Popover opened={datePickerOpen} onChange={setDatePickerOpen} position="bottom-end" shadow="md" width={220}>
-          <Popover.Target>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="sm"
-              aria-label="Pick date"
-              aria-expanded={datePickerOpen}
-              disabled={readOnly}
-              onClick={() => setDatePickerOpen((o) => !o)}
-              style={{ marginTop: 2 }}
-            >
-              {I.clock}
-            </ActionIcon>
-          </Popover.Target>
-          <Popover.Dropdown aria-label="Pick date" style={{ padding: 6 }}>
-            <input
-              type="datetime-local"
-              aria-label="Date and time"
-              value={isoToLocalInput(node.value)}
-              onChange={(e) => {
-                // Mid-edit the input reports '' until every segment is
-                // filled; writing that would blank the value under it.
-                const iso = localInputToIso(e.target.value);
-                if (iso) onPatch({ value: iso }, 'date');
-              }}
-              style={{
-                width: '100%',
-                font: 'inherit',
-                fontSize: 11,
-                padding: '3px 4px',
-                color: T.text,
-                background: T.surface,
-                border: `1px solid ${T.border}`,
-                borderRadius: T.rs,
-              }}
-            />
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', marginTop: 6 }}>
-              {DATE_PRESETS.map((p) => (
-                <Button
-                  key={p.id}
-                  variant="subtle"
-                  color="gray"
-                  size="compact-xs"
-                  styles={{ inner: { justifyContent: 'flex-start' } }}
-                  onClick={() => {
-                    onPatch({ value: datePresetValue(p.id, new Date()) });
-                    setDatePickerOpen(false);
-                  }}
-                >
-                  {p.label}
-                </Button>
-              ))}
-            </div>
-          </Popover.Dropdown>
-        </Popover>
-      )}
-      {chips !== null && <ListToggle asText disabled={readOnly} onToggle={() => setListAsText(false)} />}
-      <Tooltip label={formatCondPreview(node)} withArrow>
-        <span
-          style={{
-            fontSize: 9,
-            color: T.textGhost,
-            fontFamily: '"JetBrains Mono", monospace',
-            flexShrink: 0,
-            maxWidth: 90,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            lineHeight: '26px',
-          }}
-        >
-          {formatCondPreview(node)}
-        </span>
-      </Tooltip>
     </div>
   );
 }

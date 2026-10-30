@@ -186,6 +186,46 @@ describe('TableView — rendering and interaction', () => {
     expect(container.textContent).toMatch(/users|→|↗/);
   });
 
+  it('renders a chip on the parent object cell for a dotted rule and opens it with the nested path and value', () => {
+    const rule: ReferenceRule = {
+      id: 'r2',
+      connectionId: 'c1',
+      sourceDb: 'app',
+      sourceCollection: 'orders',
+      sourceField: 'address.userId',
+      targetDb: 'app',
+      targetCollection: 'users',
+      targetField: '_id',
+      projection: [],
+      displayTemplate: undefined,
+      enabled: true,
+      createdAt: '2026-04-01T00:00:00Z',
+      updatedAt: '2026-04-01T00:00:00Z',
+    };
+    const refsByField = new Map<string, ReferenceRule>([['address.userId', rule]]);
+    const oid = { $oid: '507f1f77bcf86cd799439011' };
+    const docs = [{ _id: 'o1', address: { userId: oid, city: 'x' } }];
+    const onRefOpen = vi.fn();
+    const { getByTitle } = render(
+      <CollectionWorkspaceProvider
+        state={emptyState()}
+        actions={emptyWorkspaceActions()}
+        meta={emptyWorkspaceMeta()}
+      >
+        <TableView
+          documents={docs}
+          onColumnResize={vi.fn()}
+          refsByField={refsByField}
+          onRowExpand={vi.fn()}
+          onRefOpen={onRefOpen}
+        />
+      </CollectionWorkspaceProvider>,
+    );
+    const cell = getByTitle(/Drag to add "address /);
+    fireEvent.click(within(cell).getByRole('button', { name: /users/ }));
+    expect(onRefOpen).toHaveBeenCalledWith(rule, 'address.userId', oid);
+  });
+
   // AC1 — row expand reuses the Tree's field-tree renderer. `nested` itself
   // is already visible as a *column* before expansion (unlike Tree view,
   // Table always shows every derived field as a header) — the un-expanded

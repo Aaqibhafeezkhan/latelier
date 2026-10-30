@@ -1,6 +1,6 @@
 # X03 — MQL operator autocomplete
 
-> **Status: Implemented.** Its follow-ups, signature hints and completion inside `$facet`, are not built.
+> **Status: Implemented.** Its follow-ups, signature hints, completion inside `$facet` and usage ranking, are not built.
 
 ## Purpose
 
@@ -198,6 +198,31 @@ differentiates.
 `useTextareaAutocomplete.onSelect` splices `s.name` for operator hits
 (same behavior as field hits but with the `$`-prefixed name).
 
+### Picker grouping
+
+The builder's op box passes `groupOperators` to the popover, which then
+lays the operator rows out under one header per class: `query` shows as
+Comparison, then Logical, Element, Evaluation, Array and Geospatial (any
+other class is Other). `operatorGroups.ts` computes the runs from the
+list's own order, so grouping never reorders anything.
+
+- Grouping applies only while the box is blank. Once there is a token the
+  list is a relevance ranking and stays flat.
+- The markup is a `role="group"` per run, labelled by a non-interactive
+  header, inside the one listbox. The highlight, `aria-selected` and Enter
+  walk the options as a single flat list across groups; headers are never
+  highlightable.
+- The builder's list offers each operator once: the `$expr`-only twins of
+  `$eq`, `$size` and the like (expression class) are left out, so no
+  Other group appears.
+- Only the builder opts in. Stage bodies, the query bar and the
+  aggregation editor keep the flat list.
+- Known limitation: focusing a row's op box puts the committed operator
+  (such as `$eq`) in the token, which filters the list, so the grouped view
+  shows on a blank row or after the user clears the box. Showing the full
+  catalog on focus would change what the popover does today and is out of
+  scope here.
+
 ## 8. Consumer wiring
 
 ### Textarea surfaces (W05 query bar, A03 stage accordion)
@@ -352,6 +377,9 @@ lives in memory.
   `operatorContext: 'update'`. The catalog already carries the entries
   so this is purely additive.
 - *(Follow-up)* $facet inner-stage context resolution.
+- *(Follow-up)* Rank operators by how often the user picks them.
+- With a blank op box, the builder's operator list shows under class
+  headers, and arrow keys move through the options across headers.
 
 ## 15. Test cases
 

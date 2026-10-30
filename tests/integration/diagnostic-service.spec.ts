@@ -168,6 +168,31 @@ describe('DiagnosticService', () => {
     expect(Object.keys(bundle.logs)).toEqual(['latelier.2026-05-07.log']);
   });
 
+  it('keeps the newest size-cap parts of a day, counting part numbers as numbers', async () => {
+    for (const name of [
+      'mongolab.2026-10-29.log',
+      'latelier.2026-10-29.log',
+      'latelier.2026-10-29.1.log',
+      'latelier.2026-10-29.2.log',
+      'latelier.2026-10-29.10.log',
+    ]) {
+      await fs.writeFile(path.join(logsDir, name), `${name}\n`);
+    }
+    const svc = new DiagnosticService({
+      userDataDir,
+      connRepo: { list: () => [] },
+      maxLogFiles: 3,
+    });
+    const bundle = await svc.build();
+    // In whole-name order `.1` and `.10` sort before the bare name and `.2`,
+    // so the kept three would be `.2`, the bare name and `mongolab.`.
+    expect(Object.keys(bundle.logs).sort((a, b) => a.localeCompare(b))).toEqual([
+      'latelier.2026-10-29.1.log',
+      'latelier.2026-10-29.10.log',
+      'latelier.2026-10-29.2.log',
+    ]);
+  });
+
   it('truncates oversized log files to the configured byte cap and starts on a clean line', async () => {
     const big = path.join(logsDir, 'latelier.2026-05-07.log');
     // 10 lines, each 100 chars-ish.

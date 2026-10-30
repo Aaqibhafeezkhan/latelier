@@ -19,6 +19,7 @@ import { isMacRenderer } from '../utils/platform';
 import { usePaletteContext } from './PaletteContext';
 import { groupRows, rankCommands } from './rank';
 import { GROUP_LABEL } from './types';
+import { _resetPaletteOpenerForTests, setPaletteOpener } from './paletteOpener';
 import type { Command } from './types';
 
 const MRU_CAP = 8;
@@ -35,6 +36,7 @@ const [paletteStore, paletteControls] = createSpotlight();
 /** Test-only: reset the palette open/query state between tests. */
 // eslint-disable-next-line react-refresh/only-export-components
 export function _resetPaletteStoreForTests(): void {
+  _resetPaletteOpenerForTests();
   paletteStore.setState({
     opened: false,
     empty: false,
@@ -326,6 +328,15 @@ export function CommandPalette({ registerApi }: PaletteShellProps) {
     }
   }, [hints]);
 
+  // Capture phase, registered once: focus has usually moved onto the search
+  // input before Mantine reports the palette open, so the opener has to be
+  // known beforehand. See paletteOpener.ts.
+  React.useEffect(() => {
+    const track = (e: FocusEvent) => setPaletteOpener(e.target);
+    document.addEventListener('focusin', track, true);
+    return () => document.removeEventListener('focusin', track, true);
+  }, []);
+
   React.useEffect(() => {
     registerApi({
       open: openPalette,
@@ -386,6 +397,7 @@ export function CommandPalette({ registerApi }: PaletteShellProps) {
   return (
     <>
       <SpotlightRoot
+        data-command-palette
         store={paletteStore}
         shortcut="mod + K"
         // Mantine's Modal applies `aria-label` to the outer root, not the

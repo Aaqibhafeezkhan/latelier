@@ -2,6 +2,8 @@ import React from 'react';
 import { Button, Drawer } from '@mantine/core';
 import { themeVars } from '../../../theme/themeVars';
 import { api, getErrorMessage } from '../../../api/atelier';
+import { logFailure } from '../../../utils/rendererLog';
+import { notify } from '../../../theme/notifications';
 import { useDialogFocusReturn } from '../../../hooks/useDialogFocusReturn';
 import { ejsonStringify } from '../../../utils/ejson';
 import { copyToClipboard } from '../../../utils/clipboard';
@@ -173,8 +175,9 @@ export function ExplainDrawer({
     if (!json) return;
     try {
       await api.app.saveFile({ defaultName: 'explain.json', content: json });
-    } catch {
-      // ignore
+    } catch (err) {
+      logFailure('explain plan save', err);
+      notify.error(getErrorMessage(err, 'The explain plan could not be saved.'), { title: 'Save failed' });
     }
   };
 

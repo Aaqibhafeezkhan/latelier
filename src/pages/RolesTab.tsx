@@ -17,6 +17,8 @@ import {
 import { themeVars } from '../theme/themeVars';
 import { I } from '../icons';
 import { api, isIpcError } from '../api/atelier';
+import { logFailure } from '../utils/rendererLog';
+import { notify } from '../theme/notifications';
 import { confirmDestructive } from '../utils/confirm';
 import { ejsonParse, ejsonStringifyReadable } from '../utils/ejson';
 import { SubmitButton } from '../components/SubmitButton';
@@ -72,7 +74,7 @@ export function RolesTab({
     void api.prefs
       .get<string>(LAST_DB_KEY)
       .then((v) => v && v !== USERS_ALL_DBS && setPicked(v))
-      .catch(() => { /* non-fatal: stay on admin */ });
+      .catch((err) => logFailure(`reading preference ${LAST_DB_KEY}`, err));
   }, []);
 
   const loadDatabases = React.useCallback(async () => {
@@ -122,7 +124,10 @@ export function RolesTab({
 
   const onPickDb = (next: string) => {
     setPicked(next);
-    void api.prefs.set(LAST_DB_KEY, next).catch(() => { /* ok */ });
+    void api.prefs.set(LAST_DB_KEY, next).catch((err) => {
+      logFailure(`saving preference ${LAST_DB_KEY}`, err);
+      notify.warning('The selected database will not be remembered.', { title: 'Preference not saved' });
+    });
   };
 
   if (runtime.status !== 'connected') {

@@ -745,7 +745,7 @@ export interface RecentQuery {
 
 // ─── Audit log (X13) ─────────────────────────────────────────────────────────
 
-/** Mirrors the `audit_log.op` CHECK constraint (migration 012). */
+/** Mirrors the `audit_log.op` CHECK constraint (migrations 012 and 016). */
 export type AuditOp =
   | 'insertMany'
   | 'updateOne'
@@ -754,6 +754,7 @@ export type AuditOp =
   | 'deleteMany'
   | 'collectionDrop'
   | 'collectionRename'
+  | 'collectionModify'
   | 'databaseDrop'
   | 'import';
 
@@ -770,6 +771,8 @@ export type AuditSummary =
   | { op: 'deleteOne' | 'deleteMany'; filter: string; deletedCount?: number }
   | { op: 'collectionRename'; fromName: string; toName: string }
   | { op: 'collectionDrop' | 'databaseDrop' }
+  /** Which groups of options were changed, never their values: a validator can embed sample literals. */
+  | { op: 'collectionModify'; changed: Array<'validator' | 'validationLevel' | 'validationAction' | 'view'> }
   /** `format` is absent when the import failed before its file was read. `cancelled` is absent unless true. */
   | { op: 'import'; fileName: string; format?: ImportFormat; insertedCount?: number; failedCount?: number; cancelled?: boolean };
 

@@ -178,6 +178,85 @@ describe('useQueryRunner', () => {
     expect(totalPatches[0][1].totalCount).toBe(2);
   });
 
+  describe('a failing background count', () => {
+    function setup(counts: Array<() => Promise<{ count: number }>>) {
+      const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+      const countSpy = vi.fn<() => Promise<{ count: number }>>();
+      for (const c of counts) countSpy.mockImplementationOnce(c);
+      installAtelierMock({
+        app: { log },
+        query: {
+          find: async () => ({ documents: [], durationMs: 1, hasMore: false }),
+          count: countSpy,
+        },
+      });
+      const { result } = renderHook(() =>
+        useQueryRunner({ active: makeTarget(), patchCollectionState: vi.fn(), loadingDelayMs: 0 }),
+      );
+      const countLogs = () =>
+        log.mock.calls.filter(([line]) => line.message.startsWith('counting the matching documents failed'));
+      return { result, countLogs };
+    }
+
+    it('is logged when its run is still the current one', async () => {
+      const { result, countLogs } = setup([
+        async () => {
+          throw { code: 'INTERNAL', message: 'count timed out' };
+        },
+      ]);
+      await act(async () => {
+        await result.current.run();
+      });
+      await waitFor(() => expect(countLogs()).toHaveLength(1));
+      expect(countLogs()[0]![0].message).toBe('counting the matching documents failed: count timed out');
+    });
+
+    it('is not logged once a newer run has taken over', async () => {
+      let rejectFirst: (e: unknown) => void = () => {};
+      const first = new Promise<{ count: number }>((_, reject) => {
+        rejectFirst = reject;
+      });
+      const { result, countLogs } = setup([() => first, () => new Promise(() => {})]);
+      await act(async () => {
+        await result.current.run();
+      });
+      await act(async () => {
+        await result.current.run();
+      });
+      await act(async () => {
+        rejectFirst({ code: 'INTERNAL', message: 'cancelled with its run' });
+        await first.catch(() => {});
+      });
+      expect(countLogs()).toHaveLength(0);
+    });
+  });
+
+  it('logs a refused cancel of the run a newer Run supersedes', async () => {
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    installAtelierMock({
+      app: { log },
+      query: {
+        find: () => new Promise(() => {}),
+        count: async () => ({ count: 1 }),
+        cancel: async () => {
+          throw { code: 'INTERNAL', message: 'no such query' };
+        },
+      },
+    });
+    const { result } = renderHook(() =>
+      useQueryRunner({ active: makeTarget(), patchCollectionState: vi.fn(), loadingDelayMs: 0 }),
+    );
+    await act(async () => {
+      void result.current.run();
+    });
+    await act(async () => {
+      void result.current.run();
+    });
+    await waitFor(() =>
+      expect(log).toHaveBeenCalledWith({ level: 'warn', message: 'query cancel failed: no such query', source: 'component' }),
+    );
+  });
+
   it('a run for a different target does not discard this target\'s own pending count', async () => {
     // runTokenRef used to be a single global counter — starting target B's
     // run bumped it, so target A's still-in-flight count failed its
@@ -517,8 +596,9 @@ describe('useQueryRunner', () => {
     });
 
     it('a rejected explain leaves the documents patched, with no plan and no error', async () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
       installAtelierMock({
+        app: { log },
         query: {
           find: async () => ({ documents: [{ _id: 1 }], durationMs: 4, hasMore: false }),
           count: async () => ({ count: 1 }),
@@ -536,7 +616,11 @@ describe('useQueryRunner', () => {
         await result.current.run();
       });
 
-      await waitFor(() => expect(warn).toHaveBeenCalled());
+      await waitFor(() =>
+        expect(log).toHaveBeenCalledWith(
+          expect.objectContaining({ level: 'warn', message: 'plan explain failed: explain refused', source: 'component' }),
+        ),
+      );
       const runs = patch.mock.calls.filter((c) => c[1].lastRun !== undefined);
       expect(runs).toHaveLength(1);
       expect(runs[0][1].lastRun.documents).toEqual([{ _id: 1 }]);
@@ -820,6 +904,48 @@ describe('useQueryRunner', () => {
       });
 
       expect(explainSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // The Run gate and the runner share one filter rule. NBSP padding is what
+  // `String.prototype.trim` strips and `JSON.parse` refuses, so it is the case
+  // that told the two apart: the find must go out with the trimmed text.
+  it('runs a filter padded with Unicode spaces, sending it trimmed', async () => {
+    const find = vi.fn<IpcApi['query']['find']>(async () => ({ documents: [], durationMs: 1, hasMore: false }));
+    installAtelierMock({ query: { find, count: async () => ({ count: 0 }) } });
+    const { result } = renderHook(() =>
+      useQueryRunner({
+        active: makeTarget({ queryRaw: '\u00a0{"a":1}\u00a0' }),
+        patchCollectionState: vi.fn(),
+        loadingDelayMs: 0,
+      }),
+    );
+    await act(async () => {
+      await result.current.run();
+    });
+
+    expect(find).toHaveBeenCalledTimes(1);
+    expect(find.mock.calls[0]?.[0]?.filter).toBe('{"a":1}');
+  });
+
+  // Fail-closed: a refused filter never runs, as `{}` or otherwise, and the
+  // pill says what is wrong with it rather than a generic "not valid JSON".
+  it('refuses a broken filter before any find, naming the problem in the pill', async () => {
+    const find = vi.fn<IpcApi['query']['find']>(async () => ({ documents: [], durationMs: 1, hasMore: false }));
+    installAtelierMock({ query: { find, count: async () => ({ count: 0 }) } });
+    const patch = vi.fn();
+    const { result } = renderHook(() =>
+      useQueryRunner({ active: makeTarget({ queryRaw: '[1]' }), patchCollectionState: patch, loadingDelayMs: 0 }),
+    );
+    await act(async () => {
+      await result.current.run();
+    });
+
+    expect(find).not.toHaveBeenCalled();
+    expect(patch).toHaveBeenCalledWith('t1', {
+      lastRun: expect.objectContaining({
+        error: { code: 'VALIDATION', message: 'A filter must be a document, like { "status": "active" }.' },
+      }),
     });
   });
 

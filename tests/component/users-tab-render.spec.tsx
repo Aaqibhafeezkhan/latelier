@@ -295,4 +295,39 @@ describe('UsersTab — render', () => {
     });
     expect(screen.getByText('reader')).toBeTruthy();
   });
+
+  // jsdom never blurs an element that goes `disabled`, and the e2e suite cannot
+  // inject IPC latency, so the focus drop itself is unobservable here; what the
+  // fix guarantees (and what is asserted) is that the button never takes the
+  // real `disabled` attribute, which is what makes Chromium blur it.
+  it('keeps Refresh focusable while loading and swallows a second click', async () => {
+    let lists = 0;
+    let finish: (r: UserInfo[]) => void = () => {};
+    installAtelierMock({
+      conn: { get: async () => makeFullConn() },
+      meta: { listDatabases: async () => [{ name: 'myapp', sizeOnDisk: 0, empty: false }] },
+      user: {
+        list: () => {
+          lists += 1;
+          return new Promise<UserInfo[]>((resolve) => {
+            finish = resolve;
+          });
+        },
+      },
+    });
+
+    renderTab();
+    await waitFor(() => expect(lists).toBe(1));
+    const refresh = screen.getByRole('button', { name: /refresh/i });
+    expect(refresh.hasAttribute('disabled')).toBe(false);
+    expect(refresh.getAttribute('aria-disabled')).toBe('true');
+
+    await userEvent.click(refresh);
+    expect(lists).toBe(1);
+
+    await act(async () => {
+      finish([READER]);
+    });
+    expect(screen.getByRole('button', { name: /refresh/i }).hasAttribute('aria-disabled')).toBe(false);
+  });
 });

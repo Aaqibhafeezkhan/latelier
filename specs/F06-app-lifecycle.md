@@ -95,6 +95,7 @@ app.on('before-quit', (e) => {
   log.info('shutdown', 'begin');
   const work = runTeardown(
     [
+      ['flush renderer', flushRenderer],
       ['persist bounds', persistBoundsNow],
       ['dispose documents', () => docSvc.dispose()],
       ['dispose shells', () => mshellSvc.disposeAll()],
@@ -112,6 +113,8 @@ app.on('before-quit', (e) => {
 ```
 
 - 8-second hard budget. Anything still pending is abandoned.
+- Every `before-quit` is held (`createBeforeQuitHandler`, `electron/quitGuard.ts`), including one that arrives while the sequence runs, such as a second Cmd+Q during the flush: Electron's own quit would end the app mid-teardown. The sequence ends the app with `app.exit`, which emits no `before-quit`.
+- `flush renderer` comes first, while the database is still open: `app.exit` destroys the window without its unload events, so the tab edits the renderer still holds back (§6) are asked for here. Main pushes `app:flush-request-event` and waits for the renderer's `app:flushDone` (`awaitRendererFlush`, `electron/quitGuard.ts`) for at most 1.5 seconds, inside the 8-second budget. With no window, nothing is asked; an answer that does not come in time is logged at `warn` and the quit goes on.
 - Each step runs in its own try/catch (`runTeardown`, `electron/quitGuard.ts`): a step that throws or rejects is logged by name and the later steps still run, so a failed step never leaves the pool connected or the database open.
 - `db.close()` is last — once it returns, no more writes are possible.
 - On macOS, closing the last window does NOT quit (`window-all-closed` unless `process.platform !== 'darwin'`) — existing behavior. The app and its sessions keep running, so closing the window cuts off no work.
@@ -121,7 +124,7 @@ app.on('before-quit', (e) => {
 Before the sequence above starts, `before-quit` checks for work that quitting would kill or throw away:
 
 - **Counted:** script runs in flight (`ScriptService.runningCount()`), shell sessions with a command still running (`ShellService.busyCount()`, W11 section 3), imports in flight (`ImportService.runningCount()`) and aggregation runs in flight (`AggregationService.runningCount()`). An idle shell is not counted.
-- **Unsaved work, reported by the renderer:** the renderer has no say in quitting (`beforeunload` is cancelled silently by Electron), so it reports instead, through `app:setUnsavedWork` (`{ source: 'connectionForm' | 'pipelines', count }`), and each report replaces that source's last one. Main keeps the counts in a module-level store and zeroes both on a full page load (a main-frame `did-start-navigation` that is not same-document; the app's own hash-route changes are), on `render-process-gone` and on the window's `closed`, so a report never outlives the page that made it and a reloaded or crashed renderer cannot make every later quit ask.
+- **Unsaved work, reported by the renderer:** the renderer has no say in quitting (`beforeunload` is cancelled silently by Electron), so it reports instead, through `app:setUnsavedWork` (`{ source: 'connectionForm' | 'pipelines', count }`), and each report replaces that source's last one. Main keeps the counts in a module-level store and resets it (`resetUnsavedWork`) on a full page load (a main-frame `did-start-navigation` that is not same-document; the app's own hash-route changes are), on `render-process-gone` and on the window's `closed`: the form's report goes with the page, so a reloaded or crashed renderer cannot make every later quit ask, and dirty pipelines are recounted from the saved tabs (`WorkspaceStateService.dirtyPipelineCount`, the Workspace's own rule, a truthy `aggregation.dirty`; a tab whose saved state does not parse counts 0 and is logged at `warn`), since they outlive the page. The Workspace's own report replaces that count once it mounts again. Once shutdown has begun nothing is recounted, as the database may be closed.
   - **Connection form:** the full-page form (`NewConnection`) and the modal (`ConnectionFormModal`) report 1 while the form is dirty, and 0 on unmount and after a successful save.
   - **Pipelines:** the workspace reports how many collection tabs hold a pipeline with `aggregation.dirty`. Nothing is reported until the tabs have loaded, or when they failed to load, so an empty list never overwrites the last real count. They count only when `ui.workspace.restoreTabs` is explicitly `false`: with "Reopen tabs on launch" on (or unset), the tabs and their pipelines come back at the next launch, so nothing is lost.
 - **Not counted:** plain finds. They run in main with no handle the check can read, so quitting still cuts them off without asking.
@@ -137,6 +140,7 @@ Before the sequence above starts, `before-quit` checks for work that quitting wo
 
 - In dev (`VITE_DEV_SERVER_URL` set), HMR reloads the renderer but keeps the main process — services remain alive.
 - A "hard reload" (⌘⇧R) reloads the window without restarting main. Tab state is persisted on every change (W01), so the renderer can restore.
+- Tab-state edits wait 250ms before `tabs.update` saves them. Edits still waiting are sent at once when the Workspace unmounts, on the page's `pagehide` (a reload, or the window closing while main lives on) and before quitting, when main asks (§4); the renderer's answer is `FlushOnQuit` in `RootLayout`, which flushes everything registered in `src/state/pendingFlush.ts` and answers even when nothing is.
 - A `devReset` developer shortcut (⌘⇧⌥R) is registered that: closes the DB, deletes the open database file with its `-wal` and `-shm`, reopens, re-runs migrations, then reloads the window. Disabled in packaged builds.
 
 ## 7. Crash handling
@@ -147,10 +151,16 @@ Before the sequence above starts, `before-quit` checks for work that quitting wo
 ## 8. Logs
 
 - Rotating file at `userData/logs/latelier.<date>.log`. Daily rotation, 7-day retention.
+- Each file is capped at 10 MiB. A day that outgrows it continues in `latelier.<date>.1.log`, then `.2`, and so on; a line bigger than the cap still goes whole into an empty part. The logger counts bytes in memory and reads a size from disk only when it opens a day, where it resumes that day's highest part. Parts age out like any other log file. The diagnostic bundle keeps the newest files by date, then part number counted as a number, then the pre-rename `mongolab.` file before the `latelier.` one of the same day.
 - On POSIX the `logs/` dir is `0700` and log files are `0600`; existing files are tightened at startup, and a dir or file that cannot be is reported as a `warn` line. No-op on Windows.
 - Log levels: `debug` (dev only), `info`, `warn`, `error`.
 - `log.info(tag, msg, data?)` — `tag` is a short namespace (`'boot'`, `'mongo'`, `'db'`, `'ipc'`).
-- Renderer never writes to this log directly; it calls `app:log` IPC which the main side filters and forwards.
+- Renderer never writes to this log directly; it calls `app:log`, which main validates, rate-limits and writes under the `renderer` tag, with `{ source, stack }` as data. The usual scrubbing applies.
+  - Payload: `level` is `warn` or `error`; `message` is at most 2000 characters; `source` is `window.error`, `unhandledrejection`, `errorBoundary` or `component`; the optional `stack` is at most 8000 characters. Anything else is refused as `VALIDATION`. The renderer cuts the message and stack to those lengths itself, so a long error is shortened, never refused whole.
+  - Rate limit: 50 lines per 60 s window. The first line dropped in a window writes one `warn`, "renderer log rate limit reached; dropping until <ISO time>", and the rest are dropped silently. A dropped line still answers ok. A full page load (a reload, or the page after a crash) starts a fresh window.
+  - The channel is registered quiet: the router writes no `ipc.req` or `ipc.ok` line for it, so a loop adds nothing per call around the gate, and the `ipc.err` line of a refused call carries no request summary.
+  - Senders: the window's `error` and `unhandledrejection` listeners, installed before the first render; the error boundary, which sends the error's message, and its stack joined with the component stack; and component catches that have no UI to report to, such as the Mongo shell's stop during cleanup.
+  - When `app:log` itself fails, the renderer says so once with `console.warn` and never through `app:log`, so a broken bridge cannot loop.
 
 ## 9. Acceptance criteria
 
@@ -158,20 +168,36 @@ Before the sequence above starts, `before-quit` checks for work that quitting wo
 - Second instance quits silently and focuses the primary.
 - On quit with a live MongoClient, the app exits within 8 seconds.
 - Quitting with a script or shell command running asks first, and Cancel keeps the app open; quitting with nothing running does not ask.
-- Quitting with a dirty connection form asks first and names the form; dirty pipelines are named only when "Reopen tabs on launch" is off. A reload or a renderer crash forgets every unsaved-work report.
+- Quitting with a dirty connection form asks first and names the form; dirty pipelines are named only when "Reopen tabs on launch" is off. A reload or a renderer crash forgets the form's report and recounts dirty pipelines from the saved tabs.
+- A tab edit made just before quitting or closing the window is there after a relaunch.
 - A DB file that fails to open (corrupt) produces an error dialog naming the file path and tells the user how to reset.
 - `app:log` IPC entries appear in the log file with the correct process tag.
+- A renderer that logs in a loop writes at most 50 lines and one rate-limit notice per minute.
+- No log file grows past 10 MiB, except for a single line that is larger than the cap.
 
 ## 10. Test cases
 
 ### Integration
 - **boot-order.spec.ts** (with stubbed Electron `app`/`BrowserWindow`): assert registration order is DB → services → IPC → window.
 - **single-instance.spec.ts**: second `app.requestSingleInstanceLock` returns false → the test harness observes a quit call and a `second-instance` event emission on the first.
-- **app-unsaved-work.spec.ts**: `app:setUnsavedWork` sets its source in the store; zod rejects an unknown source and a count that is negative, fractional or over 1000.
+- **app-unsaved-work.spec.ts**: `app:setUnsavedWork` sets its source in the store; zod rejects an unknown source and a count that is negative, fractional or over 1000. `app:flushDone` reaches the ack sink, and zod rejects a payload that is not an object.
+- **app-log-channel.spec.ts**: `app:log` writes the line at its level under the `renderer` tag with source and stack, scrubbed; accepts a message and stack exactly at their caps; refuses an unknown level or source, a message over 2000, a stack over 8000, a missing message and a non-object; writes 50 lines, one notice and then nothing, answering ok; a flood of 200 calls leaves exactly 50 lines and the notice in the file, none from the router; takes lines again after a reset; `resetGateOnFreshPage` resets the gate on a main-frame, cross-document navigation only.
+- **diagnostic-service.spec.ts**: the bundle keeps the newest parts of a day, with `.10` after `.2`.
+- **log.spec.ts** (unit): a line that lands exactly on the cap stays and the next rolls to `.1`; bytes are counted, not characters; an oversized line goes into an empty part; startup resumes the day's highest part and counts its bytes; a new day starts at part 0; a failed append is not counted. `compareLogFiles` and `createRateGate` (cap, first refusal, window boundary, a clock that moves back, reset) are covered here and by property tests.
+- **router-dispatch.spec.ts**: a quiet channel writes no `ipc.req` or `ipc.ok` line and its `ipc.err` line no payload, while a normal channel keeps all three.
+- **workspace-state-dirty-count.spec.ts**: `dirtyPipelineCount` counts collection tabs with a truthy `aggregation.dirty`, ignores clean, plain and script tabs, and counts an unparseable row as 0 with one warning.
 - **shutdown-budget.spec.ts**: stub `pool.disconnectAll` to hang; total shutdown time is ≤ 8s.
-- **quit-guard.spec.ts** (unit): the sentence for each mix of running scripts and shell commands, the unsaved-work sentence alone and after the running-work one, none when idle, a hold on unsaved work alone, and the gate: asked once per close, a request while the question is open, the shutdown bypass, and Cancel followed by a later quit asking again.
+- **quit-guard.spec.ts** (unit): the sentence for each mix of running scripts and shell commands, the unsaved-work sentence alone and after the running-work one, none when idle, a hold on unsaved work alone, and the gate: asked once per close, a request while the question is open, the shutdown bypass, and Cancel followed by a later quit asking again. `resetUnsavedWork` drops the form and takes the recount; `awaitRendererFlush` answers `no-window`, `flushed` and `timeout`, and an ack after the timeout changes nothing. `createBeforeQuitHandler` holds every quit, starts the teardown once, holds a second quit during it, and asks over held work.
+
+### Component
+- **workspace-tabs-flush.spec.tsx**: an edit followed by unmount, `pagehide` or `flushAll` inside the debounce is sent; `flushAll` resolves after the save settles, also when it fails.
+- **renderer-log.spec.ts**: `logToMain` cuts the message and stack, coerces an Error's non-string message and stack, warns once when main refuses or the bridge is missing, and never throws or rejects; the global listeners forward an uncaught error and an unhandled rejection.
+- **error-boundary.spec.tsx**: the caught error goes to `app:log` with its stack and the component stack, cut to 8000 characters.
+- **mongo-shell-pane.spec.tsx**: a refused Stop prints why in the pane and logs it; a stop that fails during cleanup is logged.
+- **flush-on-quit.spec.tsx**: `FlushOnQuit` answers a flush request after every flusher has finished, answers with none registered, logs a refused answer to the console instead of leaving it unhandled, and unsubscribes on unmount.
 
 ### E2E
 - **first-run.e2e.ts**: delete the userData dir; launch; assert the connections page renders empty state and the DB file exists on disk.
 - **crash-reload.e2e.ts**: force a renderer crash via `window.location = 'about:crash'`; assert the window reloads once.
 - **f06-quit-confirm.e2e.ts**: with the dialog stubbed in main, quitting idle exits without asking; with a script or a shell command running it asks, names it, stays open on Cancel and exits on Quit; off macOS, closing the window with work running asks once, keeps the window on Cancel and exits on Quit; with text typed into a new connection form, quitting asks and names the form.
+- **quit-flushes-tab-state.e2e.ts**: a filter typed and quit at once, or typed and the window closed at once, is back after a relaunch on the same userData; after a reload onto the new-connection page with a dirty pipeline and "Reopen tabs on launch" off, quitting names the pipeline.

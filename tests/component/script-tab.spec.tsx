@@ -209,6 +209,23 @@ describe('ScriptTab', () => {
     resolveRun({ valueJson: null, printBuffer: '', durationMs: 0 });
   });
 
+  it('tells the user and the main log when a cancel is refused', async () => {
+    const refused = { code: 'INTERNAL', message: 'no such run' };
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    installAtelierMock({
+      script: { run: () => new Promise(() => {}), cancel: async () => { throw refused; } },
+      app: { log },
+    });
+
+    render(<ScriptTab tab={tab()} onPatch={() => {}} />);
+    fireEvent.click(screen.getByText('▶ Run'));
+    fireEvent.click(await screen.findByText('Cancel'));
+
+    expect(await screen.findByText('Cancel failed')).toBeTruthy();
+    expect(screen.getByText('no such run')).toBeTruthy();
+    expect(log).toHaveBeenCalledWith({ level: 'warn', message: 'script cancel failed: no such run', source: 'component' });
+  });
+
   it('forwards title and dbName edits through onPatch', () => {
     installAtelierMock();
     const onPatch = vi.fn();

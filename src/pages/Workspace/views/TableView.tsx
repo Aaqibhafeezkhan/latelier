@@ -39,6 +39,7 @@ import {
   deriveColumns,
   resolveColumns,
   getValueAtPath,
+  nestedReferenceFor,
   ariaSortFor,
   type ResolvedColumn,
 } from './tableColumns';
@@ -141,6 +142,9 @@ interface TableCellProps {
   cellKey: string;
   isCopied: boolean;
   rule?: ReferenceRule;
+  /** Set when the chip belongs to a nested path of an object cell: the chip acts on this path and value instead of the cell's. */
+  refPath?: string;
+  refValue?: unknown;
   onCopyCell: (text: string, cellKey: string) => void;
   onContextMenu: (
     e: React.MouseEvent,
@@ -168,6 +172,8 @@ function TableCell({
   cellKey,
   isCopied,
   rule,
+  refPath,
+  refValue,
   onCopyCell,
   onContextMenu,
   onRefHover,
@@ -528,9 +534,9 @@ function TableCell({
           </span>
           <ReferenceChip
             rule={rule}
-            onHover={(rect) => onRefHover?.(rule, value, rect)}
+            onHover={(rect) => onRefHover?.(rule, refPath ? refValue : value, rect)}
             onLeave={() => onRefHoverLeave?.()}
-            onClick={() => onRefOpen?.(rule, fieldPath, value)}
+            onClick={() => onRefOpen?.(rule, refPath ?? fieldPath, refPath ? refValue : value)}
           />
         </span>
       ) : (
@@ -856,13 +862,26 @@ function TableRowImpl({
           const cellKey = `${index}:${col.field}`;
           const isCopied = copiedCell === cellKey;
           const width = ownGet(widths, col.field) ?? 160;
-          const rule = val !== undefined ? refsByField?.get(fieldPath) : undefined;
+          const directRule = val !== undefined ? refsByField?.get(fieldPath) : undefined;
+          // A rule on a dotted path inside an object cell never matches the
+          // column key, so the parent cell carries the chip for the nested
+          // value instead.
+          // ponytail: first nested rule only; a cell with several nested references shows one chip — list them in the hover card if that bites.
+          const nested =
+            !directRule &&
+            col.kind === 'field' &&
+            toDisplayValue(val).type === 'object'
+              ? nestedReferenceFor(col.field, doc, refsByField)
+              : null;
+          const rule = directRule ?? nested?.rule;
 
           return (
             <TableCell
               key={col.field}
               value={val}
               fieldPath={fieldPath}
+              refPath={nested?.path}
+              refValue={nested?.value}
               isFieldColumn={col.kind === 'field'}
               doc={doc}
               width={width}

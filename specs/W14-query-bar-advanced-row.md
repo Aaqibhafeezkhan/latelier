@@ -261,8 +261,12 @@ so the 5-file contract and `scripts/ipc-secret-allowlist.txt` are untouched.
   projection / sort / limit is set, leaves the advanced row **open**.
 - The inverse: first tab has a sort, second tab has none → the advanced row
   is **collapsed** on the second tab.
-- Loading a Saved query with a projection into the active tab opens the
-  advanced row.
+- Loading a Saved or Recent query that has advanced values into the active
+  tab opens the advanced row, whatever the row held before: a tab whose row
+  already had values and was collapsed by the user opens too. Any load that
+  replaces the query wholesale (Saved and Recent run-here, Reset) re-derives
+  the row as a tab switch does, so Reset, which empties the values, collapses
+  it.
 - A user's explicit collapse of the advanced row is **not** undone by editing
   the filter, typing in the query bar, or any other same-tab re-render.
 - When collapsed with at least one advanced value set, the trigger shows a
@@ -290,7 +294,9 @@ so the 5-file contract and `scripts/ipc-secret-allowlist.txt` are untouched.
 2. Explicit collapse, then patch `queryRaw`; assert the region stays collapsed —
    the guard against a naive `useEffect` resync.
 3. Saved-query load with a projection into a tab that had none; assert the region
-   opens.
+   opens. A load bringing a different sort into a tab whose row had a sort and
+   was collapsed; assert the region opens, while a plain sort edit with no load
+   behind it leaves the collapsed row alone.
 4. Collapsed + advanced values set → indicator present, with its count. Collapsed
    + none set → absent.
 4a. Collapsed with an unparseable sort, a sort that is not a document, a limit

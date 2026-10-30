@@ -5,6 +5,7 @@ import { render, screen, waitFor, fireEvent, act } from '../helpers/render';
 import { DarkCtx } from '../../src/ThemeContext';
 import { AggregationTab } from '../../src/pages/Workspace/Aggregation/AggregationTab';
 import { notifications } from '@mantine/notifications';
+import { commandRegistry } from '../../src/commands/registry';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { invalidateSampleSchemaCache } from '../../src/features/fieldSuggestions/sources/sampleSchemaSource';
 import { invalidateSchemaEnumCache } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
@@ -702,6 +703,30 @@ describe('AggregationTab — cancelling a run', () => {
     return { run, cancel };
   }
 
+  it('a refused cancel is logged and shown to the user', async () => {
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    installAtelierMock({
+      app: { log },
+      agg: {
+        run: (() => new Promise(() => {})) as never,
+        cancel: async () => {
+          throw { code: 'INTERNAL', message: 'no such run' };
+        },
+      },
+    });
+    renderStatefulTab({
+      ...DEFAULT_AGGREGATION_TAB_STATE,
+      stages: [{ id: 1, op: '$match', body: '{}', enabled: true }],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText('Cancel failed')).toBeTruthy();
+    expect(screen.getByText('no such run')).toBeTruthy();
+    expect(log).toHaveBeenCalledWith({ level: 'warn', message: 'aggregation cancel failed: no such run', source: 'component' });
+  });
+
   it('a cancelled write run that completes shows its result and says the write ran to completion', async () => {
     const pending = deferred<typeof ranOk>();
     const { run, cancel } = await startWriteRun(pending.promise);
@@ -930,5 +955,128 @@ describe('AggregationTab — Copy menu (#23)', () => {
   it('is disabled while the pipeline does not validate', () => {
     renderTab(pipelineState('{ a: '));
     expect((screen.getByRole('button', { name: 'Copy pipeline' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// jsdom never blurs an element that goes `disabled`, and the e2e suite cannot
+// inject IPC latency, so the focus drop itself is unobservable here; what the
+// fix guarantees (and what is asserted) is that Save never takes the real
+// `disabled` attribute, which is what makes Chromium blur it.
+describe('AggregationTab — Save stays focusable when it goes inert', () => {
+  const savedState = {
+    ...DEFAULT_AGGREGATION_TAB_STATE,
+    stages: [{ id: 1, op: '$match', body: '{}', enabled: true }],
+    savedId: 's1',
+    name: 'p',
+  } satisfies AggregationTabState;
+
+  const updateOk = async () => ({
+    id: 's1',
+    connectionId: 'c1',
+    name: 'p',
+    dbName: 'app',
+    collection: 'orders',
+    kind: 'aggregation' as const,
+    payload: { kind: 'aggregation' as const, stages: [] },
+    createdAt: '',
+    updatedAt: '',
+  });
+
+  it('a clean pipeline: Save is aria-disabled, not disabled, and a click saves nothing', () => {
+    const update = vi.fn<IpcApi['saved']['update']>(updateOk);
+    installAtelierMock({ saved: { update } });
+    renderStatefulTab(savedState);
+
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save.hasAttribute('disabled')).toBe(false);
+    expect(save.getAttribute('aria-disabled')).toBe('true');
+
+    fireEvent.click(save);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('a successful save clears dirty without taking focus off the button', async () => {
+    const update = vi.fn<IpcApi['saved']['update']>(updateOk);
+    installAtelierMock({ saved: { update } });
+    renderStatefulTab({ ...savedState, dirty: true });
+
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save.hasAttribute('aria-disabled')).toBe(false);
+    save.focus();
+    fireEvent.click(save);
+
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save' }).getAttribute('aria-disabled')).toBe('true'),
+    );
+    const after = screen.getByRole('button', { name: 'Save' });
+    expect(after.hasAttribute('disabled')).toBe(false);
+    expect(document.activeElement).toBe(after);
+  });
+});
+
+// The palette command reaches the same save as the button, so the button's
+// inert states (nothing changed, a run in flight) have to hold for it too.
+describe('AggregationTab — the "Save pipeline" palette command', () => {
+  const savedState = {
+    ...DEFAULT_AGGREGATION_TAB_STATE,
+    stages: [{ id: 1, op: '$match', body: '{}', enabled: true }],
+    savedId: 's1',
+    name: 'p',
+  } satisfies AggregationTabState;
+
+  const updateOk = async () => ({
+    id: 's1',
+    connectionId: 'c1',
+    name: 'p',
+    dbName: 'app',
+    collection: 'orders',
+    kind: 'aggregation' as const,
+    payload: { kind: 'aggregation' as const, stages: [] },
+    createdAt: '',
+    updatedAt: '',
+  });
+
+  function runSaveCommand() {
+    const cmd = commandRegistry.list().find((c) => c.id === 'agg.save');
+    if (!cmd) throw new Error('agg.save is not registered');
+    act(() => {
+      void cmd.perform({ pathname: '/workspace', connectionId: 'c1' });
+    });
+  }
+
+  it('saves nothing on a clean pipeline', async () => {
+    const update = vi.fn<IpcApi['saved']['update']>(updateOk);
+    installAtelierMock({ saved: { update } });
+    renderStatefulTab(savedState);
+
+    runSaveCommand();
+    await act(async () => {});
+
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('saves nothing while a run is in flight', async () => {
+    const update = vi.fn<IpcApi['saved']['update']>(updateOk);
+    const run = vi.fn<IpcApi['agg']['run']>(() => new Promise(() => {}));
+    installAtelierMock({ saved: { update }, agg: { run } });
+    renderStatefulTab({ ...savedState, dirty: true });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    runSaveCommand();
+    await act(async () => {});
+
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('still saves a dirty, idle pipeline', async () => {
+    const update = vi.fn<IpcApi['saved']['update']>(updateOk);
+    installAtelierMock({ saved: { update } });
+    renderStatefulTab({ ...savedState, dirty: true });
+
+    runSaveCommand();
+
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
   });
 });

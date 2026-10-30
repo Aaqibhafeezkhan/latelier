@@ -16,6 +16,8 @@ import {
   TextInput,
 } from '@mantine/core';
 import { api, isIpcError } from '../api/atelier';
+import { logFailure } from '../utils/rendererLog';
+import { notify } from '../theme/notifications';
 import { confirmDestructive } from '../utils/confirm';
 import { DisclosureToggle } from '../components/DisclosureToggle';
 import { SubmitButton } from '../components/SubmitButton';
@@ -114,14 +116,14 @@ export function UsersTab({
 
   // Fetch full connection (auth_username / auth_database) for self-protection.
   React.useEffect(() => {
-    void api.conn.get(conn.id).then(setConnFull).catch(() => { /* non-fatal */ });
+    void api.conn.get(conn.id).then(setConnFull).catch((err) => logFailure('loading the connection for self-protection', err));
   }, [conn.id]);
 
   React.useEffect(() => {
     void api.prefs
       .get<string>(LAST_DB_KEY)
       .then((v) => v && setPicked(v))
-      .catch(() => { /* non-fatal */ });
+      .catch((err) => logFailure(`reading preference ${LAST_DB_KEY}`, err));
   }, []);
 
   const loadDatabases = React.useCallback(async () => {
@@ -184,7 +186,10 @@ export function UsersTab({
 
   const onPickDb = (next: string) => {
     setPicked(next);
-    void api.prefs.set(LAST_DB_KEY, next).catch(() => { /* ok */ });
+    void api.prefs.set(LAST_DB_KEY, next).catch((err) => {
+      logFailure(`saving preference ${LAST_DB_KEY}`, err);
+      notify.warning('The selected database will not be remembered.', { title: 'Preference not saved' });
+    });
   };
 
   if (runtime.status !== 'connected') {
@@ -300,9 +305,9 @@ export function UsersTab({
           + New user
         </Button>
 
-        <Button size="compact-xs" variant="subtle" onClick={() => void loadUsers()} leftSection={I.sync} disabled={loading}>
+        <SubmitButton size="compact-xs" variant="subtle" onClick={() => void loadUsers()} leftSection={I.sync} submitting={loading}>
           Refresh
-        </Button>
+        </SubmitButton>
       </div>
 
       <div

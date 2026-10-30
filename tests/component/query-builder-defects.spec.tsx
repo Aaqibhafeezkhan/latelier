@@ -125,7 +125,8 @@ describe(' a blank or invalid filter text has no runnable filter', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/blank or not valid JSON/)).toBeTruthy();
+      // `filterProblem`'s own message: blank text is a missing filter.
+      expect(screen.getByText(/Enter a filter, like/)).toBeTruthy();
     });
     expect(findSpy).not.toHaveBeenCalled();
   });

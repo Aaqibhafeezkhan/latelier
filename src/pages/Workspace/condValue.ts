@@ -134,7 +134,8 @@ function jsonString(s: string): string | null {
 
 /** A chip's label in a row of `valType`: quoted only when the bare text would read back as something else. */
 export function chipText(el: Chip, valType: ValType): string {
-  if (typeof el !== 'string') return String(el);
+  // String(-0) is '0', which reads back as +0: keep the sign the user typed.
+  if (typeof el !== 'string') return Object.is(el, -0) ? '-0' : String(el);
   return parseChipText(el, valType) === el ? el : JSON.stringify(el);
 }
 

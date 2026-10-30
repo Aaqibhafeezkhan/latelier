@@ -9,6 +9,7 @@ import { TroubleshootingProvider } from "./troubleshooting/TroubleshootingProvid
 import { TroubleshootingPaletteCommand } from "./troubleshooting/TroubleshootingPaletteCommand";
 import { UpdateReadyPrompt } from "./features/updates/UpdateReadyPrompt";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { FlushOnQuit } from "./features/lifecycle/FlushOnQuit";
 
 /**
  * The root layout route: the provider stack every screen sits inside. Its own
@@ -20,6 +21,7 @@ export function RootLayout() {
   // routed screen, keeps the providers and the palette alive when only a screen fails.
   return (
     <ErrorBoundary>
+      <FlushOnQuit />
       <PaletteContextProvider>
         <SettingsProvider>
           <ConnectionTransferProvider>

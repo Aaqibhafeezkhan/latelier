@@ -56,7 +56,7 @@ describe('sqlite bootstrap', () => {
     }
   });
 
-  it('drops preview_fields (migration 011) and lands on schema_version 16', () => {
+  it('drops preview_fields (migration 011) and lands on schema_version 17', () => {
     tmp = createTempDb();
     const names = tmp.db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -64,7 +64,7 @@ describe('sqlite bootstrap', () => {
       .map((r) => (r as { name: string }).name);
     expect(names).not.toContain('preview_fields');
     const version = tmp.db.prepare('SELECT version FROM schema_version').get() as { version: number };
-    expect(version.version).toBe(16);
+    expect(version.version).toBe(17);
   });
 
   it('reopening an existing DB does not re-run migrations', () => {

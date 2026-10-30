@@ -137,7 +137,7 @@ describe('migration 016 and encryptLegacyRows', () => {
     const warnings: string[] = [];
     const log = { info: () => {}, warn: (_s: string, m: string) => void warnings.push(m) };
 
-    const first = openDatabase({ userDataDir: dir, migrations: loadMigrationsFromDisk() });
+    const first = openDatabase({ userDataDir: dir, migrations: loadMigrationsFromDisk().filter((m) => m.version <= 16) });
     const real = first.exec.bind(first);
     const spy = vi.spyOn(first, 'exec').mockImplementationOnce((sql: string) => {
       if (sql === 'VACUUM') throw new Error('database or disk is full');
@@ -155,7 +155,7 @@ describe('migration 016 and encryptLegacyRows', () => {
       closeDatabase(first);
     }
 
-    const second = openDatabase({ userDataDir: dir, migrations: loadMigrationsFromDisk() });
+    const second = openDatabase({ userDataDir: dir, migrations: loadMigrationsFromDisk().filter((m) => m.version <= 16) });
     try {
       expect(encryptLegacyRows(second, cipher, log)).toBe(0);
       expect(isVacuumPending(second)).toBe(false);
@@ -183,7 +183,7 @@ describe('migration 016 and encryptLegacyRows', () => {
       insert.run('v1', 'mac-1', now);
       insert.run('v2', 'mac-2', now);
       expect(() => insert.run('v3', 'mac-1', now)).toThrow(/UNIQUE/);
-      expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 16 });
+      expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 17 });
 
       db.prepare("DELETE FROM connections WHERE id = 'c1'").run();
       expect(db.prepare('SELECT COUNT(*) AS n FROM recent_field_values').get()).toEqual({ n: 0 });

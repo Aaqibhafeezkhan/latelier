@@ -1,4 +1,5 @@
 import { api } from '../api/atelier';
+import { logFailure } from '../utils/rendererLog';
 
 // Main restores the previous session's tabs (or clears them) before the first
 // window loads, so the first tab list this renderer sees is the restore. Tabs
@@ -10,7 +11,10 @@ export function readLaunchTabCount(): Promise<number> {
   launchTabCount ??= api.tabs.list().then(
     (list) => list.length,
     // Fail-open to "nothing restored": a missing hint beats a wrong one.
-    () => 0,
+    (err) => {
+      logFailure('listing the restored tabs', err);
+      return 0;
+    },
   );
   return launchTabCount;
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { redactSecrets } from '../../electron/log';
+import { compareLogFiles, redactSecrets } from '../../electron/log';
 
 // Mirrors REDACTED_KEYS in electron/log.ts — kept in sync manually since the
 // source set isn't exported.
@@ -169,6 +169,35 @@ describe('redactSecrets property: URI query secrets', () => {
         const out = JSON.stringify(redactSecrets({ k: `see ${sch}://h/?${query} end` }));
         expect(out).not.toContain(value);
         expect(out).toContain('tls=true');
+      }),
+    );
+  });
+});
+
+describe('compareLogFiles (property)', () => {
+  // A log file as the writer names it: part 0 is the bare name, and only the
+  // current prefix has numbered parts.
+  const logFile = fc
+    .record({
+      date: fc.date({ min: new Date('2020-01-01'), max: new Date('2030-12-31'), noInvalidDate: true }),
+      part: fc.nat({ max: 120 }),
+      legacy: fc.boolean(),
+    })
+    .map(({ date, part, legacy }) => {
+      const day = date.toISOString().slice(0, 10);
+      const p = legacy ? 0 : part;
+      return {
+        name: legacy ? `mongolab.${day}.log` : p === 0 ? `latelier.${day}.log` : `latelier.${day}.${p}.log`,
+        key: [day, p, legacy ? 0 : 1] as const,
+      };
+    });
+
+  it('sorts names exactly as their (date, part, legacy first) keys sort', () => {
+    fc.assert(
+      fc.property(fc.uniqueArray(logFile, { selector: (f) => f.name, maxLength: 12 }), (files) => {
+        const byKey = [...files].sort((a, b) =>
+          a.key[0] !== b.key[0] ? (a.key[0] < b.key[0] ? -1 : 1) : a.key[1] - b.key[1] || a.key[2] - b.key[2]);
+        expect(files.map((f) => f.name).sort(compareLogFiles)).toEqual(byKey.map((f) => f.name));
       }),
     );
   });

@@ -373,9 +373,11 @@ describe('MongoShellPane', () => {
         };
       },
     };
-    installAtelierMock({ mshell });
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    installAtelierMock({ mshell, app: { log } });
     return {
       mshell,
+      log,
       push: (evt: ShellOutputEvent) => act(() => outputCb!(evt)),
     };
   }
@@ -573,5 +575,74 @@ describe('MongoShellPane', () => {
 
     await waitFor(() => expect(mshell.start).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(input.placeholder).toBe(''));
+  });
+
+  // ─── A stop that fails ─────────────────────────────────────────────────
+
+  // Main rejects with the plain `{ code, message }` shape, not an Error.
+  const sessionGone = { code: 'NOT_FOUND', message: 'no session s1' };
+
+  it('Stop that main refuses prints why in the pane and logs it', async () => {
+    const { mshell, log } = installDrivable();
+    mshell.stop.mockRejectedValueOnce(sessionGone);
+    mount();
+    await readyInput();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    expect(await screen.findByText(/\[could not stop the shell: no session s1\]/)).toBeTruthy();
+    expect(log).toHaveBeenCalledWith({
+      level: 'warn', message: 'mshell stop failed: no session s1', source: 'component',
+    });
+  });
+
+  it('a stop that fails while the pane unmounts is logged, not swallowed', async () => {
+    const { mshell, log } = installDrivable();
+    mshell.stop.mockRejectedValueOnce(sessionGone);
+    const view = mount();
+    await readyInput();
+
+    view.unmount();
+
+    await waitFor(() => expect(log).toHaveBeenCalledWith({
+      level: 'warn', message: 'mshell stop failed during cleanup: no session s1', source: 'component',
+    }));
+  });
+
+  it('a stop that throws an Error sends its stack as the stack', async () => {
+    const { mshell, log } = installDrivable();
+    const err = new Error('bridge gone');
+    mshell.stop.mockRejectedValueOnce(err);
+    mount();
+    await readyInput();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    await waitFor(() => expect(log).toHaveBeenCalledWith({
+      level: 'warn', message: 'mshell stop failed: bridge gone', source: 'component', stack: err.stack,
+    }));
+  });
+
+  it('a stop that fails for a session that started after the pane went away is logged', async () => {
+    let release!: (info: ShellSessionInfo) => void;
+    const { mshell, log } = installDrivable(
+      () =>
+        new Promise<ShellSessionInfo>((resolve) => {
+          release = resolve;
+        }),
+    );
+    mshell.stop.mockRejectedValueOnce(sessionGone);
+    const view = mount();
+    await waitFor(() => expect(mshell.start).toHaveBeenCalledTimes(1));
+    view.unmount();
+
+    await act(async () => {
+      release({ sessionId: 's1', connectionId: 'c1', startedAt: new Date().toISOString() });
+    });
+
+    await waitFor(() => expect(mshell.stop).toHaveBeenCalledWith({ sessionId: 's1' }));
+    await waitFor(() => expect(log).toHaveBeenCalledWith({
+      level: 'warn', message: 'mshell stop failed during cleanup: no session s1', source: 'component',
+    }));
   });
 });

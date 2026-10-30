@@ -125,7 +125,11 @@ describe('Reset names the find options it clears', () => {
     expect(dialog.textContent).not.toContain('maxTimeMS');
 
     fireEvent.click(within(dialog).getAllByRole('button', { name: 'Reset' })[0]);
-    await waitFor(() => expect(collation.value).toBe(''));
+    // Reset is a load that replaces the query, so the advanced row
+    // re-derives like a tab switch: nothing is set any more, so it collapses.
+    await waitFor(() => expect(screen.queryByTestId('query-bar-collation')).toBeNull());
+    fireEvent.click(document.querySelector('[aria-controls="query-bar-advanced"]')!);
+    expect((screen.getByTestId('query-bar-collation') as HTMLInputElement).value).toBe('');
     expect((screen.getByTestId('query-bar-hint') as HTMLInputElement).value).toBe('');
   });
 

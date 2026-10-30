@@ -396,17 +396,32 @@ describe('QueryBar — Explain reads through the X14 repair', () => {
     expect(explainSpy).not.toHaveBeenCalled();
   });
 
+  // The Run gate trims, so NBSP padding opens Explain; the repair Explain
+  // reads through used to refuse the same text and leave the click dead.
+  it('explains a filter padded with Unicode spaces, sending it trimmed', async () => {
+    const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({
+      plan: { ok: 1 },
+      verbosity: 'queryPlanner',
+    }));
+    mountWith(tabWith('\u00a0{"foo":1}\u00a0', true), explainSpy);
+
+    await openExplainMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'queryPlanner' }));
+
+    await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(1));
+    expect(explainSpy.mock.calls[0]?.[0]?.filter).toBe('{"foo":1}');
+  });
+
   it('sends the filter byte-identical when it already parses strictly', async () => {
     const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({
       plan: { ok: 1 },
       verbosity: 'queryPlanner',
     }));
-    // This is the invariant that makes the repair inside Explain a no-op
-    // today, and it is worth pinning: the gate refuses everything
-    // `isEjsonDocument` refuses, and the transform returns `unchanged` for
-    // everything `JSON.parse` accepts, so the two sets never overlap. If a
-    // future change lets the gate open on repairable text, this test fails
-    // rather than Explain quietly reformatting a filter the user arranged.
+    // The gate opens on strict text and on strict text padded with Unicode
+    // spaces; the repair Explain reads through trims only that padding (the
+    // test above). Strict text with ordinary spacing comes back `unchanged`,
+    // so a reformatting repair fails here rather than Explain quietly
+    // rewriting a filter the user arranged.
     const hand = '{ "b" : 1,   "a" : 2 }';
     mountWith(tabWith(hand, true), explainSpy);
 

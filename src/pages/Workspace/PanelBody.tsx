@@ -213,6 +213,12 @@ export function PanelBody({
 }: PanelBodyProps) {
   const T = themeVars;
   const { openImport } = useConnectionTransfer();
+  // Bumped by every load that replaces the query wholesale (Reset, Saved and
+  // Recent run-here, all in BuilderPane). Lifted here because QueryBar needs
+  // it too: such a load re-derives the advanced row's open state, which a
+  // same-tab `hasAdvanced` change alone misses when the row already had
+  // values and was collapsed.
+  const [loadGen, bumpLoadGen] = React.useReducer((n: number) => n + 1, 0);
   const {
     prefsReady,
     refDrawerWidth, setRefDrawerWidth, commitRefDrawerWidth,
@@ -384,6 +390,7 @@ export function PanelBody({
                       />
                       <QueryBar
                         suggestionContext={collection.suggestionContext}
+                        loadGen={loadGen}
                         runShortcutRef={runShortcutRef}
                       />
                       <ResultViewer>
@@ -501,6 +508,8 @@ export function PanelBody({
                       >
                         <BuilderPane
                           savedRefreshKey={collection.savedRefreshKey}
+                          loadGen={loadGen}
+                          onLoaded={bumpLoadGen}
                           onOpenInTab={(saved) => {
                             if (saved.kind === 'aggregation') {
                               // Main loads the stored stages and refuses a pipeline

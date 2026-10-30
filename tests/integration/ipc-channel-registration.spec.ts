@@ -101,6 +101,7 @@ const PUSH_EVENT_CHANNELS = new Set<string>([
   IPC_CHANNELS.mshellOutputEvent,
   IPC_CHANNELS.dataImportProgressEvent,
   IPC_CHANNELS.appMenuCommandEvent,
+  IPC_CHANNELS.appFlushRequestEvent,
   IPC_CHANNELS.updatesStateEvent,
 ]);
 

@@ -34,6 +34,12 @@ describe('builderToStages (#156)', () => {
     });
   });
 
+  it('opens a filter padded with Unicode spaces as its trimmed $match, without throwing', () => {
+    // `findProblem` accepts NBSP padding; `JSON.parse` on the raw text throws.
+    expect(opsOf(tab('\u00a0{"a":1}\u00a0'))).toEqual(['$match {"a":1}']);
+    expect(opsOf(tab('\u00a0{}\u00a0'))).toEqual([]);
+  });
+
   it('omits each clause that is not set, and an empty filter', () => {
     expect(opsOf(tab('{}'))).toEqual([]);
     expect(opsOf(tab('  {}  '))).toEqual([]);

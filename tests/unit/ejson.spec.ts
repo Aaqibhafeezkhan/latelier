@@ -703,6 +703,13 @@ describe('renderer isValidEjson / isPlainDocument', () => {
     expect(isPlainDocumentRenderer(null)).toBe(false);
     expect(isEjsonDocumentRenderer('null')).toBe(false);
   });
+
+  // `JSON.parse` refuses the Unicode spaces `trim` strips, so the trim is what
+  // makes a padded document read as one — the filter Run gate relies on it.
+  it('isEjsonDocument accepts a document padded with NBSP, BOM or em space', () => {
+    expect(isEjsonDocumentRenderer('\u00a0{"a":1}\u00a0')).toBe(true);
+    expect(isEjsonDocumentRenderer('\ufeff{"a":1}\u2003')).toBe(true);
+  });
 });
 
 describe('renderer ejsonStringifyReadable — isoDate does not crash on a malformed inner $date', () => {

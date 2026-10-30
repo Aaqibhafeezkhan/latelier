@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CollectionTabState, LastRun } from '@shared/types';
 import { api, getErrorMessage } from '../../api/atelier';
+import { logFailure } from '../../utils/rendererLog';
 import { invalidateRecentValuesCache } from '../../features/fieldSuggestions/sources';
 import { fieldValueEntriesFromFilter } from '../../features/fieldSuggestions/fieldValueEntries';
 import { queryRunKey } from '../../utils/queryRunKey';
@@ -9,6 +10,7 @@ import {
   compileFindOptions,
   currentFilterJson,
   effectivePageLimit,
+  filterProblem,
   optionsProblem,
   projectionProblem,
   sortProblem,
@@ -138,7 +140,7 @@ export function useQueryRunner({
       // itself as stale and skips patching state once the abort settles.
       runTokenRef.current.set(target.id, (runTokenRef.current.get(target.id) ?? 0) + 1);
       clearRunning(target.id);
-      void api.query.cancel({ token }).catch((err: unknown) => console.warn('[query] cancel failed', err));
+      void api.query.cancel({ token }).catch((err: unknown) => logFailure('query cancel', err));
     },
     [clearRunning],
   );
@@ -153,7 +155,7 @@ export function useQueryRunner({
       if (runningIdsRef.current.has(target.id)) {
         const staleToken = cancelTokensRef.current.get(target.id);
         if (staleToken) {
-          void api.query.cancel({ token: staleToken }).catch((err: unknown) => console.warn('[query] cancel failed', err));
+          void api.query.cancel({ token: staleToken }).catch((err: unknown) => logFailure('query cancel', err));
         }
       }
       const runToken = (runTokenRef.current.get(target.id) ?? 0) + 1;
@@ -214,10 +216,9 @@ export function useQueryRunner({
               documents: target.state.lastRun?.documents ?? [],
               durationMs: 0,
               ranAt: new Date().toISOString(),
-              error: {
-                code: 'VALIDATION',
-                message: 'Filter text is blank or not valid JSON',
-              },
+              // `currentFilterJson` is null exactly when `filterProblem`
+              // names a reason, so the pill says what is wrong with the filter.
+              error: { code: 'VALIDATION', message: filterProblem(state.queryRaw)! },
             },
           });
           return;
@@ -335,7 +336,7 @@ export function useQueryRunner({
               if (lastWrittenRef.current.get(target.id) !== written) return;
               patchState(target.id, { lastRun: { ...lastRun, plan: res.plan } });
             })
-            .catch((err: unknown) => console.warn('[query] plan explain failed', err));
+            .catch((err: unknown) => logFailure('plan explain', err));
         }
         // Fire-and-forget: persists the values this run's conditions actually
         // carried for the value-suggestion popover. Never
@@ -355,7 +356,7 @@ export function useQueryRunner({
             })
             // Value history is a convenience: a failed write must not fail
             // the run, but it is reported rather than dropped.
-            .catch((err: unknown) => console.warn('[recent] recordFieldValues failed', err));
+            .catch((err: unknown) => logFailure('recording field values', err));
         }
         recordEvent?.(
           'queryRun',
@@ -388,7 +389,12 @@ export function useQueryRunner({
               userLimit !== null ? Math.min(count, userLimit) : count;
             patchState(target.id, { totalCount: displayCount });
           })
-          .catch(() => {});
+          .catch((err) => {
+            // A superseded run's count is cancelled with it, which is not a failure.
+            // The page itself is already on screen; only its total goes missing.
+            if (runToken !== runTokenRef.current.get(target.id)) return;
+            logFailure('counting the matching documents', err);
+          });
       } catch (err) {
         // Superseded (cancelled, or a newer run already took over): the
         // abort's rejection is expected noise, not a result to show — a

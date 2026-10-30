@@ -115,4 +115,32 @@ describe('Workspace — unsaved pipelines report', () => {
     });
     expect(setUnsavedWork).not.toHaveBeenCalled();
   });
+
+  it('sends a refused report to the main log', async () => {
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    installAtelierMock({
+      tabs: { list: async () => [tab('t1', 0, true)] },
+      conn: { list: async () => [connectionFixture({ id: 'c1' })] },
+      app: {
+        setUnsavedWork: async () => {
+          throw { code: 'INTERNAL', message: 'sink gone' };
+        },
+        log,
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/workspace']}>
+        <Workspace />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(log).toHaveBeenCalledWith({
+        level: 'warn',
+        message: 'reporting unsaved pipelines failed: sink gone',
+        source: 'component',
+      }),
+    );
+  });
 });

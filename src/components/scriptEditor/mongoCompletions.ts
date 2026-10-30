@@ -10,6 +10,7 @@ import { OPERATORS, type OperatorDef } from '../../features/fieldSuggestions/ope
 import { sampleSchemaSource } from '../../features/fieldSuggestions/sources';
 import type { FieldSuggestion } from '../../features/fieldSuggestions/types';
 import { detectFieldPosition } from './fieldPositionDetector';
+import { logFailure } from '../../utils/rendererLog';
 
 /**
  * Collection methods exposed via the `db.<coll>` proxy in `ScriptService`.
@@ -194,7 +195,10 @@ export function mongoCompletionSource(
               validFor,
             };
           },
-          () => null,
+          (err) => {
+            logFailure('completing field names', err);
+            return null;
+          },
         );
       }
     }

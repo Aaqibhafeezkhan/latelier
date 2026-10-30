@@ -45,7 +45,7 @@ function Harness({ initial, onState }: { initial: BuilderState; onState: (s: Col
   );
   return (
     <CollectionWorkspaceProvider state={state} actions={actions} meta={emptyWorkspaceMeta()}>
-      <QueryBar suggestionContext={null} />
+      <QueryBar suggestionContext={null} loadGen={0} />
     </CollectionWorkspaceProvider>
   );
 }

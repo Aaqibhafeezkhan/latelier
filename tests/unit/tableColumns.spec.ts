@@ -6,8 +6,9 @@ import {
   orderFields,
   deriveColumns,
   ariaSortFor,
+  nestedReferenceFor,
 } from '../../src/pages/Workspace/views/tableColumns';
-import type { TableColumnConfig } from '@shared/types';
+import type { ReferenceRule, TableColumnConfig } from '@shared/types';
 
 describe('orderFields', () => {
   const derived = ['_id', 'apple', 'banana', 'zebra'];
@@ -306,5 +307,72 @@ describe('ariaSortFor (#53)', () => {
   it('is "ascending" or "descending" for a sortable column\'s active direction', () => {
     expect(ariaSortFor(true, 1)).toBe('ascending');
     expect(ariaSortFor(true, -1)).toBe('descending');
+  });
+});
+
+describe('nestedReferenceFor', () => {
+  const mk = (id: string, sourceField: string): ReferenceRule => ({
+    id,
+    connectionId: 'c1',
+    sourceDb: 'app',
+    sourceCollection: 'orders',
+    sourceField,
+    targetDb: 'app',
+    targetCollection: 'users',
+    targetField: '_id',
+    projection: [],
+    displayTemplate: undefined,
+    enabled: true,
+    createdAt: '2026-04-01T00:00:00Z',
+    updatedAt: '2026-04-01T00:00:00Z',
+  });
+  const refs = (...fields: string[]) =>
+    new Map(fields.map((f) => [f, mk(f, f)] as const));
+
+  it('returns null with no rules at all', () => {
+    expect(nestedReferenceFor('address', { address: { userId: 1 } }, undefined)).toBeNull();
+    expect(nestedReferenceFor('address', { address: { userId: 1 } }, new Map())).toBeNull();
+  });
+
+  it('ignores a direct rule on the column itself', () => {
+    expect(nestedReferenceFor('address', { address: { userId: 1 } }, refs('address'))).toBeNull();
+  });
+
+  it('ignores a rule on a sibling column whose name merely starts with the field', () => {
+    expect(nestedReferenceFor('addr', { addr: { userId: 1 }, address: { userId: 2 } }, refs('address.userId'))).toBeNull();
+  });
+
+  it('matches a dotted rule and returns its rule, path and leaf value', () => {
+    const r = refs('address.userId');
+    expect(nestedReferenceFor('address', { address: { userId: 7 } }, r)).toEqual({
+      rule: r.get('address.userId'),
+      path: 'address.userId',
+      value: 7,
+    });
+  });
+
+  it('returns null when the dotted path is missing from the document', () => {
+    expect(nestedReferenceFor('address', { address: { city: 'x' } }, refs('address.userId'))).toBeNull();
+  });
+
+  it('returns null when the rule targets a nested object or an array', () => {
+    expect(nestedReferenceFor('address', { address: { geo: { a: 1 } } }, refs('address.geo'))).toBeNull();
+    expect(nestedReferenceFor('address', { address: { ids: [1, 2] } }, refs('address.ids'))).toBeNull();
+  });
+
+  it('treats an ObjectId sentinel as a leaf, not an object', () => {
+    const oid = { $oid: '507f1f77bcf86cd799439011' };
+    const r = refs('address.userId');
+    expect(nestedReferenceFor('address', { address: { userId: oid } }, r)).toEqual({
+      rule: r.get('address.userId'),
+      path: 'address.userId',
+      value: oid,
+    });
+  });
+
+  it('picks the first matching rule by localeCompare and skips non-leaf ones', () => {
+    const doc = { address: { a: { x: 1 }, b: 'bee', c: 'sea' } };
+    const r = refs('address.c', 'address.b', 'address.a');
+    expect(nestedReferenceFor('address', doc, r)?.path).toBe('address.b');
   });
 });

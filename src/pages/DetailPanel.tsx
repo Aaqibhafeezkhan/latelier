@@ -4,6 +4,8 @@ import { themeVars } from '../theme/themeVars';
 import { I } from '../icons';
 import { Button, Table, UnstyledButton, VisuallyHidden } from '@mantine/core';
 import { api, isIpcError } from '../api/atelier';
+import { logFailure } from '../utils/rendererLog';
+import { notify } from '../theme/notifications';
 import { disconnectConnection } from '../features/connections/disconnectConnection';
 import type {
   CollectionInfo,
@@ -145,7 +147,8 @@ function OverviewTab({ conn, runtime }: {
               variant="filled"
               size="xs"
               onClick={() => {
-                void api.mongo.connect(conn.id).catch(() => { /* status event updates UI */ });
+                // The status event updates the UI; the log keeps the cause.
+                void api.mongo.connect(conn.id).catch((err) => logFailure('connect', err));
               }}
             >
               {hasError ? 'Retry' : 'Connect'}
@@ -287,7 +290,7 @@ function CollectionsTab({ conn, runtime }: {
     void api.prefs
       .get<boolean>('ui.showSystemDbs')
       .then((v) => v !== null && setShowSystem(v))
-      .catch(() => { /* non-fatal */ });
+      .catch((err) => logFailure('reading preference ui.showSystemDbs', err));
   }, []);
 
   const loadCollections = React.useCallback(async (dbName: string) => {
@@ -341,7 +344,10 @@ function CollectionsTab({ conn, runtime }: {
   const toggleShowSystem = async () => {
     const next = !showSystem;
     setShowSystem(next);
-    void api.prefs.set('ui.showSystemDbs', next).catch(() => { /* ok */ });
+    void api.prefs.set('ui.showSystemDbs', next).catch((err) => {
+      logFailure('saving preference ui.showSystemDbs', err);
+      notify.warning('This choice will not be remembered.', { title: 'Preference not saved' });
+    });
   };
 
   if (runtime.status !== 'connected') {
@@ -552,7 +558,7 @@ export function DetailPanel({ selected, loading, onDelete, onDisconnect }: {
     let active = true;
     void api.mongo.status(selected.id).then((r) => {
       if (active) setRuntime(r);
-    }).catch(() => { /* ok */ });
+    }).catch((err) => logFailure('reading connection status', err));
     const off = api.mongo.onStatus((r) => {
       if (!active) return;
       if (r.id === selected.id) setRuntime(r);

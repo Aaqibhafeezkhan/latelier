@@ -180,6 +180,25 @@ Per composite widget (grid, tree, tablist, listbox):
   distinct from the selected treatment, and meeting WCAG 1.4.11 non-text
   contrast against the surfaces it can sit on.
 
+Per focus hand-off:
+
+- A dialog opened from the command palette returns focus on close to the
+  control that had it before the palette opened, not to `<body>`. The
+  palette's search input unmounts with the palette, so a dialog's own capture
+  of the active element cannot serve as the trigger; the palette remembers its
+  opener (`src/commands/paletteOpener.ts`) and `useDialogFocusReturn` uses it
+  whenever its capture lands inside the palette.
+- Reopening the Connection Switcher while it is still inside its exit
+  transition lands focus on its search field (or the add-mode button) every
+  time. Mantine keeps the dropdown mounted for that window, so `autoFocus`
+  does not run again; an effect keyed on the open state does the focusing.
+- A refresh or save button that is busy stays focusable: it uses `SubmitButton`
+  (`aria-disabled`, click swallowed) rather than the real `disabled` attribute,
+  which makes Chromium blur the button and drop focus to `<body>` a beat after
+  the click. jsdom never blurs a disabled element and the e2e suite cannot
+  inject IPC latency, so the component tests assert the attributes and the
+  swallowed click, not the blur itself.
+
 ## 5. Verification — mutation, not green
 
 `tsc -b` was green before this work and proves nothing about it. Every ticket

@@ -164,6 +164,60 @@ describe('ResultBar plan badge', () => {
 // W14 §9 — the plan badge's drawer re-asks the server with the tab's current
 // options. A half-typed one would come back as a server refusal; the
 // builder's own message names what to fix instead.
+describe('useFindExplain — the filter it sends', () => {
+  const wrap = (state: CollectionTabState) =>
+    function Wrapper({ children }: { children: React.ReactNode }) {
+      return (
+        <CollectionWorkspaceProvider state={state} actions={emptyWorkspaceActions()} meta={emptyWorkspaceMeta()}>
+          {children}
+        </CollectionWorkspaceProvider>
+      );
+    };
+
+  // The plan badge reads the committed `queryRaw`, which the Run gate accepts
+  // with NBSP padding; the main process's `JSON.parse` would refuse it.
+  it('sends a filter padded with Unicode spaces trimmed', async () => {
+    const explain = vi.fn(async () => ({ plan: collscanPlan, verbosity: 'queryPlanner' }));
+    installAtelierMock({ query: { explain } });
+    const state = makeState(collscanPlan, '\u00a0{"status":"a"}\u00a0');
+    const { result } = renderHook(() => useFindExplain(() => state.queryRaw), { wrapper: wrap(state) });
+
+    await result.current.runExplain('queryPlanner');
+    expect(explain).toHaveBeenCalledTimes(1);
+    expect((explain.mock.calls[0] as unknown[])[0]).toMatchObject({ filter: '{"status":"a"}' });
+  });
+
+  it('prefills the index suggestion from a filter padded with Unicode spaces', async () => {
+    installAtelierMock({ query: { explain: vi.fn(async () => ({ plan: collscanPlan, verbosity: 'queryPlanner' })) } });
+    const openCreateIndex = vi.fn();
+    const state = makeState(collscanPlan, '\u00a0{"status":"a"}\u00a0');
+    const { result } = renderHook(() => useFindExplain(() => state.queryRaw), {
+      wrapper: ({ children }) => (
+        <CollectionWorkspaceProvider state={state} actions={emptyWorkspaceActions({ openCreateIndex })} meta={emptyWorkspaceMeta()}>
+          {children}
+        </CollectionWorkspaceProvider>
+      ),
+    });
+
+    result.current.onCreateIndex!();
+    expect(openCreateIndex).toHaveBeenCalledWith(
+      expect.objectContaining({ keys: [{ field: 'status', direction: 1 }] }),
+    );
+  });
+
+  it('refuses an unrunnable filter with the Run gate\'s reason and asks the server nothing', async () => {
+    const explain = vi.fn(async () => ({ plan: collscanPlan, verbosity: 'queryPlanner' }));
+    installAtelierMock({ query: { explain } });
+    const state = makeState(collscanPlan, '[1]');
+    const { result } = renderHook(() => useFindExplain(() => state.queryRaw), { wrapper: wrap(state) });
+
+    await expect(result.current.runExplain('queryPlanner')).rejects.toThrow(
+      'A filter must be a document, like { "status": "active" }.',
+    );
+    expect(explain).not.toHaveBeenCalled();
+  });
+});
+
 describe('useFindExplain — find options that cannot run', () => {
   it('refuses with the option problem and asks the server nothing', async () => {
     const explain = vi.fn(async () => ({ plan: collscanPlan, verbosity: 'queryPlanner' }));

@@ -6,7 +6,9 @@ import type {
   ResultViewMode,
   CollectionTabState,
 } from '@shared/types';
-import { api, isIpcError } from '../../api/atelier';
+import { api, getErrorMessage, isIpcError } from '../../api/atelier';
+import { notify } from '../../theme/notifications';
+import { logFailure } from '../../utils/rendererLog';
 import { invalidateSampleSchemaCache } from '../../features/fieldSuggestions/sources/sampleSchemaSource';
 import { invalidateSchemaEnumCache } from '../../features/fieldSuggestions/sources/schemaEnumSource';
 import { themeVars } from '../../theme/themeVars';
@@ -120,7 +122,12 @@ function ScriptTabInner({ tab, defaultDb, onPatch }: ScriptTabProps) {
   const cancelScript = React.useCallback(() => {
     const token = cancelTokenRef.current;
     if (!token) return;
-    void api.script.cancel({ token }).catch(() => {});
+    void api.script.cancel({ token }).catch((err) => {
+      logFailure('script cancel', err);
+      notify.error(getErrorMessage(err, 'The script could not be cancelled.'), {
+        title: 'Cancel failed',
+      });
+    });
   }, []);
 
   const onSourceChange = React.useCallback(

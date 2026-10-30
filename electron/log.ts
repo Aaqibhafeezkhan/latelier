@@ -135,6 +135,71 @@ export const isLogFile = (name: string): boolean =>
   (name.startsWith('latelier.') || name.startsWith('mongolab.')) && name.endsWith('.log');
 
 /**
+ * Splits a log file name into its date and part: `latelier.<date>.log` is part
+ * 0 and `latelier.<date>.<N>.log` is part N, written once part N-1 reached the
+ * size cap. A part that is not a number comes back NaN.
+ */
+function logNameParts(name: string): { date: string; part: number } {
+  const fields = name.slice(name.indexOf('.') + 1, -'.log'.length).split('.');
+  return { date: fields[0]!, part: fields.length === 1 ? 0 : Number.parseInt(fields[1]!, 10) };
+}
+
+/**
+ * Oldest-first order of log file names: by date, then by part number counted
+ * as a number (`.10` after `.2`, and the bare name before `.1`), then the
+ * pre-rename `mongolab.` file first, since on the upgrade day it was written
+ * before the `latelier.` one. Whole-name order gets all three wrong. Dates are
+ * ISO, so code-unit order is chronological; `localeCompare` is avoided on
+ * purpose, because its collation depends on the locale and which files a
+ * caller keeps must not.
+ */
+export function compareLogFiles(a: string, b: string): number {
+  const pa = logNameParts(a);
+  const pb = logNameParts(b);
+  const legacy = (name: string) => (name.startsWith('mongolab.') ? 0 : 1);
+  if (pa.date < pb.date) return -1;
+  if (pa.date > pb.date) return 1;
+  return pa.part - pb.part || legacy(a) - legacy(b);
+}
+
+export type RateVerdict = { allow: true } | { allow: false; firstDrop: boolean; until: number };
+
+export interface RateGate {
+  take: () => RateVerdict;
+  /** Opens a fresh window: the next call is allowed whatever came before. */
+  reset: () => void;
+}
+
+/**
+ * Lets at most `maxPerWindow` calls through per fixed window of `windowMs`,
+ * the window starting at the first call after the last one ended. A refused
+ * call says whether it is the window's first refusal, so the caller can say
+ * once that lines are being dropped, and when the window ends.
+ */
+export function createRateGate(maxPerWindow: number, windowMs: number, now: () => number = Date.now): RateGate {
+  let windowStart = Number.NEGATIVE_INFINITY;
+  let count = 0;
+  return {
+    take() {
+      const t = now();
+      // A clock that moved back (NTP, a manual change) also opens a window:
+      // otherwise every call would be refused until it caught up, unannounced.
+      if (t < windowStart || t - windowStart >= windowMs) {
+        windowStart = t;
+        count = 0;
+      }
+      count++;
+      if (count <= maxPerWindow) return { allow: true };
+      return { allow: false, firstDrop: count === maxPerWindow + 1, until: windowStart + windowMs };
+    },
+    reset() {
+      windowStart = Number.NEGATIVE_INFINITY;
+      count = 0;
+    },
+  };
+}
+
+/**
  * Deletes log files past retention. A failure stops the sweep (nothing more is
  * pruned this run), so it is returned for the caller to report once it has a
  * logger — silently stopping would let logs outlive their retention unnoticed.
@@ -178,6 +243,8 @@ export function createLogger(userDataDir: string, opts: {
   level?: LogLevel;
   retentionDays?: number;
   toStderr?: boolean;
+  /** A day's file rolls to the next `.N` part once it holds this many bytes. */
+  maxFileBytes?: number;
 } = {}): Logger {
   // Defaults to the quiet level on purpose. `ipc.req` logs the pre-validation
   // payload of every channel — documents, filters, shell input — so a debug
@@ -201,7 +268,42 @@ export function createLogger(userDataDir: string, opts: {
   startupWarnings.push(...pruneOldLogs(logsDir, retention), ...tightenLogFiles(logsDir));
 
   let diskFailureReported = false;
-  const filePath = () => path.join(logsDir, `latelier.${todayStamp()}.log`);
+
+  // The file being written: its day, its part and the bytes it holds. The
+  // size is counted in memory and read from disk only when a day is opened
+  // (the first line, then each date change), never per line.
+  const maxFileBytes = opts.maxFileBytes ?? 10 * 1024 * 1024;
+  let day: string | undefined;
+  let part = 0;
+  let bytes = 0;
+  const partPath = (stamp: string, n: number) =>
+    path.join(logsDir, n === 0 ? `latelier.${stamp}.log` : `latelier.${stamp}.${n}.log`);
+
+  // Resumes the newest part of the day already on disk, so a restart appends
+  // where the last run stopped rather than to a part that is already full.
+  function openDay(stamp: string): void {
+    const parts = fs.readdirSync(logsDir)
+      .filter((name) => name.startsWith(`latelier.${stamp}.`) && name.endsWith('.log'))
+      .map((name) => logNameParts(name).part)
+      .filter((n) => Number.isInteger(n));
+    const newest = Math.max(0, ...parts);
+    bytes = fs.statSync(partPath(stamp, newest), { throwIfNoEntry: false })?.size ?? 0;
+    part = newest;
+    day = stamp;
+  }
+
+  // A part that already holds bytes rolls over before a line would take it
+  // past the cap; an empty one takes the line whatever its size, or a single
+  // oversized line would open empty parts forever.
+  function fileFor(lineBytes: number): string {
+    const stamp = todayStamp();
+    if (stamp !== day) openDay(stamp);
+    if (bytes > 0 && bytes + lineBytes > maxFileBytes) {
+      part++;
+      bytes = 0;
+    }
+    return partPath(stamp, part);
+  }
 
   function write(lvl: LogLevel, tag: string, msg: string, data?: unknown): void {
     if (LEVEL_ORDER[lvl] < LEVEL_ORDER[level]) return;
@@ -214,8 +316,12 @@ export function createLogger(userDataDir: string, opts: {
       ...(data !== undefined ? { data: redactSecrets(data) } : {}),
     };
     const serialized = JSON.stringify(line) + '\n';
+    const lineBytes = Buffer.byteLength(serialized);
     try {
-      fs.appendFileSync(filePath(), serialized, { mode: 0o600 });
+      // Opening the day reads the logs dir, so it fails with the same broken
+      // disk as the append and is reported the same way.
+      fs.appendFileSync(fileFor(lineBytes), serialized, { mode: 0o600 });
+      bytes += lineBytes;
     } catch {
       // Logging must never crash the app, and the failing logger cannot report
       // its own failure, so say so once on stderr. Fixed text, no re-entry into

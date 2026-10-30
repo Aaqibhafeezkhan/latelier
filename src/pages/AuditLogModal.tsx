@@ -20,9 +20,17 @@ function target(e: AuditEntry): string {
   return e.collection === null ? e.dbName : `${e.dbName}.${e.collection}`;
 }
 
+const CHANGED_LABELS = {
+  validator: 'validator',
+  validationLevel: 'validation level',
+  validationAction: 'validation action',
+  view: 'view definition',
+} as const;
+
 function details(e: AuditEntry): string {
   const s = e.summary;
   const parts: string[] = [];
+  if ('changed' in s) parts.push(`changed ${s.changed.map((g) => CHANGED_LABELS[g]).join(', ')}`);
   if ('filter' in s) parts.push(s.filter);
   if ('fileName' in s) parts.push(s.format ? `${s.fileName} (${s.format.toUpperCase()})` : s.fileName);
   if ('insertedCount' in s && s.insertedCount !== undefined) parts.push(`${s.insertedCount} inserted`);

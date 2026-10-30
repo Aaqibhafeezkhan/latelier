@@ -20,6 +20,7 @@ import { SavedAggregationPayloadSchema } from '../ipc/schemas/saved.ts';
 import type { SavedQueryService } from './SavedQueryService.ts';
 import { serializeTabState } from './tabStateResults.ts';
 import type { AppStateService } from './AppStateService.ts';
+import type { Logger } from '../log.ts';
 
 export interface OpenCollectionInput {
   connectionId: string;
@@ -56,9 +57,40 @@ export interface TabStatePatch {
 export class WorkspaceStateService {
   private repo: WorkspaceTabRepo;
   private saved: SavedQueryService;
-  constructor(repo: WorkspaceTabRepo, saved: SavedQueryService) {
+  private log: Logger | undefined;
+  constructor(repo: WorkspaceTabRepo, saved: SavedQueryService, log?: Logger) {
     this.repo = repo;
     this.saved = saved;
+    this.log = log;
+  }
+
+  /**
+   * How many saved collection tabs hold a pipeline with unsaved edits, by the
+   * renderer's own rule (a truthy `aggregation.dirty`). Main recounts with this when
+   * the page that reported the count is gone. A row whose state does not
+   * parse cannot be read as dirty, so it counts 0; the rows are named in one
+   * warning per count.
+   */
+  dirtyPipelineCount(): number {
+    let count = 0;
+    const unreadable: string[] = [];
+    for (const row of this.repo.list()) {
+      // Every kind but `script` reads back as a collection tab (`rowToTab`).
+      if (row.kind === 'script') continue;
+      let state: unknown;
+      try {
+        state = JSON.parse(row.state_json);
+      } catch {
+        unreadable.push(row.id);
+        continue;
+      }
+      // Truthy, not `=== true`: the Workspace counts its tabs the same way.
+      if ((state as Partial<CollectionTabState> | null)?.aggregation?.dirty) count++;
+    }
+    if (unreadable.length > 0) {
+      this.log?.warn('tabs', 'saved tab state does not parse; not counted as a dirty pipeline', { ids: unreadable });
+    }
+    return count;
   }
 
   list(): WorkspaceTab[] {

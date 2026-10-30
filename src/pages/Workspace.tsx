@@ -8,6 +8,7 @@ import { useWorkspaceTabs } from '../state/workspaceTabs';
 import { useConnections, isConnectionActive, isKnownNotConnected } from '../state/connections';
 import { setFocusedConnectionId as publishFocusedConnectionId } from '../state/focusedConnection';
 import { api, getErrorMessage, isIpcError } from '../api/atelier';
+import { logFailure } from '../utils/rendererLog';
 import { notify } from '../theme/notifications';
 import { ejsonParse, isPlainDocument } from '../utils/ejson';
 import { buildUpdateRequest, setAtSegments } from './Workspace/documentDiff';
@@ -199,7 +200,9 @@ function WorkspaceInner() {
   ).length;
   React.useEffect(() => {
     if (!tabsKnown) return;
-    api.app.setUnsavedWork({ source: 'pipelines', count: dirtyPipelineCount }).catch(console.warn);
+    api.app
+      .setUnsavedWork({ source: 'pipelines', count: dirtyPipelineCount })
+      .catch((err) => logFailure('reporting unsaved pipelines', err));
   }, [tabsKnown, dirtyPipelineCount]);
 
   const referenceRules = useReferenceRules(
@@ -983,8 +986,9 @@ function WorkspaceInner() {
   // and Collection. Not guarded on "already connected" — re-clicking retries
   // an errored Connection, and a re-connect must rebuild the client after edits.
   const openConnection = React.useCallback((id: string) => {
-    void api.conn.touchUsed(id).catch(() => { /* fire-and-forget */ });
-    void api.mongo.connect(id).catch(() => { /* status event drives the UI */ });
+    void api.conn.touchUsed(id).catch((err) => logFailure('marking the connection used', err));
+    // The status event drives the UI; the log keeps the cause.
+    void api.mongo.connect(id).catch((err) => logFailure('connect', err));
   }, []);
 
   // Only the Focused Tab's own Connection auto-connects on launch; every

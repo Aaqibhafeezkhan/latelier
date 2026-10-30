@@ -269,6 +269,11 @@ function parseFieldPredicate(field: string, rawValue: unknown): FilterNode[] {
       const guess = guessSentinelOnly(rawValue);
       if (guess) return [condNode(field, '$eq', guess)];
       if (UNREPRESENTABLE_SENTINEL_KEYS.has(keys[0])) return [rawPair(field, rawValue)];
+      // `$date` is not in that set because the string form is representable
+      // and already won above. Reaching here means a non-string payload, the
+      // canonical `{$date: {$numberLong}}` shape: left to the operator-map
+      // branch it would become a bogus cond with op `$date`.
+      if (keys[0] === '$date') return [rawPair(field, rawValue)];
     }
     // Stryker disable next-line MethodExpression: swapping `every` for `some`
     // only diverges when the key set is mixed ($-prefixed and not), and any
@@ -370,7 +375,11 @@ function parseRoot(obj: Record<string, unknown>): GroupNode {
 export function parseFilter(ejson: string): ParseOutcome {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(ejson);
+    // Trimmed like the Run gate (`filterProblem`) trims: `JSON.parse` refuses
+    // the Unicode spaces `String.prototype.trim` strips (NBSP, BOM, em space),
+    // so a padded filter Run accepts would otherwise read as invalid here.
+    // Blank text still fails, as the empty string `JSON.parse` refuses.
+    parsed = JSON.parse(ejson.trim());
   } catch {
     return { ok: false, reason: 'Invalid JSON' };
   }

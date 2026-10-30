@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import { RolesTab } from '../../src/pages/RolesTab';
+import type { IpcApi } from '@shared/ipc';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import type {
   ConnectionRuntime,
@@ -45,6 +46,8 @@ const CUSTOM: RoleInfo = {
 
 function setup(over: {
   pref?: string | null;
+  prefSet?: (key: string, value: unknown) => Promise<unknown>;
+  log?: IpcApi['app']['log'];
   list?: (input: { dbName: string }) => Promise<RoleInfo[]>;
   create?: (input: RoleCreateInput) => Promise<{ ok: true }>;
   update?: (input: RoleUpdateInput) => Promise<{ ok: true }>;
@@ -61,7 +64,8 @@ function setup(over: {
         { name: 'myapp', sizeOnDisk: 0, empty: false },
       ],
     },
-    prefs: { get: (async () => over.pref ?? 'myapp') as never, set: async (_k, v) => v },
+    prefs: { get: (async () => over.pref ?? 'myapp') as never, set: (over.prefSet ?? (async (_k: string, v: unknown) => v)) as never },
+    ...(over.log ? { app: { log: over.log } } : {}),
     role: {
       list,
       ...(over.create ? { create: over.create } : {}),
@@ -304,5 +308,24 @@ describe('RolesTab', () => {
 
     finishDrop();
     await waitFor(() => expect(screen.queryByText('Drop role "appAdmin" on myapp?')).toBeNull());
+  });
+
+  it('says so, and logs the key but not the value, when the picked database cannot be remembered', async () => {
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    setup({
+      log,
+      prefSet: async () => {
+        throw { code: 'INTERNAL', message: 'disk full' };
+      },
+    });
+    await waitFor(() => expect(screen.getByText('appAdmin')).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText('Database'), { target: { value: 'admin' } });
+
+    expect(await screen.findByText('Preference not saved')).toBeTruthy();
+    await waitFor(() => expect(log).toHaveBeenCalledTimes(1));
+    const [line] = log.mock.calls[0]!;
+    expect(line.message).toMatch(/^saving preference .+ failed: disk full$/);
+    expect(line.message).not.toContain('admin');
   });
 });

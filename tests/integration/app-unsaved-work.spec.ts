@@ -64,3 +64,42 @@ describe('app:setUnsavedWork', () => {
     if (!res.ok) expect(res.error.code).toBe('INTERNAL');
   });
 });
+
+describe('app:flushDone', () => {
+  const handlers = new Map<string, Handler>();
+  const done = async (payload: unknown) =>
+    (await handlers.get(IPC_CHANNELS.appFlushDone)!(invokeEvent, payload)) as Envelope<void>;
+
+  function register(onFlushDone?: () => void) {
+    handlers.clear();
+    const router = createRouter({ handle: (c: string, fn: Handler) => void handlers.set(c, fn) }, testSenderCheck);
+    registerAppChannels(router, () => null, new Set(), createPickedCredentialPaths(), undefined, undefined, onFlushDone);
+  }
+
+  it('hands the answer to the sink', async () => {
+    const sink = vi.fn();
+    register(sink);
+    expect((await done({})).ok).toBe(true);
+    expect(sink).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['a string', 'x'],
+    ['a number', 42],
+    ['an array', [1]],
+  ])('rejects %s without calling the sink', async (_label, payload) => {
+    const sink = vi.fn();
+    register(sink);
+    const res = await done(payload);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('VALIDATION');
+    expect(sink).not.toHaveBeenCalled();
+  });
+
+  it('fails as INTERNAL when no sink was given', async () => {
+    register();
+    const res = await done({});
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('INTERNAL');
+  });
+});

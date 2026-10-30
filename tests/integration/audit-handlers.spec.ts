@@ -328,6 +328,64 @@ describe('audit log via the router', () => {
     });
   });
 
+  describe('collectionModify', () => {
+    const validator = JSON.stringify({ $jsonSchema: { required: [BODY_MARKER] } });
+
+    it('a real collMod writes one row naming the namespace and the option groups, not their values', async () => {
+      await client.db(dbName).createCollection('orders');
+
+      await ok(IPC_CHANNELS.collectionModify, {
+        ...target('orders'),
+        options: { validator, validationLevel: 'moderate' },
+      });
+
+      const info = await client.db(dbName).listCollections({ name: 'orders' }, { nameOnly: false }).toArray();
+      expect((info[0] as { options?: unknown }).options).toMatchObject({ validationLevel: 'moderate' });
+      const entries = await list();
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        connectionId: 'c1',
+        dbName,
+        collection: 'orders',
+        op: 'collectionModify',
+        outcome: 'ok',
+        reversible: false,
+        summary: { op: 'collectionModify', changed: ['validator', 'validationLevel'] },
+      });
+      const raw = tmp.db.prepare('SELECT summary_json, undo_json FROM audit_log').all();
+      expect(JSON.stringify(raw)).not.toContain(BODY_MARKER);
+      expect(JSON.stringify(raw)).not.toContain('moderate');
+    });
+
+    it('a collMod the server refuses writes an error row with the envelope code', async () => {
+      const env = await shim.invoke(IPC_CHANNELS.collectionModify, {
+        ...target('does_not_exist'),
+        options: { validationAction: 'warn' },
+      });
+      expect(env.ok).toBe(false);
+
+      const entries = await list();
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({
+        collection: 'does_not_exist',
+        op: 'collectionModify',
+        outcome: 'error',
+        reversible: false,
+        summary: { op: 'collectionModify', changed: ['validationAction'] },
+      });
+      expect(entries[0]!.errorCode).toBe(env.ok ? undefined : env.error.code);
+    });
+
+    it('a payload the schema refuses writes no row', async () => {
+      await client.db(dbName).createCollection('orders');
+
+      const env = await shim.invoke(IPC_CHANNELS.collectionModify, { ...target('orders'), options: {} });
+
+      expect(env.ok).toBe(false);
+      expect(rowCount()).toBe(0);
+    });
+  });
+
   it('an audit write that throws leaves the Operation succeeded and logs the loss', async () => {
     await client.db(dbName).collection<{ _id: number }>('orders').insertOne({ _id: 1 });
     vi.spyOn(auditRepo, 'insert').mockImplementation(() => {

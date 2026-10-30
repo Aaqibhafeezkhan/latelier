@@ -171,6 +171,14 @@ what the model can't express.
 `$minKey` / `$maxKey`, `$code`, `$dbPointer`, and any `$in`/`$nin`/`$all` array
 containing an element that is itself unrepresentable.
 
+The canonical EJSON date, `{ $date: { $numberLong: "..." } }`, is unrepresentable
+too: only the string form `{ $date: "<ISO>" }` is a date value. A field holding
+the canonical form is one raw node that prints back verbatim; under an operator
+(`$gt`, ...) the pair is raw as for any other unrepresentable value, and inside
+an `$in`/`$nin`/`$all` array the element makes the array unrepresentable. It
+stays raw rather than being converted to an ISO string so that pasting it never
+rewrites text the user did not edit.
+
 The representable set is the inverse of `buildTypedValue` in `builder.ts`:
 plain string/number/boolean/null, `{$oid}`, `{$date}`, `{$numberLong}`,
 `{$numberDecimal}`, `{$regex}` (string-pattern form, no `$options` sibling —
@@ -653,7 +661,7 @@ Retired test ids and controls, so the churn isn't a surprise:
 - Nested `{ $and: [ { $or: [...] }, ... ] }` yields nested groups at arbitrary depth.
 - `parseFilter` fails **only** on invalid JSON and on a non-object root.
 - `$oid` / `$date` / `$numberLong` / `$numberDecimal` values round-trip through cond rows preserving their exact text.
-- Each unrepresentable value shape of §2b (plain nested object, `$binary`, `$timestamp`, `$numberDouble`/`$numberInt`, `$regularExpression`, `$minKey`/`$maxKey`, `$code`, `$dbPointer`, an `$in`/`$nin`/`$all` array with an unrepresentable element) yields a raw node, never a mangled cond.
+- Each unrepresentable value shape of §2b (plain nested object, `$binary`, `$timestamp`, `$numberDouble`/`$numberInt`, `$regularExpression`, `$minKey`/`$maxKey`, `$code`, `$dbPointer`, the canonical `{$date:{$numberLong}}` date, an `$in`/`$nin`/`$all` array with an unrepresentable element) yields a raw node, never a mangled cond.
 - `{ $or: [...], a: 1 }` parses to the root `$and` group containing the `$or` group and the cond as siblings.
 
 **Printer**
@@ -709,7 +717,7 @@ Retired test ids and controls, so the churn isn't a surprise:
 
 ### Unit — `tests/unit/filter-tree.spec.ts`
 - Parse table: one case per §2 row, including every raw-degradation shape and the mixed-top-level-keys row (`{ $or: [...], a: 1 }`).
-- Value representability (§2b): one case per unrepresentable shape (plain nested object, `$binary`, `$timestamp`, `$numberDouble`/`$numberInt`, `$regularExpression`, `$minKey`/`$maxKey`, `$code`, `$dbPointer`, an `$in` array with an unrepresentable element) — each yields a raw node. `$oid`/`$date`/`$numberLong`/`$numberDecimal` cases assert the exact value text round-trips into the cond row.
+- Value representability (§2b): one case per unrepresentable shape (plain nested object, `$binary`, `$timestamp`, `$numberDouble`/`$numberInt`, `$regularExpression`, `$minKey`/`$maxKey`, `$code`, `$dbPointer`, the canonical `{$date:{$numberLong}}` date, an `$in` array with an unrepresentable element) — each yields a raw node. `$oid`/`$date`/`$numberLong`/`$numberDecimal` cases assert the exact value text round-trips into the cond row.
 - Split allowlist: `$gte`+`$lte` splits; `$regex`+`$options`, `$near`+`$maxDistance`, and any pair containing a non-allowlisted key do not.
 - Print table: normalizations of §3a, one case each.
 - Numeric precision (§3a): a raw node containing `9007199254740993` makes `printFilter` fail with that node's path; the same value as `{"$numberLong":"9007199254740993"}` in the same position prints fine.

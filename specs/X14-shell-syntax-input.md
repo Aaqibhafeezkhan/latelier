@@ -330,6 +330,10 @@ main process, and it is pure JavaScript with no Node built-ins, so
   the box, and Run is enabled.
 - `{_id: ObjectId("…")}` runs and returns the document.
 - Text that already parses strictly is byte-identical after a blur.
+- Strict text padded with Unicode spaces `JSON.parse` refuses (NBSP, BOM, em
+  space) repairs to its trimmed text, byte for byte. The Run gate
+  (`filterProblem`) trims the same way, and `currentFilterJson` sends the
+  trimmed text, so Run, the runner, Explain and the blur agree on it.
 - A failed transform leaves the text as typed and Run disabled.
 - `queryRaw` in `workspace_tabs.state_json` never holds Shell Syntax after
   a blur or a Run.

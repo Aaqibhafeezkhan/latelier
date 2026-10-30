@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button, Group, Stack, Text, Title } from '@mantine/core';
 import { api, getErrorMessage } from '../api/atelier';
+import { describeError, logToMain } from '../utils/rendererLog';
 
 interface ErrorBoundaryState {
   error: Error | null;
@@ -26,10 +27,14 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Renderer convention is bare console.error (see CommandPalette.tsx,
-    // rank.ts) — electron/log.ts is main-process only and must not be
-    // imported here. This is the load-bearing "never silently swallow" log.
+    // Two records of the same error: the log file through main, which is what
+    // a diagnostic bundle carries, and devtools, where a developer looks first.
+    // The component stack goes with the error's own stack, since it is the
+    // only part that names the component that threw.
     console.error('[ErrorBoundary] uncaught render error', error, info.componentStack);
+    const { message, stack } = describeError(error);
+    const stacks = [stack, info.componentStack].filter((s) => s).join('\n');
+    logToMain('error', message, 'errorBoundary', stacks || undefined);
   }
 
   handleReload = () => {

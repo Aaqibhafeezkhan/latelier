@@ -7,6 +7,7 @@ import {
 } from './storage';
 import { HintsContext, type HintsContextValue } from './HintsContext';
 import { HINT_REGISTRY } from './registry';
+import { logFailure } from '../utils/rendererLog';
 
 const SETTLE_MS = 1500;
 const SESSION_COUNTER_CAP = 500;
@@ -59,14 +60,13 @@ export function HintsProvider({ children }: { children: React.ReactNode }) {
       next.add(id);
       return next;
     });
-    void dismissHintStorage(id).catch(() => {
-      // memory state is the source of truth for the rest of the session
-    });
+    // Memory state is the source of truth for the rest of the session.
+    void dismissHintStorage(id).catch((err) => logFailure('saving a dismissed hint', err));
   }, []);
 
   const reset = React.useCallback(() => {
     setDismissedIds(new Set());
-    void resetHintsStorage().catch(() => {});
+    void resetHintsStorage().catch((err) => logFailure('resetting hints', err));
   }, []);
 
   const registerCandidate = React.useCallback((id: FeatureHintId) => {

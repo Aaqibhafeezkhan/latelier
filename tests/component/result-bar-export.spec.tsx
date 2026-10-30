@@ -207,6 +207,21 @@ describe('ResultBar — Export all matching', () => {
     );
   });
 
+  it('sends a filter padded with Unicode spaces as the trimmed text find sends', async () => {
+    const exportFn = vi.fn<(input: Record<string, unknown>) => Promise<{ path: string | null; written: number; truncated: boolean }>>(
+      async () => ({ path: '/tmp/orders.json', written: 1, truncated: false }),
+    );
+    installAtelierMock({ query: { export: exportFn } as never });
+    renderBar({ queryRaw: '\u00a0{"active":true}\u00a0' });
+
+    await openExportDialog();
+    fireEvent.click(screen.getByRole('radio', { name: /All matching/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Export…$/ }));
+
+    await vi.waitFor(() => expect(exportFn).toHaveBeenCalledTimes(1));
+    expect(exportFn.mock.calls[0]![0].filter).toBe('{"active":true}');
+  });
+
   // W14 §9 — a collation changes which documents match, so the export of
   // "all matching" has to carry it; maxTimeMS is a find-only option.
   it('sends the collation, hint and read preference with the filter', async () => {

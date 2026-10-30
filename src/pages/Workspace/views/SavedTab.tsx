@@ -2,6 +2,7 @@ import React from 'react';
 import { ActionIcon, Badge, Box, Button, Group, Text, Tooltip } from '@mantine/core';
 import { I } from '../../../icons';
 import { themeVars } from '../../../theme/themeVars';
+import { SubmitButton } from '../../../components/SubmitButton';
 import { api, getErrorMessage } from '../../../api/atelier';
 import { confirmDestructive } from '../../../utils/confirm';
 import type { SavedKind, SavedQuery, SavedQuerySummary } from '@shared/types';
@@ -110,7 +111,7 @@ export function SavedTab({
         style={{ letterSpacing: 0.6, textTransform: 'uppercase' }}
       >
         <span style={{ flex: 1 }}>Saved · {collection}</span>
-        <Button
+        <SubmitButton
           variant="default"
           size="compact-xs"
           h={18}
@@ -118,11 +119,11 @@ export function SavedTab({
           fz={10}
           c={loading ? undefined : T.textMuted}
           onClick={() => void load()}
-          disabled={loading}
+          submitting={loading}
           aria-label="Refresh saved queries"
         >
           Refresh
-        </Button>
+        </SubmitButton>
       </Group>
 
       {loading && (

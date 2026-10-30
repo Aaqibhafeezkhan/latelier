@@ -1,5 +1,5 @@
 import type { CollectionTabState, Stage } from '@shared/types';
-import { compileFindOptions, findProblem, parseSortString } from './builder';
+import { compileFindOptions, findProblem, parseSortString, requireFilterJson } from './builder';
 import { refusalMessage, repairToCanonicalEjson } from '../../utils/shellSyntax';
 import { stagesToPipelineJson } from './Aggregation/pipeline';
 
@@ -82,7 +82,10 @@ export function builderToStages(state: CollectionTabState): StagesResult {
       problem: `Open as pipeline does not carry the ${opts.collation ? 'collation' : 'hint'}. Clear it to open this query as a pipeline.`,
     };
   }
-  const forbidden = firstKey(JSON.parse(state.queryRaw), matchForbidden);
+  // The trimmed text `find` would send: `findProblem` accepts a filter padded
+  // with Unicode spaces that `JSON.parse` refuses on the raw text.
+  const filter = requireFilterJson(state);
+  const forbidden = firstKey(JSON.parse(filter), matchForbidden);
   if (forbidden) {
     return {
       ok: false,
@@ -97,7 +100,7 @@ export function builderToStages(state: CollectionTabState): StagesResult {
     };
   }
   const bodies: [string, string][] = [];
-  if (state.queryRaw.trim() !== '{}') bodies.push(['$match', state.queryRaw]);
+  if (filter !== '{}') bodies.push(['$match', filter]);
   if (opts.sort && !isEmptyDoc(opts.sort)) bodies.push(['$sort', stageSort(opts.sort)]);
   if (opts.limit !== null) bodies.push(['$limit', String(opts.limit)]);
   if (opts.projection && !isEmptyDoc(opts.projection)) bodies.push(['$project', opts.projection]);
