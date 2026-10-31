@@ -113,5 +113,7 @@ installJsdomTeardown();
 // findBy*/waitFor give up after 1 s by default. Under --coverage on a CI runner a
 // cold Workspace mount alone can take longer, so the first test of a file fails
 // for lack of time, not for lack of the element. Same condition as testTimeout
-// in vitest.config.ts: plain local runs keep the strict default.
-if (process.argv.includes('--coverage')) configure({ asyncUtilTimeout: 10_000 });
+// in vitest.config.ts, which sets ATELIER_COVERAGE_RUN: this file runs in a
+// worker whose own argv never carries `--coverage`. Plain local runs keep the
+// strict default.
+if (process.env.ATELIER_COVERAGE_RUN === '1') configure({ asyncUtilTimeout: 10_000 });

@@ -52,6 +52,10 @@ export default defineConfig({
           // (or shows up via slowTestThreshold) in a plain run. `npm test`
           // forwards `--coverage` into each child vitest's argv.
           testTimeout: process.argv.includes('--coverage') ? 20_000 : 5_000,
+          // The setup file runs in a forked worker, whose argv is the worker
+          // script, not this command line, so it cannot look for `--coverage`
+          // itself. Hand it the answer from here.
+          env: { ATELIER_COVERAGE_RUN: process.argv.includes('--coverage') ? '1' : '0' },
         },
       },
     ],
