@@ -87,7 +87,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^4.1.12",
     "acorn": "^8.18.0",
     "electron": "^44.9.1",
     "electron-builder": "^26.15.3",
@@ -112,7 +112,7 @@
     "vite": "^8.3.5",
     "vite-plugin-electron": "^1.1.1",
     "vite-plugin-electron-renderer": "^1.0.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.12"
   },
   "overrides": {
     "typed-rest-client": {
