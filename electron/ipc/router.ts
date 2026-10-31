@@ -26,11 +26,23 @@ export interface AuditSink {
   ): string | null;
 }
 
+export interface RegisterOptions {
+  /**
+   * The handler decides what of this channel's traffic reaches the log (as
+   * `app:log` does with its rate gate), so the router writes neither the
+   * request line nor the success line, and its error line carries no request
+   * summary. Otherwise a renderer calling in a loop would write one ungated
+   * line per call around a gate that drops the call itself.
+   */
+  quiet?: boolean;
+}
+
 export interface Router {
   register<I, O>(
     channel: string,
     validate: Validator<I>,
     handler: Handler<I, O>,
+    opts?: RegisterOptions,
   ): void;
 }
 
@@ -115,7 +127,9 @@ export function createRouter(
       channel: string,
       validate: Validator<I>,
       handler: Handler<I, O>,
+      opts: RegisterOptions = {},
     ): void {
+      const quiet = opts.quiet === true;
       ipcMain.handle(channel, async (evt, raw: unknown): Promise<Envelope<O>> => {
         // Before anything else — before the payload is even logged, since an
         // untrusted payload is not ours to write down.
@@ -128,7 +142,7 @@ export function createRouter(
         // developer can flip the log level for a fine-grained trace of every
         // DB request — including the filter / sort / projection that was
         // actually sent to MongoDB.
-        log?.debug('ipc.req', channel, { input: raw });
+        if (!quiet) log?.debug('ipc.req', channel, { input: raw });
         // Set only once validation passes: a payload that fails its schema
         // never reached a server, and has no trustworthy namespace to record.
         let validated: { input: I } | null = null;
@@ -140,10 +154,12 @@ export function createRouter(
           validated = { input };
           const data = await handler(input);
           durationMs = Date.now() - t0;
-          log?.info('ipc.ok', channel, {
-            durationMs,
-            req: summarizeRequest(raw),
-          });
+          if (!quiet) {
+            log?.info('ipc.ok', channel, {
+              durationMs,
+              req: summarizeRequest(raw),
+            });
+          }
           envelope = success<O>(data);
         } catch (err) {
           durationMs = Date.now() - t0;
@@ -160,7 +176,7 @@ export function createRouter(
             durationMs,
             code: ipcErr.code,
             message: ipcErr.message,
-            req: summarizeRequest(raw),
+            req: quiet ? undefined : summarizeRequest(raw),
           });
           envelope = { ok: false, error: ipcErr };
         }

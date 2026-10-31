@@ -190,6 +190,16 @@ export function buildCreateCollectionOptions(
 ): Record<string, unknown> {
   const opts: Record<string, unknown> = {};
 
+  if (options.clustered) {
+    if (options.capped || options.timeseries || options.viewOn) {
+      throw new ValidationError('clustered cannot be combined with capped, timeseries or a view', {
+        field: 'clustered',
+      });
+    }
+    const name = options.clusteredIndexName?.trim();
+    opts.clusteredIndex = { key: { _id: 1 }, unique: true, ...(name ? { name } : {}) };
+  }
+
   if (options.capped) {
     if (typeof options.size !== 'number' || !Number.isFinite(options.size) || options.size <= 0) {
       throw new ValidationError('capped collections require a positive numeric size', {

@@ -17,7 +17,11 @@ export function registerSecretsChannels(
   router: Router,
   appState: AppStateService,
   confirm: () => Promise<boolean>,
+  status: () => { columnKeyProtected: boolean },
 ): void {
+  // Read-only and input-free: Settings shows whether local data is protected.
+  router.register(IPC_CHANNELS.secretsStatus, zodValidator(z.undefined().or(z.null()).optional()), () => status());
+
   router.register(
     IPC_CHANNELS.secretsSetPlaintextFallback,
     zodValidator(SetPlaintextFallbackInput),

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActionIcon, Button, Group, Menu, Select, SegmentedControl, Tooltip } from '@mantine/core';
+import { ActionIcon, Button, Group, Menu, Select, SegmentedControl, Tooltip, UnstyledButton } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
 import type { ResultViewMode } from '@shared/types';
@@ -295,7 +295,7 @@ export function ResultBar() {
       <span style={{ flex: 1 }} />
 
       {planLabel !== null && (
-        <button
+        <UnstyledButton
           type="button"
           data-testid="plan-badge"
           aria-label={`Query plan: ${planLabel}${isStale ? ' (not current)' : ''}`}
@@ -310,7 +310,6 @@ export function ResultBar() {
             whiteSpace: 'nowrap',
             flexShrink: 0,
             borderRadius: T.rs,
-            cursor: 'pointer',
             ...(isStale
               ? { background: T.surface, color: T.textGhost, border: `1px solid ${T.border}` }
               : planSummary?.collscan
@@ -319,7 +318,7 @@ export function ResultBar() {
           }}
         >
           {planLabel}
-        </button>
+        </UnstyledButton>
       )}
 
       {/* Fields control — one control for all three views; each view reads

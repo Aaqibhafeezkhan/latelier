@@ -2,6 +2,8 @@ import path from 'node:path';
 import { IPC_CHANNELS, type Envelope } from '@shared/ipc';
 import type { AuditOp, AuditOutcome, AuditSummary, ImportFormat } from '@shared/types';
 
+type ModifiedGroup = Extract<AuditSummary, { op: 'collectionModify' }>['changed'][number];
+
 /** One audit row, before it has an id or timestamps. */
 export interface AuditRecord {
   connectionId: string;
@@ -50,6 +52,20 @@ function importFormat(input: Fields, data: unknown): ImportFormat | undefined {
 // predate cancel.
 function importCancelled(data: unknown): true | undefined {
   return data !== null && typeof data === 'object' && (data as Fields).cancelled === true ? true : undefined;
+}
+
+// Which option groups a collMod carried, in a fixed order. `viewOn` and
+// `pipeline` travel together (the zod schema refuses half a view), so either
+// one stands for the 'view' group. Values are deliberately not read.
+function modifiedGroups(input: Fields): ModifiedGroup[] {
+  const options = input.options as Fields;
+  const present = (k: string): boolean => options[k] !== undefined;
+  const changed: ModifiedGroup[] = [];
+  if (present('validator')) changed.push('validator');
+  if (present('validationLevel')) changed.push('validationLevel');
+  if (present('validationAction')) changed.push('validationAction');
+  if (present('viewOn') || present('pipeline')) changed.push('view');
+  return changed;
 }
 
 /**
@@ -108,6 +124,10 @@ const AUDITED_CHANNELS: Readonly<Record<string, ChannelSpec>> = {
       fromName: input.collection as string,
       toName: input.newName as string,
     }),
+  },
+  [IPC_CHANNELS.collectionModify]: {
+    op: 'collectionModify',
+    summarize: (input) => ({ op: 'collectionModify', changed: modifiedGroups(input) }),
   },
   [IPC_CHANNELS.databaseDrop]: {
     op: 'databaseDrop',

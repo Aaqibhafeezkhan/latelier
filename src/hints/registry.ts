@@ -1,4 +1,5 @@
 import type { FeatureHintId } from '@shared/types';
+import { MONITOR_POLL_MS } from '../utils/monitorPoll';
 
 export interface FeatureHintCopy {
   id: FeatureHintId;
@@ -47,5 +48,42 @@ export const HINT_REGISTRY: Record<FeatureHintId, FeatureHintCopy> = {
     body: 'Press ⌘K (Ctrl+K on Windows/Linux) to search every action — switch connections, run queries, configure references, and more.',
     ctaLabel: 'Try it',
     priority: 40,
+  },
+  'suggestions.keyboard': {
+    id: 'suggestions.keyboard',
+    title: 'Navigate suggestions',
+    body: 'Tab inserts the highlighted item. ↑↓ to pick another, then Enter or Tab. Esc to close.',
+    priority: 50,
+  },
+  'startup.restore': {
+    id: 'startup.restore',
+    title: 'Your tabs were reopened',
+    body: 'Tabs from last time came back. You can turn this off in Settings → Reopen tabs on launch.',
+    ctaLabel: 'Open settings',
+    priority: 60,
+  },
+  'monitor.live': {
+    id: 'monitor.live',
+    title: 'This list refreshes on its own',
+    body: `It refreshes every ${MONITOR_POLL_MS / 1000} s while the window is visible; Pause stops it. Kill asks first, and whatever the operation already wrote stays written.`,
+    priority: 70,
+  },
+  'monitor.profiler': {
+    id: 'monitor.profiler',
+    title: 'Profiling stays on until you turn it off',
+    body: 'The level is a server-side setting for this database, so it keeps running until you set it back to Off. Profiling can add write load.',
+    priority: 80,
+  },
+  'indexes.usage': {
+    id: 'indexes.usage',
+    title: 'What the Use column counts',
+    body: 'Use counts how often queries used an index since the date in its tooltip (server restart or index creation). Near zero over a long window: a drop candidate.',
+    priority: 90,
+  },
+  'find.options': {
+    id: 'find.options',
+    title: 'Collation and hint apply to the whole query',
+    body: 'They apply to Run, the count, export and Copy code. Delete by filter and bulk update refuse while one is set: clear it first.',
+    priority: 100,
   },
 };

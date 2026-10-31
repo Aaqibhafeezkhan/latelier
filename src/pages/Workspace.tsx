@@ -8,6 +8,7 @@ import { useWorkspaceTabs } from '../state/workspaceTabs';
 import { useConnections, isConnectionActive, isKnownNotConnected } from '../state/connections';
 import { setFocusedConnectionId as publishFocusedConnectionId } from '../state/focusedConnection';
 import { api, getErrorMessage, isIpcError } from '../api/atelier';
+import { logFailure } from '../utils/rendererLog';
 import { notify } from '../theme/notifications';
 import { ejsonParse, isPlainDocument } from '../utils/ejson';
 import { buildUpdateRequest, setAtSegments } from './Workspace/documentDiff';
@@ -43,6 +44,8 @@ import { useLatest } from '../commands/useLatest';
 import { usePaletteApi } from '../commands/CommandPalette';
 import { useFeatureHint } from '../hints/useFeatureHint';
 import { useHints } from '../hints/HintsContext';
+import { FeatureHint } from '../hints/FeatureHint';
+import { consumeLaunchRestore, isLaunchRestoreConsumed, readLaunchTabCount } from '../hints/launchRestore';
 import { queryRunKey } from '../utils/queryRunKey';
 import { looksLikeForeignIdField } from '../utils/foreignIdField';
 import {
@@ -185,6 +188,22 @@ function WorkspaceInner() {
   // Reset only on unmount, not on every id change (which a bare cleanup would do).
   React.useEffect(() => () => publishFocusedConnectionId(null), []);
 
+  // Dirty pipelines, for the quit question. Keyed on the count, so an edit
+  // that leaves it unchanged sends nothing. Nothing is sent before the tabs
+  // have loaded, or when they failed to: the empty list then is not a count,
+  // and a 0 would overwrite the last real report. No reset on unmount: the
+  // tabs outlive this page, and quitting from elsewhere still loses them when
+  // they are not restored at launch (main decides that).
+  const tabsKnown = !tabs.loading && tabs.error === null;
+  const dirtyPipelineCount = tabs.tabs.filter(
+    (t) => t.kind === 'collection' && t.state.aggregation?.dirty,
+  ).length;
+  React.useEffect(() => {
+    if (!tabsKnown) return;
+    api.app
+      .setUnsavedWork({ source: 'pipelines', count: dirtyPipelineCount })
+      .catch((err) => logFailure('reporting unsaved pipelines', err));
+  }, [tabsKnown, dirtyPipelineCount]);
 
   const referenceRules = useReferenceRules(
     activeCollection?.connectionId ?? null,
@@ -240,6 +259,26 @@ function WorkspaceInner() {
     tabSwitchCount >= 3 && !anyPinned && tabs.activeId !== null,
   );
 
+  // Tabs the previous session left behind, as main restored them at launch.
+  const [restoredAtLaunch, setRestoredAtLaunch] = React.useState(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    void readLaunchTabCount().then((n) => {
+      if (!cancelled && n > 0 && !isLaunchRestoreConsumed()) setRestoredAtLaunch(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const startupRestoreHint = useFeatureHint(
+    'startup.restore',
+    restoredAtLaunch && tabs.tabs.length > 0,
+  );
+  const startupRestoreVisible = startupRestoreHint.visible;
+  React.useEffect(() => {
+    if (startupRestoreVisible) consumeLaunchRestore();
+  }, [startupRestoreVisible]);
+
   const currentQueryKey = React.useMemo(() => {
     if (!activeCollection) return '';
     const compiled = compileFindOptions(activeCollection.state.builder);
@@ -259,6 +298,11 @@ function WorkspaceInner() {
       projectionRaw: activeCollection.state.builder.projectionRaw,
       limit,
       skip,
+      // The same options `useQueryRunner` records its key with (W14 §9).
+      collation: compiled.collation,
+      hint: compiled.hint,
+      maxTimeMS: compiled.maxTimeMS,
+      readPreference: compiled.readPreference,
     });
   }, [activeCollection]);
   const savedCreateCount = hints.getSessionEventCount('queryRun', currentQueryKey);
@@ -942,8 +986,9 @@ function WorkspaceInner() {
   // and Collection. Not guarded on "already connected" — re-clicking retries
   // an errored Connection, and a re-connect must rebuild the client after edits.
   const openConnection = React.useCallback((id: string) => {
-    void api.conn.touchUsed(id).catch(() => { /* fire-and-forget */ });
-    void api.mongo.connect(id).catch(() => { /* status event drives the UI */ });
+    void api.conn.touchUsed(id).catch((err) => logFailure('marking the connection used', err));
+    // The status event drives the UI; the log keeps the cause.
+    void api.mongo.connect(id).catch((err) => logFailure('connect', err));
   }, []);
 
   // Only the Focused Tab's own Connection auto-connects on launch; every
@@ -1176,6 +1221,13 @@ function WorkspaceInner() {
           createIndexRequest?.tabId === activeCollection?.id ? createIndexRequest : null
         }
         onStructureInitialCreateConsumed={onCreateIndexConsumed}
+      />
+
+      <FeatureHint
+        id="startup.restore"
+        visible={startupRestoreHint.visible}
+        onDismiss={startupRestoreHint.dismiss}
+        onCta={settings.open}
       />
 
       <DialogStack

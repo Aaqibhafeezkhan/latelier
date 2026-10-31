@@ -1,3 +1,4 @@
+import { UnstyledButton } from '@mantine/core';
 import { themeVars } from '../theme/themeVars';
 import { I } from '../icons';
 
@@ -12,16 +13,15 @@ interface TitleBarBackLinkProps {
 export function TitleBarBackLink({ label, onClick }: TitleBarBackLinkProps) {
   const T = themeVars;
   return (
-    <button
+    <UnstyledButton
       onClick={onClick}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 5,
-        background: 'none', border: 'none', cursor: 'pointer',
-        color: T.textMuted, fontSize: 13, fontFamily: 'inherit', padding: 0,
+        color: T.textMuted, fontSize: 13, fontFamily: 'inherit',
       }}
     >
       <span style={{ display: 'flex' }}>{I.chevL}</span>
       <span>{label}</span>
-    </button>
+    </UnstyledButton>
   );
 }

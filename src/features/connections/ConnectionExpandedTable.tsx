@@ -1,4 +1,5 @@
 import React from 'react';
+import { IconPin, IconPinFilled } from '@tabler/icons-react';
 import { Button, Checkbox, Group, Modal, Table, Text, TextInput, VisuallyHidden } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
@@ -8,6 +9,8 @@ import { relativeTime } from '../../utils/relativeTime';
 import { useRovingHighlight } from '../../hooks/useRovingHighlight';
 import { STATUS_PRESENTATION, matchesConnectionQuery } from './connectionStatus';
 import { RowActionIcon } from './RowActionIcon';
+import { sortPinnedFirst } from '../../state/connectionPins';
+import { usePinnedConnections } from '../../state/usePinnedConnections';
 import { useConnectionTransfer } from './ConnectionTransferProvider';
 import { ConnectionExportDialog } from './ConnectionExportDialog';
 import { ConnectionDeleteDialog } from './ConnectionDeleteDialog';
@@ -257,15 +260,26 @@ export function ConnectionExpandedTable({
     setDetailCache((prev) => (prev[connectionId] ? prev : { ...prev, [connectionId]: detail }));
   }, []);
 
+  const { pinnedIds, togglePin } = usePinnedConnections(connections);
   const filtered = React.useMemo(
-    () => connections.filter((c) => matchesConnectionQuery(c, query)),
-    [connections, query],
+    () => sortPinnedFirst(connections, pinnedIds).filter((c) => matchesConnectionQuery(c, query)),
+    [connections, pinnedIds, query],
   );
 
   // `resetKey: query` — a new search is a new list, same as the popover.
   const { index: highlightIndex, setIndex: setHighlightIndex, move: moveHighlight } =
     useRovingHighlight(filtered.length, query);
   const highlightedId = filtered[highlightIndex]?.id;
+  // Pinning moves a row; the keyboard highlight follows it rather than landing
+  // on whichever row took its old index.
+  const followPinRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    const id = followPinRef.current;
+    if (id === null) return;
+    followPinRef.current = null;
+    const at = filtered.findIndex((c) => c.id === id);
+    if (at >= 0) setHighlightIndex(at);
+  }, [filtered, setHighlightIndex]);
   // Only rows on screen: a search never leaves a hidden row checked (see the
   // search field), and a Connection deleted elsewhere simply drops out.
   const checkedIds = filtered.filter((c) => checked.has(c.id)).map((c) => c.id);
@@ -365,11 +379,25 @@ export function ConnectionExpandedTable({
                 }}
               />
               <span style={{ fontWeight: 600, color: T.text }}>{c.name}</span>
+              {pinnedIds.has(c.id) && (
+                <span aria-hidden title="Pinned" style={{ display: 'flex', color: T.textMuted, flexShrink: 0 }}>
+                  <IconPinFilled size={11} />
+                </span>
+              )}
               {/* X16.4 — a marker per *connected* Connection, not one
                   per active one: several can be open at once (§4.6). */}
               {c.status === 'connected' && (
                 <span aria-label="Connected" style={{ display: 'flex', color: T.accent, flexShrink: 0 }}>
                   {I.check}
+                </span>
+              )}
+              {/* Runtime-only and cleared on disconnect: shown while connected. */}
+              {c.status === 'connected' && c.serverVersion && (
+                <span
+                  title={`MongoDB ${c.serverVersion}`}
+                  style={{ fontSize: 10, color: T.textMuted, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}
+                >
+                  v{c.serverVersion}
                 </span>
               )}
             </div>
@@ -422,6 +450,21 @@ export function ConnectionExpandedTable({
                 >
                   Connect
                 </Button>
+                <RowActionIcon
+                  // One name, with the state in aria-pressed: a flipping name would read as a double negative.
+                  label={`Pin ${c.name}`}
+                  tooltip={`${pinnedIds.has(c.id) ? 'Unpin' : 'Pin'} ${c.name}`}
+                  pressed={pinnedIds.has(c.id)}
+                  onClick={() => {
+                    followPinRef.current = c.id;
+                    // Cleared once settled: pinning a row already on top moves nothing.
+                    void togglePin(c.id).finally(() => {
+                      followPinRef.current = null;
+                    });
+                  }}
+                >
+                  {pinnedIds.has(c.id) ? <IconPinFilled size={13} /> : <IconPin size={13} />}
+                </RowActionIcon>
                 <RowActionIcon label={`Manage ${c.name}`} onClick={() => onManage(c.id)}>
                   {I.gear}
                 </RowActionIcon>

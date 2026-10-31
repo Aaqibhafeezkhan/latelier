@@ -129,7 +129,7 @@ async function openEdit() {
   await waitFor(() => expect(screen.getByText('reader')).toBeTruthy());
   const trigger = screen.getByLabelText('Edit user reader');
   await userEvent.click(trigger);
-  await waitFor(() => expect(screen.getByLabelText('Role name 1')).toBeTruthy());
+  await waitFor(() => expect(screen.getByLabelText('Role name 1', { selector: 'input' })).toBeTruthy());
   return trigger;
 }
 
@@ -159,7 +159,7 @@ describe('UserDrawer — dialog shell (X15 T7)', () => {
 
     fireEvent.keyDown(document.body, { key: 'Escape' });
 
-    await waitFor(() => expect(screen.queryByLabelText('Role name 1')).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText('Role name 1', { selector: 'input' })).toBeNull());
     expect(discardPrompt()).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
@@ -175,13 +175,13 @@ describe('UserDrawer — dialog shell (X15 T7)', () => {
    */
   it('closing an untouched pre-filled edit drawer from Cancel does not prompt', async () => {
     await openEdit();
-    expect((screen.getByLabelText('Role name 1') as HTMLInputElement).value).toBe('read');
+    expect((screen.getByLabelText('Role name 1', { selector: 'input' }) as HTMLInputElement).value).toBe('read');
 
     fireEvent.click(within(editDrawer()).getByRole('button', { name: 'Cancel' }));
     await settle();
 
     expect(discardPrompt()).toBeNull();
-    await waitFor(() => expect(screen.queryByLabelText('Role name 1')).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText('Role name 1', { selector: 'input' })).toBeNull());
   });
 
   it('closing an untouched create drawer from Cancel does not prompt', async () => {

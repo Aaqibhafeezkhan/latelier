@@ -7,6 +7,13 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { ConnectionTransferProvider } from '../../src/features/connections/ConnectionTransferProvider';
 import { collectionTabFixture, installAtelierMock, multiConnectionMock, uninstallAtelierMock } from '../helpers/atelierMock';
+import { invalidateSchemaEnumCache } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
+
+// Spied so the write can be checked for dropping the cached enum suggestions.
+vi.mock('../../src/features/fieldSuggestions/sources/schemaEnumSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/features/fieldSuggestions/sources/schemaEnumSource')>()),
+  invalidateSchemaEnumCache: vi.fn(),
+}));
 import type { Connection, ConnectionRuntime, ConnectionSummary, WorkspaceTab, CollectionTab } from '@shared/types';
 
 const now = '2026-07-26T12:00:00.000Z';
@@ -231,6 +238,7 @@ function mount(
 }
 
 afterEach(() => {
+  vi.mocked(invalidateSchemaEnumCache).mockClear();
   delete (window as unknown as { __atelierEnv__?: unknown }).__atelierEnv__;
   uninstallAtelierMock();
   vi.restoreAllMocks();
@@ -1251,6 +1259,7 @@ describe('ConnectionSwitcher — manage/disconnect/delete row actions', () => {
 
     await waitFor(() => expect(deleteSpy).toHaveBeenCalledWith('c3'));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('c3');
     expect(titleBar().getByText('Prod — US East')).toBeTruthy();
 
     const reopened = await openSwitcher();

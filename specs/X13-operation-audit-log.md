@@ -10,7 +10,7 @@ X13 gives every Connection a durable **Audit Log** of the Operations that change
 
 ## Scope
 
-**In scope** — nine `op` values, chosen by blast radius on documents rather than by API level. Two of them belong to channels that do not exist yet; each gets its row in the per-channel table (§4) when its channel lands, and until then nothing records it:
+**In scope** — ten `op` values, chosen by blast radius on documents rather than by API level. Each has an IPC channel and an entry in the static per-channel table in main (§4):
 
 | Channel | `op` |
 | --- | --- |
@@ -21,12 +21,13 @@ X13 gives every Connection a durable **Audit Log** of the Operations that change
 | `docDeleteMany` | `deleteMany` |
 | `collectionDrop` | `collectionDrop` |
 | `collectionRename` | `collectionRename` |
+| `collectionModify` | `collectionModify` |
 | `databaseDrop` | `databaseDrop` |
 | `dataImport` | `import` |
 
 There is no `docReplace` to audit: the Document Editor saves through `docUpdateOne`, and the `doc:replace` channel is gone.
 
-Also in scope: migration `012`, an `AuditRepo` + `AuditService`, two IPC channels, an Undo action on the success toast, an audit modal that opens on the Focused Tab's Connection, retention in `MaintenanceService`, and one line in each of the three confirm dialogs stating whether the action can be undone.
+Also in scope: migrations `012` and `016`, an `AuditRepo` + `AuditService`, two IPC channels, an Undo action on the success toast, an audit modal that opens on the Focused Tab's Connection, retention in `MaintenanceService`, and one line in each of the three confirm dialogs stating whether the action can be undone.
 
 **Out of scope** — see [ADR 0002](../docs/adr/0002-audit-log-scope.md) for why each of these is excluded, not merely deferred:
 
@@ -40,7 +41,7 @@ Also in scope: migration `012`, an `AuditRepo` + `AuditService`, two IPC channel
 
 ## Dependencies
 
-- F02 (SQLite persistence & migrations) — migration `012`.
+- F02 (SQLite persistence & migrations) — migrations `012` and `016`.
 - F04 (IPC bridge & error envelope) — recording taps `createRouter`.
 - W08 (document write ops), C07/C09 (collection admin) — the audited channels.
 
@@ -70,10 +71,10 @@ Also in scope: migration `012`, an `AuditRepo` + `AuditService`, two IPC channel
 
 Added to `shared/types.ts`:
 
-- `AuditOp` — string-literal union of the nine `op` values above, mirrored as the SQL `CHECK` constraint.
+- `AuditOp` — string-literal union of the ten `op` values above, mirrored as the SQL `CHECK` constraint.
 - `AuditOutcome` — `'ok' | 'error' | 'partial'`.
 - `AuditEntry` — `id`, `connectionId`, `dbName`, `collection` (null for `databaseDrop`), `op`, `summary` (parsed `AuditSummary`), `outcome`, `errorCode?`, `ranAt`, `durationMs`, `reversible`, `undoneAt?`.
-- `AuditSummary` — a discriminated union on `op`, carrying only what the modal renders: the filter for the `doc*` ops, `matchedCount`/`modifiedCount`/`deletedCount`/`insertedCount` as applicable, and `fromName`/`toName` for `collectionRename`.
+- `AuditSummary` — a discriminated union on `op`, carrying only what the modal renders: the filter for the `doc*` ops, `matchedCount`/`modifiedCount`/`deletedCount`/`insertedCount` as applicable, `fromName`/`toName` for `collectionRename`, and `changed` for `collectionModify` — which of `validator`, `validationLevel`, `validationAction`, `view` the call carried, never their values, because a validator can embed sample literals.
 - `UndoResult` — `{ restored: number; skipped: number }`.
 
 New `AppErrorCode` members, thrown via `SystemError` so the renderer can `switch` on them:
@@ -83,7 +84,7 @@ New `AppErrorCode` members, thrown via `SystemError` so the renderer can `switch
 - `AUDIT_ALREADY_UNDONE` — `undone_at` is set.
 - `AUDIT_TARGET_CHANGED` — the document has changed since the Operation.
 
-## 2. Database — migration `012-audit-log.sql`
+## 2. Database — migrations `012-audit-log.sql` and `017-audit-collection-modify.sql`
 
 ```sql
 CREATE TABLE audit_log (
@@ -93,7 +94,8 @@ CREATE TABLE audit_log (
   collection     TEXT,
   op             TEXT NOT NULL CHECK(op IN (
                    'insertMany','updateOne','updateMany','deleteOne','deleteMany',
-                   'collectionDrop','collectionRename','databaseDrop','import')),
+                   'collectionDrop','collectionRename','collectionModify',
+                   'databaseDrop','import')),
   summary_json   TEXT NOT NULL,
   outcome        TEXT NOT NULL CHECK(outcome IN ('ok','error','partial')),
   error_code     TEXT,
@@ -107,6 +109,8 @@ CREATE TABLE audit_log (
 
 CREATE INDEX idx_audit_by_conn_time ON audit_log(connection_id, ran_at DESC);
 ```
+
+Migration `016` widened the `op` `CHECK` with `'collectionModify'`. SQLite cannot alter a `CHECK` in place, so it rebuilds the table (copy, drop, rename) with every column, the `outcome` `CHECK`, the foreign key and `idx_audit_by_conn_time` unchanged. The snippet above is the table as it stands after `016`; `012` created it without `'collectionModify'`.
 
 `undo_json` is vestigial: it is always NULL. Pre-images were once stored there, as plaintext copies of production documents; they are now held in main-process memory only (`UndoStore`, §7) and never written to disk. Migration `015` nulled every value a previous version left behind, and the column stays because migrations are append-only. `summary_json` is the durable record and stays for the row's life. `reversible` on disk says a Pre-image was captured this session or earlier.
 
@@ -150,6 +154,7 @@ Pre-image capture lives in the services, because only they run before the write.
 | `deleteMany` | ≤1000 docs **and** ≤1 MB | the Pre-images |
 | `updateMany` | ≤1000 docs **and** ≤1 MB | the Pre-images, paired by index with what each was left as |
 | `collectionRename` | nothing | `fromName` and `toName` |
+| `collectionModify` | never | none — `reversible = 0` |
 | `collectionDrop`, `databaseDrop` | never | none — `reversible = 0` |
 
 `deleteOne`, `updateOne` and `collectionRename` capture nothing or exactly one document, so no ceiling applies. `import` gets its capture rule with its channel. `insertMany`, `deleteMany` and `updateMany` share the same bound, checked twice:

@@ -1,5 +1,5 @@
 import React from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '../helpers/render';
 import { MemoryRouter } from 'react-router-dom';
 import {
@@ -99,6 +99,63 @@ describe('<CommandPalette>', () => {
     act(() => dispatchToggle());
     fireEvent.change(screen.getByLabelText('Search commands'), { target: { value: 'zzz' } });
     expect(screen.getByText(/No matches for "zzz"/)).toBeTruthy();
+  });
+
+  describe('combobox semantics', () => {
+    const scrollIntoView = vi.fn();
+    beforeEach(() => {
+      // jsdom has no scrollIntoView.
+      Element.prototype.scrollIntoView = scrollIntoView;
+    });
+    afterEach(() => {
+      scrollIntoView.mockClear();
+      // @ts-expect-error -- restoring jsdom's absence of the method
+      delete Element.prototype.scrollIntoView;
+    });
+
+    function options() {
+      return screen.getAllByRole('option');
+    }
+
+    it('wires the search input to one listbox and points aria-activedescendant at the cursor row', () => {
+      render(harness(<RegisterTest perform={() => {}} />));
+      act(() => dispatchToggle());
+      const input = screen.getByRole('combobox', { name: 'Search commands' });
+      const listbox = screen.getByRole('listbox');
+
+      expect(screen.getAllByRole('listbox')).toHaveLength(1);
+      expect(input.getAttribute('aria-expanded')).toBe('true');
+      expect(input.getAttribute('aria-autocomplete')).toBe('list');
+      expect(input.getAttribute('aria-controls')).toBe(listbox.id);
+      expect(listbox.contains(options()[0])).toBe(true);
+      expect(input.getAttribute('aria-activedescendant')).toBe(options()[0].id);
+      expect(options()[0].getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('ArrowDown moves aria-activedescendant to the next row and scrolls it into view', () => {
+      render(harness(<RegisterTest perform={() => {}} />));
+      act(() => dispatchToggle());
+      const input = screen.getByRole('combobox', { name: 'Search commands' });
+      const first = options()[0].id;
+      scrollIntoView.mockClear();
+
+      fireEvent.keyDown(input, { key: 'ArrowDown' });
+
+      const second = options()[1];
+      expect(second.id).not.toBe(first);
+      expect(input.getAttribute('aria-activedescendant')).toBe(second.id);
+      expect(second.getAttribute('aria-selected')).toBe('true');
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+      expect(scrollIntoView.mock.contexts.at(-1)).toBe(second);
+    });
+
+    it('drops aria-activedescendant when nothing matches', () => {
+      render(harness(<RegisterTest perform={() => {}} />));
+      act(() => dispatchToggle());
+      const input = screen.getByRole('combobox', { name: 'Search commands' });
+      fireEvent.change(input, { target: { value: 'zzz' } });
+      expect(input.hasAttribute('aria-activedescendant')).toBe(false);
+    });
   });
 
   it('exposes a stable api: toggle button works before keyboard listener fires', () => {

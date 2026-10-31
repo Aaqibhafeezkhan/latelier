@@ -32,6 +32,57 @@ export function truncateWal(db: Database): boolean {
 }
 
 /**
+ * Rebuilds the file so bytes freed before `secure_delete` was on (older
+ * installs) or left in page slack by an in-place rewrite do not linger, then
+ * folds and truncates the WAL that the rebuild wrote. VACUUM needs free disk
+ * about the size of the database and the work before it has committed, so
+ * with a logger a failure is reported rather than thrown. `when` names the
+ * step in the log line. Returns whether the VACUUM itself succeeded.
+ */
+export function vacuumAndTruncateWal(db: Database, when: string, log?: Pick<Logger, 'warn'>): boolean {
+  let vacuumed = true;
+  try {
+    db.exec('VACUUM');
+  } catch (err) {
+    if (!log) throw err;
+    log.warn('db', `vacuum ${when} failed`, { message: String(err) });
+    vacuumed = false;
+  }
+  if (!truncateWal(db)) log?.warn('db', `wal checkpoint ${when} was blocked`);
+  return vacuumed;
+}
+
+/**
+ * `app_state` key present while a VACUUM that must erase plaintext is still
+ * owed. A failed VACUUM (disk full) after work that has already committed
+ * would otherwise never be retried: the next boot has nothing left to
+ * convert and no migration to run. It lives in `app_state` because that is
+ * where main keeps its own maintenance state, it survives "Reset protected
+ * data" (which empties `column_keys`), and the renderer can neither read nor
+ * write it (it is not on the prefs allowlist). Only its presence counts.
+ */
+export const VACUUM_PENDING_KEY = 'db.vacuumPending';
+
+export function markVacuumPending(db: Database): void {
+  db.prepare(
+    `INSERT INTO app_state (key, value_json, updated_at) VALUES (?, 'true', ?)
+     ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+  ).run(VACUUM_PENDING_KEY, new Date().toISOString());
+}
+
+export function isVacuumPending(db: Database): boolean {
+  return db.prepare('SELECT 1 FROM app_state WHERE key = ?').get(VACUUM_PENDING_KEY) !== undefined;
+}
+
+/** Runs the owed VACUUM and clears the marker only when it succeeded. */
+export function runOwedVacuum(db: Database, when: string, log: Pick<Logger, 'warn'>): boolean {
+  if (!vacuumAndTruncateWal(db, when, log)) return false;
+  db.prepare('DELETE FROM app_state WHERE key = ?').run(VACUUM_PENDING_KEY);
+  truncateWal(db);
+  return true;
+}
+
+/**
  * Moves a database left under the pre-rename name to DB_FILENAME and returns
  * the filename to open. Must run before openDatabase: ensurePrivateFile creates
  * an empty DB_FILENAME, after which the legacy file would never be adopted.
@@ -102,23 +153,45 @@ export function openDatabase(opts: OpenDatabaseOptions): Database {
   // Per-connection, and on before migrations so a migration that scrubs data
   // zeroes the bytes it frees instead of leaving them in a free page.
   db.pragma('secure_delete = ON');
+  // VACUUM builds its copy in a temp database; on disk that copy would hold
+  // every still-plaintext row of an upgrade in a file nothing scrubs.
+  db.pragma('temp_store = MEMORY');
 
   const migrations = opts.migrations ?? loadMigrations();
-  // An upgrade's migrations may scrub data; VACUUM rebuilds the file so bytes
-  // freed before secure_delete was on (older installs) don't linger in free pages.
-  // It needs free disk about the size of the database, and the migrations have
-  // already committed, so a failure is reported rather than failing the boot.
+  // An upgrade's migrations may scrub data, so the file is rebuilt after them.
+  // A failed VACUUM leaves the marker, so the post-open step retries it. With
+  // a logger, neither failure fails the boot: the migrations have committed.
   if (runMigrations(db, migrations) > 0) {
-    try {
-      db.exec('VACUUM');
-    } catch (err) {
-      if (!opts.log) throw err;
-      opts.log.warn('db', 'vacuum after migrations failed', { message: String(err) });
+    if (!vacuumAndTruncateWal(db, 'after migrations', opts.log)) {
+      try {
+        markVacuumPending(db);
+      } catch (err) {
+        if (!opts.log) throw err;
+        opts.log.warn('db', 'could not record the owed vacuum', { message: String(err) });
+      }
     }
+  } else if (!truncateWal(db)) {
+    opts.log?.warn('db', 'wal checkpoint after migrations was blocked');
   }
-  if (!truncateWal(db)) opts.log?.warn('db', 'wal checkpoint after migrations was blocked');
 
   return db;
+}
+
+/**
+ * The dev reset: empties the live database instead of deleting its files.
+ * Deleting connections cascades to connection_secrets, saved_queries,
+ * recent_queries, workspace_tabs, reference_rules, audit_log and
+ * recent_field_values. `column_keys` stays, so the cipher the repositories
+ * hold keeps matching the (now empty) data. Every service keeps its handle,
+ * which is why this works where reopening the file did not.
+ */
+export function resetDatabaseInPlace(db: Database, log: Pick<Logger, 'warn'>): void {
+  db.transaction(() => {
+    db.prepare('DELETE FROM connections').run();
+    db.prepare('DELETE FROM app_state').run();
+    markVacuumPending(db);
+  })();
+  runOwedVacuum(db, 'after the dev reset', log);
 }
 
 export function closeDatabase(db: Database): void {

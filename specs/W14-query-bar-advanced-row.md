@@ -37,8 +37,9 @@ projection editor's parity gap with the filter tree.
 - **Out**: Saved / Recent tab restyling (Mantine + `aria-label` parity) and the
   Recent tab's missing query preview — real, P2, pre-existing, and unrelated to
   the advanced row; separate tickets. `ReferenceDrawer`'s fixed `width={380}`.
-  `FindInput` additions (`collation` / `hint` / `maxTimeMS` / `readPreference`) —
-  still W13 §Scope's Phase 3.
+- **Since added (§9):** the `FindInput` additions (`collation` / `hint` /
+  `maxTimeMS` / `readPreference`), W13 §Scope's Phase 3, as an options row in
+  the advanced region.
 
 ## Dependencies
 
@@ -243,13 +244,13 @@ What moved and what did not:
 
 ## 5. Types
 
-No new types. No changes to `BuilderState`, `CollectionTabState`, or any
+For §1–§4: no new types. No changes to `BuilderState`, `CollectionTabState`, or any
 persisted shape. `projection: string[]` and its inclusion-only model are
 unchanged.
 
 ## 6. IPC contract
 
-**None.** This spec is renderer-only. No channel is added, removed, or altered,
+For §1–§4: **none**; §9 changes four channel inputs. §1–§4 are renderer-only. No channel is added, removed, or altered,
 so the 5-file contract and `scripts/ipc-secret-allowlist.txt` are untouched.
 
 ---
@@ -260,8 +261,12 @@ so the 5-file contract and `scripts/ipc-secret-allowlist.txt` are untouched.
   projection / sort / limit is set, leaves the advanced row **open**.
 - The inverse: first tab has a sort, second tab has none → the advanced row
   is **collapsed** on the second tab.
-- Loading a Saved query with a projection into the active tab opens the
-  advanced row.
+- Loading a Saved or Recent query that has advanced values into the active
+  tab opens the advanced row, whatever the row held before: a tab whose row
+  already had values and was collapsed by the user opens too. Any load that
+  replaces the query wholesale (Saved and Recent run-here, Reset) re-derives
+  the row as a tab switch does, so Reset, which empties the values, collapses
+  it.
 - A user's explicit collapse of the advanced row is **not** undone by editing
   the filter, typing in the query bar, or any other same-tab re-render.
 - When collapsed with at least one advanced value set, the trigger shows a
@@ -289,7 +294,9 @@ so the 5-file contract and `scripts/ipc-secret-allowlist.txt` are untouched.
 2. Explicit collapse, then patch `queryRaw`; assert the region stays collapsed —
    the guard against a naive `useEffect` resync.
 3. Saved-query load with a projection into a tab that had none; assert the region
-   opens.
+   opens. A load bringing a different sort into a tab whose row had a sort and
+   was collapsed; assert the region opens, while a plain sort edit with no load
+   behind it leaves the collapsed row alone.
 4. Collapsed + advanced values set → indicator present, with its count. Collapsed
    + none set → absent.
 4a. Collapsed with an unparseable sort, a sort that is not a document, a limit
@@ -317,3 +324,149 @@ so the 5-file contract and `scripts/ipc-secret-allowlist.txt` are untouched.
 Note for whoever writes test 1: assert on the presence of the region
 (`#query-bar-advanced`) or its inputs, not on the advanced grid's internal
 markup, which W13 already reshaped once.
+
+---
+
+## 9. Find options (W13 Phase 3)
+
+The four find options W13 §Scope deferred: `collation`, `hint`, `maxTimeMS`
+and `readPreference`. They live in the advanced region, below skip and limit,
+because that is where everything the find carries besides its filter is set.
+
+### State
+
+`BuilderState` gains four optional strings, each the text the input holds
+(blank is unset): `collation?`, `hint?`, `maxTimeMS?`, `readPreference?`.
+They are optional and additive like `projectionRaw`, so tabs and saved rows
+from before them restore unchanged. `SavedFindPayloadSchema.builder` accepts
+them as optional strings, not the wire enum or number, so a row saved with an
+option the builder flags still loads.
+
+### Wire
+
+`FindInput` gains `FindMatchOptions` — `collation?` (an EJSON document as
+text), `hint?` (text: an EJSON document is a key pattern, anything else an
+index name) and `readPreference?` (the driver's five modes) — plus
+`maxTimeMS?: number`. The zod schemas take `collation` and `hint` as strings
+and parse them main-side (`parseEjsonDocument`), like `filter` and `sort`;
+`readPreference` is a `z.enum`; `maxTimeMS` is an integer of at least 1.
+
+- **Timeout.** `maxTimeMS = min(input.maxTimeMS ?? cap, cap)` with the 30 s
+  `QUERY_TIMEOUT_MS` cap. A user value can only lower the cap; a larger one
+  is clamped, and the row says it runs at 30000. A find stopped by the user's
+  limit names that limit, not 30 s.
+- **A read preference no server can serve** fails server selection after
+  `serverSelectionTimeoutMS`. Find, count, explain and export name it ("No
+  server can serve the read preference secondary: …") as `MONGO_ERROR`, with
+  the driver's message in `details`; never `TIMEOUT`, which would say the
+  query ran too long and stop the live count asking that collection again.
+- **Which ops carry what.** A collation decides which documents match, so
+  every op that must see the on-screen set carries collation, hint and
+  readPreference: `query:count` (the result bar's total and the drawer's live
+  count), `query:explain` (the plan badge and the Explain menu) and
+  `query:export`. `query:find` carries all four; `maxTimeMS` is find-only.
+- **History.** `recordFind` stores the four options in the recorded builder,
+  as it stores `projectionRaw` (collation and hint trimmed as sent, a blank
+  one not at all), so a Recent rerun is the run in the list.
+
+### Gates
+
+`findOptionProblems(builder)` names each option that cannot run:
+
+- a collation must be a document, as EJSON or Shell Syntax (X14); it is sent
+  repaired to EJSON, so `{locale: 'en'}` runs as typed;
+- a hint that starts with `{` must be a document the same way; a quoted hint
+  (`"_id_"`, `'_id_'`) is the index name it quotes, sent without the quotes,
+  and must be one closed string; any other text is an index name, which only
+  the server can check;
+- maxTimeMS must be digits only, an integer of at least 1 (`5xyz` and `1.5`
+  are refused, not coerced as `limit` is);
+- a read preference must be one of the five modes.
+
+`optionsProblem` is the first of them, and `findProblem` includes it, so Run,
+⌘↵, Copy code, Open as pipeline, Export all matching and the runner's own
+guard all refuse the same states. `queryRunKey` includes the four options.
+The drawer's live count idles while `optionsProblem` holds, and the plan
+badge's Explain refuses with its message, so a half-typed collation shows no
+server refusal.
+
+### UI
+
+Two grid rows, `collation | hint` and `maxTimeMS | read pref`: plain inputs
+for the first three (placeholders `{"locale":"en","strength":2}`,
+`_id_ or {"a":1}` and `max 30000`) and a native `<select>` whose first entry
+is the connection default. Each is named by `aria-labelledby` off its label
+cell and has its own `role="alert"` notice, as sort and limit do. The
+collapsed badge counts set options and their problems (§2).
+
+### Writes and pipelines
+
+- **Delete and update by filter refuse while a collation or a hint is set.**
+  `doc:confirmDeleteMany`/`deleteMany` and `doc:confirmUpdateMany`/`updateMany`
+  send only `filterJson`, so with a collation they would act on a different set
+  than the one on screen, and with a hint naming a sparse index the screen can
+  show fewer documents than the filter matches. `DeleteConfirm` (delete by the
+  tab's filter) and `UpdateConfirm` say "Clear the collation to delete/update by
+  filter: it would change which documents match" or "Clear the hint to
+  delete/update by filter: a hinted sparse index can show fewer documents than
+  the filter matches", and disable the confirm. A refused delete asks for no
+  count, so its title names no number the filter alone would give. A delete of
+  selected documents (by `_id`) or of one document is unaffected. Carrying the options through the
+  four doc channels is a follow-up, only if asked.
+- **Open as pipeline refuses a collation or a hint**: the aggregate channel
+  carries neither.
+- **Copy code carries the collation and the hint** in all three languages
+  (W04 §Footer); `maxTimeMS` and the read preference are left out, since
+  neither changes the documents or their order.
+
+### Acceptance criteria
+
+- A collation `{"locale":"en","strength":2}` makes `{"name":"a"}` match `A` in
+  the result, the total and the drawer's live count.
+- A hint by index name and by key pattern reaches the plan; an index that does
+  not exist is refused by the server as `VALIDATION`.
+- `maxTimeMS` 40000 runs with 30000; 2000 runs with 2000; the row says a value
+  over 30000 runs at 30000.
+- The chosen read preference reaches find, count, explain and export.
+- Count, explain and export carry collation, hint and readPreference;
+  `maxTimeMS` reaches only the find.
+- Each invalid option shows its own notice and disables Run; ⌘↵ is refused
+  with "Invalid find option"; the runner refuses one that reaches it.
+- A Shell Syntax collation `{locale: 'en'}` and key pattern `{a: 1}` run, sent
+  as EJSON; a quoted hint `"_id_"` or `'_id_'` runs as `_id_`, and one left
+  open is refused.
+- While an option cannot run, the drawer's live count asks nothing and the
+  plan badge's Explain refuses with the option's own message.
+- A read preference no server can serve is named in the error, as
+  `MONGO_ERROR`, never `TIMEOUT`.
+- Changing an option changes the run key and asks for a new plan.
+- A Recent rerun and a saved query keep the options; a saved row with no
+  builder clears the tab's. Recent stores the collation and hint trimmed.
+- Reset clears the options along with the sort, limit and projection, and its
+  confirm names whichever are set.
+- Delete all matching and Update all matching are refused while a collation
+  or a hint is set, and a refused delete asks for no count; Open as pipeline
+  is refused with a collation or a hint.
+- The renderer's `CountInput` type has no `maxTimeMS`, matching the schema.
+- Copy code emits the collation and the hint, and neither `maxTimeMS` nor the
+  read preference.
+- The delete confirm's type-to-confirm input is named "Type <collection> to
+  confirm" (N5.2).
+
+### Test cases
+
+- Integration `query-service.spec.ts` (memory-server): collation in find and
+  count, a `Long` past 2^53 in the filter beside a collation, hint by name and
+  key, an unknown hint, the maxTimeMS clamp and message, readPreference on
+  every op (driver spies), an unservable read preference named on every op
+  (injected selection error), and find, count, explain and export driven
+  through the router with every option.
+- Unit `query-schema.spec.ts`, `builder-find-options.spec.ts`,
+  `queryRunKey.spec.ts`, `builder-to-pipeline.spec.ts`, `driver-code.spec.ts`,
+  `mongo-errors.spec.ts`; integration `recent-query-service.spec.ts`.
+- Component `query-bar-find-options.spec.tsx`, plus the delete, update,
+  live count, export, explain and runner specs, `result-bar-plan-badge`,
+  `workspace-delete-modes`, `saved-legacy-payload`, `workspace-run-hint` and
+  the Copy code case in `query-composition-truthfulness`.
+- E2E `w14-find-options.e2e.ts`: set a case-insensitive collation, Run, and the
+  mixed-case row shows with the count matching.

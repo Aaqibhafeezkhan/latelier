@@ -1,5 +1,6 @@
+import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { render, fireEvent, within, emptyWorkspaceActions, emptyWorkspaceMeta } from '../helpers/render';
+import { act, render, fireEvent, within, emptyWorkspaceActions, emptyWorkspaceMeta } from '../helpers/render';
 import { QueryBar } from '../../src/pages/Workspace/QueryBar';
 import { CollectionWorkspaceProvider } from '../../src/pages/Workspace/CollectionWorkspaceProvider';
 import type { CollectionWorkspaceActions, CollectionWorkspaceMeta } from '../../src/pages/Workspace/context';
@@ -57,7 +58,7 @@ function Bar({
 }) {
   return (
     <CollectionWorkspaceProvider state={state} actions={actions} meta={meta}>
-      <QueryBar suggestionContext={null} />
+      <QueryBar suggestionContext={null} loadGen={0} />
     </CollectionWorkspaceProvider>
   );
 }
@@ -310,5 +311,80 @@ describe('QueryBar — collapsed advanced error indicator', () => {
     expect(advancedRegion(container)).toBeNull();
     expect(indicator(container)?.textContent).toBe('1 set');
     expect(errorIndicator(container)).toBeNull();
+  });
+});
+
+// A Saved or Recent load replaces the query in place, in the same tab. When
+// the tab's row already held values and the user had collapsed it, the load
+// leaves `hasAdvanced` true → true, so only the load count can tell the row
+// that a different query is now behind it. The harness holds the state in
+// `useState` and merges every patch the way the Workspace does, and a load
+// is the patch plus the count's bump in one `act()` — they are batched into
+// one render in the app (both are called from BuilderPane's one handler).
+describe('QueryBar — a load re-derives the advanced row', () => {
+  const meta = makeMeta('tA', 'users');
+  type Patch = Partial<CollectionTabState>;
+  type Drive = { patch: (p: Patch) => void; load: (p: Patch) => void };
+
+  function LoadHarness({ initial, driveRef }: { initial: CollectionTabState; driveRef: { current: Drive | null } }) {
+    const [state, setState] = React.useState(initial);
+    const [loadGen, bumpLoadGen] = React.useReducer((n: number) => n + 1, 0);
+    const patch = React.useCallback((p: Patch) => setState((prev) => ({ ...prev, ...p })), []);
+    const actions = React.useMemo(() => emptyWorkspaceActions({ patch }), [patch]);
+    React.useEffect(() => {
+      driveRef.current = {
+        patch,
+        load: (p) => {
+          patch(p);
+          bumpLoadGen();
+        },
+      };
+    }, [driveRef, patch]);
+    return (
+      <CollectionWorkspaceProvider state={state} actions={actions} meta={meta}>
+        <QueryBar suggestionContext={null} loadGen={loadGen} />
+      </CollectionWorkspaceProvider>
+    );
+  }
+
+  function mount(builder: BuilderState) {
+    const drive: { current: Drive | null } = { current: null };
+    const utils = render(<LoadHarness initial={makeState(builder)} driveRef={drive} />);
+    const step = (fn: (d: Drive) => void) =>
+      act(() => {
+        fn(drive.current!);
+      });
+    return { ...utils, step };
+  }
+
+  function mountCollapsed(builder: BuilderState) {
+    const utils = mount(builder);
+    expect(advancedRegion(utils.container)).not.toBeNull();
+    fireEvent.click(trigger(utils.container));
+    expect(advancedRegion(utils.container)).toBeNull();
+    return utils;
+  }
+
+  it('opens a collapsed row when a load brings a different sort', () => {
+    const { container, getByTestId, step } = mountCollapsed(b({ sort: '{"a":1}' }));
+
+    step((d) => d.load({ builder: b({ sort: '{"b":-1}' }), queryRaw: '{"x":1}' }));
+    expect(advancedRegion(container)).not.toBeNull();
+    expect((getByTestId('query-bar-sort') as HTMLInputElement).value).toBe('{"b":-1}');
+  });
+
+  it('still never re-opens a collapsed row on a plain edit of the sort', () => {
+    const { container, step } = mountCollapsed(b({ sort: '{"a":1}' }));
+    // A patch with no load behind it — the table header's quick-sort flipping
+    // the direction while the row is collapsed.
+    step((d) => d.patch({ builder: b({ sort: '{"a":-1}' }) }));
+    expect(advancedRegion(container)).toBeNull();
+  });
+
+  it('collapses the row on a load that empties the values, as Reset does', () => {
+    const { container, step } = mount(b({ limit: '20' }));
+    expect(advancedRegion(container)).not.toBeNull();
+    step((d) => d.load({ builder: b(), queryRaw: '{}' }));
+    expect(advancedRegion(container)).toBeNull();
   });
 });

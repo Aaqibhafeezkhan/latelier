@@ -1,7 +1,9 @@
 import React from 'react';
-import { Drawer } from '@mantine/core';
+import { Button, Drawer } from '@mantine/core';
 import { themeVars } from '../../../theme/themeVars';
 import { api, getErrorMessage } from '../../../api/atelier';
+import { logFailure } from '../../../utils/rendererLog';
+import { notify } from '../../../theme/notifications';
 import { useDialogFocusReturn } from '../../../hooks/useDialogFocusReturn';
 import { ejsonStringify } from '../../../utils/ejson';
 import { copyToClipboard } from '../../../utils/clipboard';
@@ -173,8 +175,9 @@ export function ExplainDrawer({
     if (!json) return;
     try {
       await api.app.saveFile({ defaultName: 'explain.json', content: json });
-    } catch {
-      // ignore
+    } catch (err) {
+      logFailure('explain plan save', err);
+      notify.error(getErrorMessage(err, 'The explain plan could not be saved.'), { title: 'Save failed' });
     }
   };
 
@@ -244,21 +247,16 @@ export function ExplainDrawer({
             <option value="executionStats">executionStats</option>
             <option value="allPlansExecution">allPlansExecution</option>
           </select>
-          <button
+          <Button
+            variant="default"
+            size="compact-xs"
+            fz={11}
+            c={T.textMuted}
             onClick={() => setViewMode((m) => (m === 'tree' ? 'raw' : 'tree'))}
             aria-label={viewMode === 'tree' ? 'Switch to raw view' : 'Switch to tree view'}
-            style={{
-              fontSize: 11,
-              padding: '4px 8px',
-              border: `1px solid ${T.border}`,
-              borderRadius: T.rs,
-              background: T.surfaceRaised,
-              color: T.textMuted,
-              cursor: 'pointer',
-            }}
           >
             {viewMode === 'tree' ? 'Raw' : 'Tree'}
-          </button>
+          </Button>
         </div>
 
         {writeOmitted && (
@@ -323,24 +321,21 @@ export function ExplainDrawer({
                       </span>
                     ) : null}
                     {summary.collscan && onCreateIndex && (
-                      <button
+                      <Button
                         data-testid="explain-create-index"
+                        variant="default"
+                        size="compact-xs"
+                        h={20}
+                        px={8}
+                        fz={10}
+                        c={T.text}
                         onClick={() => {
                           close();
                           onCreateIndex();
                         }}
-                        style={{
-                          fontSize: 10,
-                          padding: '2px 8px',
-                          borderRadius: T.rs,
-                          background: T.surfaceRaised,
-                          color: T.text,
-                          border: `1px solid ${T.border}`,
-                          cursor: 'pointer',
-                        }}
                       >
                         Create an index for this query
-                      </button>
+                      </Button>
                     )}
                     {!summary.collscan && summary.usesIndex ? (
                       <span
@@ -406,38 +401,26 @@ export function ExplainDrawer({
             justifyContent: 'flex-end',
           }}
         >
-          <button
+          <Button
+            variant="default"
+            size="compact-xs"
+            fz={11}
+            c={json ? T.textMuted : undefined}
             onClick={onCopy}
             disabled={!json}
-            style={{
-              fontSize: 11,
-              padding: '4px 10px',
-              border: `1px solid ${T.border}`,
-              borderRadius: T.rs,
-              background: T.surfaceRaised,
-              color: T.textMuted,
-              cursor: json ? 'pointer' : 'not-allowed',
-              opacity: json ? 1 : 0.5,
-            }}
           >
             Copy
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="default"
+            size="compact-xs"
+            fz={11}
+            c={json ? T.textMuted : undefined}
             onClick={() => void onDownload()}
             disabled={!json}
-            style={{
-              fontSize: 11,
-              padding: '4px 10px',
-              border: `1px solid ${T.border}`,
-              borderRadius: T.rs,
-              background: T.surfaceRaised,
-              color: T.textMuted,
-              cursor: json ? 'pointer' : 'not-allowed',
-              opacity: json ? 1 : 0.5,
-            }}
           >
             Download
-          </button>
+          </Button>
         </div>
       </div>
     </Drawer>

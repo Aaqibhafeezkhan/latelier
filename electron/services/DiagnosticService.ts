@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { isLogFile, redactSecrets } from '../log.ts';
+import { compareLogFiles, isLogFile, redactSecrets } from '../log.ts';
 
 export interface DiagnosticBundle {
   generatedAt: string;
@@ -27,15 +27,22 @@ export interface DiagnosticBundle {
     lastUsedAt: string | null;
   }>;
   /** Present only when the service was given a `secretsStatus` probe. */
-  secrets?: { encryptionAvailable: boolean; backend: string | null };
+  secrets?: SecretsStatus;
   logs: Record<string, string>;
+}
+
+export interface SecretsStatus {
+  encryptionAvailable: boolean;
+  backend: string | null;
+  /** False when the column key is stored unwrapped because no usable keychain exists. */
+  columnKeyProtected: boolean;
 }
 
 export interface DiagnosticServiceOpts {
   userDataDir: string;
   connRepo: ConnectionReader;
   /** Reports whether secrets get real encryption and which keychain backend serves them. */
-  secretsStatus?: () => { encryptionAvailable: boolean; backend: string | null };
+  secretsStatus?: () => SecretsStatus;
   /** Number of most recent log files to include. Defaults to 7. */
   maxLogFiles?: number;
   /** Cap each log file at this many bytes (most recent slice). Defaults to 1 MiB. */
@@ -142,17 +149,10 @@ export class DiagnosticService {
     }
     const files = entries
       .filter(isLogFile)
-      // Order by the date after the prefix: the prefix changed with the rename
-      // and `l` < `m`, so whole-name order puts every legacy `mongolab.*` log
-      // after the newer `latelier.*` ones and the `slice` below would keep the
-      // old logs and drop the newest. On the upgrade day both prefixes share a
-      // date; the `mongolab.` file was written first, so it sorts first.
-      // ISO date, so code-unit order IS chronological order. Deliberately not
-      // `localeCompare`: its collation is locale-dependent, and which files
-      // survive the `slice` below must not be.
-      .map((name) => ({ name, key: name.slice(name.indexOf('.') + 1) + (name.startsWith('mongolab.') ? '0' : '1') }))
-      .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
-      .map((f) => f.name)
+      // Oldest first, so the `slice` keeps the newest files. Whole-name order
+      // would keep the wrong ones: legacy `mongolab.*` logs sort after newer
+      // `latelier.*` ones, and a day's `.1` part before its first file.
+      .sort(compareLogFiles)
       .slice(-this.maxLogFiles);
 
     const out: Record<string, string> = {};

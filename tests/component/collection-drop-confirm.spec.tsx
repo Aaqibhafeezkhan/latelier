@@ -3,8 +3,16 @@ import { render, screen, waitFor } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import { DropCollectionConfirm } from '../../src/pages/Workspace/DropCollectionConfirm';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
+import { invalidateSchemaEnumCache } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
+
+// Spied so the write can be checked for dropping the cached enum suggestions.
+vi.mock('../../src/features/fieldSuggestions/sources/schemaEnumSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/features/fieldSuggestions/sources/schemaEnumSource')>()),
+  invalidateSchemaEnumCache: vi.fn(),
+}));
 
 afterEach(() => {
+  vi.mocked(invalidateSchemaEnumCache).mockClear();
   uninstallAtelierMock();
   vi.restoreAllMocks();
 });
@@ -63,6 +71,7 @@ describe('DropCollectionConfirm', () => {
       { connectionId: 'c1', dbName: 'shop', collection: 'orders' },
     ]));
     await waitFor(() => expect(onDropped).toHaveBeenCalled());
+    expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('c1', 'shop', 'orders');
   });
 
   it('shows an inline error on API failure', async () => {

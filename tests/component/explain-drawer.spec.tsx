@@ -1,10 +1,13 @@
 import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
+import type { IpcApi } from '@shared/ipc';
+import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { render, screen, waitFor, fireEvent, within } from '../helpers/render';
 import { ExplainDrawer } from '../../src/pages/Workspace/Aggregation/ExplainDrawer';
 
 afterEach(() => {
+  uninstallAtelierMock();
   vi.restoreAllMocks();
 });
 
@@ -396,5 +399,29 @@ describe('ExplainDrawer — initialPlan', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Explain plan' });
     expect(within(dialog).getByTestId('explain-summary-strip')).toBeTruthy();
     expect(runExplain).not.toHaveBeenCalled();
+  });
+
+  it('tells the user and the main log when the plan cannot be saved', async () => {
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    installAtelierMock({
+      app: {
+        saveFile: async () => {
+          throw { code: 'SYSTEM', message: 'read-only volume' };
+        },
+        log,
+      },
+    });
+    const runExplain = vi.fn(async () => ({ plan: { queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } } }));
+    render(<ExplainDrawer onClose={() => {}} runExplain={runExplain} />);
+    await screen.findByRole('dialog', { name: 'Explain plan' });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
+
+    expect(await screen.findByText('Save failed')).toBeTruthy();
+    expect(log).toHaveBeenCalledWith({
+      level: 'warn',
+      message: 'explain plan save failed: read-only volume',
+      source: 'component',
+    });
   });
 });

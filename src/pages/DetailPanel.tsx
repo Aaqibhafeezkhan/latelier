@@ -2,8 +2,10 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { themeVars } from '../theme/themeVars';
 import { I } from '../icons';
-import { Button } from '@mantine/core';
+import { Button, Table, UnstyledButton, VisuallyHidden } from '@mantine/core';
 import { api, isIpcError } from '../api/atelier';
+import { logFailure } from '../utils/rendererLog';
+import { notify } from '../theme/notifications';
 import { disconnectConnection } from '../features/connections/disconnectConnection';
 import type {
   CollectionInfo,
@@ -12,13 +14,15 @@ import type {
 } from '@shared/ipc';
 import type { ConnectionRuntime, ConnectionSummary } from '@shared/types';
 import { UsersTab } from './UsersTab';
+import { RolesTab } from './RolesTab';
+import { MonitorTab } from './MonitorTab';
 import { CreateCollectionDrawer } from './Workspace/CreateCollectionDrawer';
 import { useTroubleshooting } from '../troubleshooting/TroubleshootingContext';
 import { relativeTime } from '../utils/relativeTime';
 import { ownGet } from '../utils/ownProperty';
 import { humanBytes } from '../utils/humanBytes';
 
-const TABS = ['Overview', 'Collections', 'Users'] as const;
+const TABS = ['Overview', 'Monitor', 'Collections', 'Users', 'Roles'] as const;
 type Tab = typeof TABS[number];
 
 function humanDuration(s: number): string {
@@ -143,32 +147,26 @@ function OverviewTab({ conn, runtime }: {
               variant="filled"
               size="xs"
               onClick={() => {
-                void api.mongo.connect(conn.id).catch(() => { /* status event updates UI */ });
+                // The status event updates the UI; the log keeps the cause.
+                void api.mongo.connect(conn.id).catch((err) => logFailure('connect', err));
               }}
             >
               {hasError ? 'Retry' : 'Connect'}
             </Button>
             {hasError && (
-              <button
+              <Button
+                variant="subtle"
+                size="compact-xs"
+                c={T.accent}
                 onClick={() =>
                   help.open({
                     errorCode: runtime.errorCode,
                     message: runtime.errorMessage,
                   })
                 }
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  color: T.accent,
-                  fontSize: 12,
-                  fontFamily: 'inherit',
-                  padding: '6px 4px',
-                  textDecoration: 'underline',
-                }}
               >
                 Help me fix this →
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -179,9 +177,10 @@ function OverviewTab({ conn, runtime }: {
   if (!info && error) {
     return (
       <div style={{ padding: 20, color: T.warn, fontSize: 13 }}>
-        {error} <button onClick={() => void load()} style={{
-          marginLeft: 8, background: 'none', border: 'none', color: T.accent, cursor: 'pointer',
-        }}>Retry</button>
+        {error}{' '}
+        <Button variant="subtle" size="compact-xs" c={T.accent} ml={8} onClick={() => void load()}>
+          Retry
+        </Button>
       </div>
     );
   }
@@ -291,7 +290,7 @@ function CollectionsTab({ conn, runtime }: {
     void api.prefs
       .get<boolean>('ui.showSystemDbs')
       .then((v) => v !== null && setShowSystem(v))
-      .catch(() => { /* non-fatal */ });
+      .catch((err) => logFailure('reading preference ui.showSystemDbs', err));
   }, []);
 
   const loadCollections = React.useCallback(async (dbName: string) => {
@@ -345,7 +344,10 @@ function CollectionsTab({ conn, runtime }: {
   const toggleShowSystem = async () => {
     const next = !showSystem;
     setShowSystem(next);
-    void api.prefs.set('ui.showSystemDbs', next).catch(() => { /* ok */ });
+    void api.prefs.set('ui.showSystemDbs', next).catch((err) => {
+      logFailure('saving preference ui.showSystemDbs', err);
+      notify.warning('This choice will not be remembered.', { title: 'Preference not saved' });
+    });
   };
 
   if (runtime.status !== 'connected') {
@@ -360,9 +362,9 @@ function CollectionsTab({ conn, runtime }: {
     return (
       <div style={{ padding: 20, color: T.warn }}>
         {error}
-        <button onClick={() => void loadDatabases()} style={{
-          marginLeft: 8, background: 'none', border: 'none', color: T.accent, cursor: 'pointer',
-        }}>Retry</button>
+        <Button variant="subtle" size="compact-xs" c={T.accent} ml={8} onClick={() => void loadDatabases()}>
+          Retry
+        </Button>
       </div>
     );
   }
@@ -425,14 +427,14 @@ function CollectionsTab({ conn, runtime }: {
             : null;
           return (
             <div key={db.name}>
-              <button
+              <UnstyledButton
                 type="button"
                 onClick={() => toggleDb(db.name)}
                 aria-expanded={open}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 8,
                   padding: '9px 16px', borderBottom: `1px solid ${T.border}`,
-                  background: T.surface, border: 'none', margin: 0, width: '100%',
+                  background: T.surface, width: '100%',
                   font: 'inherit', color: 'inherit', textAlign: 'left',
                 }}
               >
@@ -442,7 +444,7 @@ function CollectionsTab({ conn, runtime }: {
                 <span style={{ fontSize: 11, color: T.textMuted }}>
                   {db.sizeOnDisk === undefined ? '—' : humanBytes(db.sizeOnDisk)}
                 </span>
-              </button>
+              </UnstyledButton>
               {open && (
                 <div style={{ borderBottom: `1px solid ${T.border}` }}>
                   {!entry && (
@@ -461,63 +463,62 @@ function CollectionsTab({ conn, runtime }: {
                     </div>
                   )}
                   {rows && rows.length > 0 && (
-                    <div
-                      role="row"
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '2fr 1fr 1fr 0.7fr 1fr 90px',
-                        padding: '6px 16px',
-                        background: T.surfaceRaised,
-                        borderBottom: `1px solid ${T.border}`,
-                        fontSize: 10, fontWeight: 700, letterSpacing: 0.6,
-                        textTransform: 'uppercase', color: T.textMuted,
+                    <Table
+                      highlightOnHover
+                      aria-label={`Collections in ${db.name}`}
+                      styles={{
+                        table: { fontSize: 11 },
+                        th: {
+                          fontSize: 10, fontWeight: 700, letterSpacing: 0.6,
+                          textTransform: 'uppercase', color: T.textMuted,
+                          background: T.surfaceRaised, padding: '6px 16px',
+                        },
+                        td: { padding: '6px 16px', color: T.textMuted, verticalAlign: 'middle' },
                       }}
                     >
-                      <span>Collection</span>
-                      <span>Documents</span>
-                      <span>Size</span>
-                      <span>Indexes</span>
-                      <span>Modified</span>
-                      <span />
-                    </div>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>Collection</Table.Th>
+                          <Table.Th>Documents</Table.Th>
+                          <Table.Th>Size</Table.Th>
+                          <Table.Th>Indexes</Table.Th>
+                          <Table.Th>Modified</Table.Th>
+                          <Table.Th style={{ width: 90 }}><VisuallyHidden>Actions</VisuallyHidden></Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {rows.map((c) => (
+                          <Table.Tr key={c.name}>
+                            <Table.Td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ color: T.textGhost, display: 'flex' }}>{I.doc}</span>
+                                <span style={{ fontSize: 12, fontWeight: 500, color: T.text }}>{c.name}</span>
+                              </div>
+                            </Table.Td>
+                            <Table.Td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {c.documentCount?.toLocaleString() ?? '—'}
+                            </Table.Td>
+                            <Table.Td>{c.sizeBytes === undefined ? '—' : humanBytes(c.sizeBytes)}</Table.Td>
+                            <Table.Td>{c.indexCount ?? '—'}</Table.Td>
+                            <Table.Td>{relativeTime(c.lastModified, '—')}</Table.Td>
+                            <Table.Td>
+                              <Button size="compact-xs" variant="subtle" leftSection={I.open} onClick={() => {
+                                void api.conn.touchUsed(conn.id);
+                                void navigate('/workspace', {
+                                  state: {
+                                    openConnectionId: conn.id,
+                                    openCollection: { dbName: db.name, collection: c.name },
+                                  },
+                                });
+                              }}>
+                                Open
+                              </Button>
+                            </Table.Td>
+                          </Table.Tr>
+                        ))}
+                      </Table.Tbody>
+                    </Table>
                   )}
-                  {rows?.map((c) => (
-                    <div
-                      key={c.name}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '2fr 1fr 1fr 0.7fr 1fr 90px',
-                        padding: '9px 16px', borderBottom: `1px solid ${T.border}`,
-                        alignItems: 'center',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ color: T.textGhost, display: 'flex' }}>{I.doc}</span>
-                        <span style={{ fontSize: 12, fontWeight: 500, color: T.text }}>{c.name}</span>
-                      </div>
-                      <div style={{ fontSize: 11, color: T.textMuted, fontVariantNumeric: 'tabular-nums' }}>
-                        {c.documentCount?.toLocaleString() ?? '—'}
-                      </div>
-                      <div style={{ fontSize: 11, color: T.textMuted }}>{c.sizeBytes === undefined ? '—' : humanBytes(c.sizeBytes)}</div>
-                      <div style={{ fontSize: 11, color: T.textMuted }}>{c.indexCount ?? '—'}</div>
-                      <div style={{ fontSize: 11, color: T.textMuted }}>
-                        {relativeTime(c.lastModified, '—')}
-                      </div>
-                      <div style={{ padding: '6px 0' }}>
-                        <Button size="compact-xs" variant="subtle" leftSection={I.open} onClick={() => {
-                          void api.conn.touchUsed(conn.id);
-                          void navigate('/workspace', {
-                            state: {
-                              openConnectionId: conn.id,
-                              openCollection: { dbName: db.name, collection: c.name },
-                            },
-                          });
-                        }}>
-                          Open
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
                 </div>
               )}
             </div>
@@ -557,7 +558,7 @@ export function DetailPanel({ selected, loading, onDelete, onDisconnect }: {
     let active = true;
     void api.mongo.status(selected.id).then((r) => {
       if (active) setRuntime(r);
-    }).catch(() => { /* ok */ });
+    }).catch((err) => logFailure('reading connection status', err));
     const off = api.mongo.onStatus((r) => {
       if (!active) return;
       if (r.id === selected.id) setRuntime(r);
@@ -694,8 +695,10 @@ export function DetailPanel({ selected, loading, onDelete, onDisconnect }: {
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {activeTab === 'Overview' && <OverviewTab conn={selected} runtime={effective} />}
+        {activeTab === 'Monitor' && <MonitorTab conn={selected} runtime={effective} />}
         {activeTab === 'Collections' && <CollectionsTab conn={selected} runtime={effective} />}
         {activeTab === 'Users' && <UsersTab conn={selected} runtime={effective} />}
+        {activeTab === 'Roles' && <RolesTab conn={selected} runtime={effective} />}
       </div>
     </div>
   );

@@ -6,7 +6,7 @@ import { AggregationService } from '../../electron/mongo/AggregationService';
 import { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo';
 import type { Logger } from '../../electron/log';
-import { createTempDb, insertConnectionRow, type TempDb } from '../helpers/db';
+import { createTempDb, insertConnectionRow, type TempDb, createTempCipher } from '../helpers/db';
 import { getSharedMongoUri, makeConnection, makeReader } from '../helpers/mongo';
 
 /**
@@ -52,7 +52,7 @@ describe('recent-query write failures are logged, not swallowed', () => {
     // Only `rwf-conn` has a SQLite row: a run against `rwf-ghost` reaches Mongo
     // fine and then fails the recent_queries foreign key.
     insertConnectionRow(tmp.db, connId);
-    repo = new RecentQueryRepo(tmp.db);
+    repo = new RecentQueryRepo(tmp.db, createTempCipher());
     recent = new RecentQueryService(repo);
 
     const client = await pool.write(connId).client();

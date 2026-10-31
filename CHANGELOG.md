@@ -22,14 +22,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-10-26
+
+### Added
+
+- **Import wizard.** One flow imports Connections from L'Atelier exports,
+  MongoDB Compass exports (plain or passphrase-encrypted), pasted connection
+  strings, and any other JSON file through Field Mapping. Every source ends on
+  the same final-approval screen, and nothing is saved until you click Import.
+- **Query to pipeline and code.** Open a Builder or Find query as an
+  aggregation pipeline, copy a query as mongosh, Node or Python code, and drop
+  a field onto Sort. The query bar gains find options: collation, hint,
+  maxTimeMS and read preference.
+- **Value suggestions.** Filters and stage bodies suggest values from
+  validator enums, field samples and your recent `$match` stages. Fields that
+  look secret are never suggested.
+- **Builder v2.** The filter tree has toggles, NOT groups, typed editors and a
+  live document count.
+- **Command palette and navigation.** Fuzzy matching, recent collections per
+  connection, quick-open for a namespace, a tab menu, and a keyboard shortcut
+  sheet (⌘/). The collection view strip is a real tab list with arrow keys.
+- **Collection structure.** Statistics above the indexes, distinct counts and
+  numeric ranges in the schema view, a per-stage explain tree with a plan
+  badge, and editable validation rules.
+- **Views.** Save an aggregation pipeline as a view, and modify a view's
+  source and pipeline from the navigator.
+- **Roles tab.** Create, edit and drop roles, and pick roles when you edit a
+  user.
+- **Monitor tab.** See current operations, kill one, and read the profiler.
+  The Collections tab is now a table.
+- **Create collection** supports clustered collections and numeric capped
+  inputs.
+- **Settings.** System theme, default page size and view, editor font size, an
+  app-themed code editor, reduced motion, and a *Reopen tabs on launch*
+  switch.
+- **Honest state.** A failed inline edit keeps your text and says why; the
+  app tells you what stopped a query; a preference that fails to save says so.
+  Quitting while an import, aggregation or script is running asks first, and
+  so does quitting with an unsaved connection form or pipeline. An activity
+  log keeps recent error messages.
+- **Navigator.** A CAPPED badge, a server-version badge, pinned connections,
+  and *Duplicate view*. *Copy URI* on a saved connection leaves the password
+  out.
+
 ### Changed
 
+- **Aggregation Cancel now stops a `$out` or `$merge` on the server.** A write
+  that already reached the server is never reported as cancelled, and its own
+  error still shows.
+- **Buttons across the app moved to Mantine,** with filled Tab Group headers
+  and no ⚡ icon or + button on the tab strip.
+- **Connection create and update are atomic with the saved-password vault,**
+  and export files are readable by their owner only.
 - **The local database file is now `latelier.db`,** renamed from `mongolab.db`
   the first time you start this version. Your connections and settings carry
   over. Log files and the diagnostic file use the L'Atelier name too
   (`latelier.<date>.log`, `latelier-diagnostic-<time>.json`); older logs keep
   their name and age out as usual. Going back to 0.17.1 or older needs one
   manual step, described in the troubleshooting guide.
+
+### Fixed
+
+- **Large integers keep their precision** in the EJSON parsers, the stage
+  Format button and Double display.
+- **Shell and Script start on the focused tab's database** instead of `test`,
+  print the contents of thrown values and un-awaited Promises, and print a
+  hint for a bare `db.<collection>`.
+- **The References button is back** on the collection header, with its rule
+  count.
+- **Stale list responses** in the Indexes and Users tabs no longer overwrite
+  the list after you switch target.
+- **Count** works for `$where` and `$near` filters.
+- **Copy code** handles quoted hints and Python infinity.
+- **The Monitor profiler** keeps its own database after a switch, and the
+  Roles drop dialog ignores Escape while a drop is pending.
 
 ## [0.17.1] — 2026-10-06
 

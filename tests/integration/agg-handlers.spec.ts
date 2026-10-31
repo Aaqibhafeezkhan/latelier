@@ -11,7 +11,7 @@ import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo'
 import type { Logger } from '../../electron/log';
 import { SecretsVault } from '../../electron/secrets/SecretsVault';
 import { createSafeStorageMock } from '../helpers/safeStorageMock';
-import { createTempDb, insertConnectionRow, type TempDb } from '../helpers/db';
+import { createTempDb, insertConnectionRow, type TempDb, createTempCipher } from '../helpers/db';
 import { createIpcShim } from '../helpers/ipcShim';
 import { expectSchemaReject } from '../helpers/ipcAssert';
 import { testSenderCheck } from '../helpers/ipcSender';
@@ -113,7 +113,7 @@ describe('agg:* channels via router', () => {
       ]),
       vault: new SecretsVault(tmp.db, createSafeStorageMock()),
     });
-    svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)));
+    svc = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())));
     registerAggChannels(createRouter(shim.ipcMain, testSenderCheck), svc);
   });
 
@@ -465,7 +465,7 @@ describe('agg:* channels via router', () => {
 
     it('still succeeds without counts, and logs, when the target cannot be counted', async () => {
       const log: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-      const logged = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)), log);
+      const logged = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())), log);
       // The write path takes its handle from the write grant, so only the
       // count probes go through `readDb`. The connection is fine; the count
       // itself is refused, as for a user without the `find` privilege.
@@ -494,7 +494,7 @@ describe('agg:* channels via router', () => {
 
     it('does not fail a $merge that already wrote because the connection dropped before the closing count', async () => {
       const log: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-      const logged = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)), log);
+      const logged = new AggregationService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())), log);
       const readDb = pool.readDb.bind(pool);
       // First call is the count before the write; the second is the one after.
       vi.spyOn(pool, 'readDb')

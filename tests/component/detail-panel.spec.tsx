@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, act } from '../helpers/render';
+import { render, screen, waitFor, act, within } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { DetailPanel } from '../../src/pages/DetailPanel';
@@ -328,5 +328,61 @@ describe('DetailPanel Collections', () => {
       dbName: 'beta',
     }));
     await screen.findByText('widgets');
+  });
+});
+
+describe('DetailPanel Collections table', () => {
+  it('lists collections in a real table with column headers, one row each', async () => {
+    installAtelierMock({
+      mongo: {
+        status: async (id) => ({ id, status: 'connected', serverVersion: '7.0.0' }),
+        onStatus: () => () => { /* ok */ },
+      },
+      meta: {
+        listDatabases: async () => [{ name: 'alpha', sizeOnDisk: 1024, empty: false }],
+        listCollections: async () => [
+          { name: 'products', type: 'collection' as const, documentCount: 1234,
+            sizeBytes: 1024, indexCount: 2, capped: false },
+          { name: 'orders', type: 'collection' as const, documentCount: 5,
+            sizeBytes: 2048, indexCount: 1, capped: false },
+        ],
+      },
+    });
+    renderDetail(baseConn);
+    await userEvent.click(screen.getByRole('button', { name: 'Collections' }));
+    const table = await screen.findByRole('table', { name: 'Collections in alpha' });
+
+    const headers = within(table).getAllByRole('columnheader').map((h) => h.textContent);
+    expect(headers).toEqual(['Collection', 'Documents', 'Size', 'Indexes', 'Modified', 'Actions']);
+
+    const rows = within(table).getAllByRole('row');
+    // Header row plus one per collection.
+    expect(rows).toHaveLength(3);
+    const cells = within(rows[1]!).getAllByRole('cell').map((c) => c.textContent);
+    expect(cells.slice(0, 4)).toEqual(['products', (1234).toLocaleString(), '1.0 KB', '2']);
+    expect(within(rows[2]!).getByRole('button', { name: 'Open' })).toBeTruthy();
+  });
+});
+
+describe('DetailPanel Monitor tab', () => {
+  it('sits right after Overview and opens the monitor', async () => {
+    const currentOp = vi.fn(async () => ({ ops: [] }));
+    installAtelierMock({
+      mongo: {
+        status: async (id) => ({ id, status: 'connected', serverVersion: '7.0.0' }),
+        onStatus: () => () => { /* ok */ },
+      },
+      admin: { currentOp },
+    });
+    renderDetail(baseConn);
+    const tabs = ['Overview', 'Monitor', 'Collections'].map((name) =>
+      screen.getByRole('button', { name }),
+    );
+    expect(tabs[0]!.compareDocumentPosition(tabs[1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tabs[1]!.compareDocumentPosition(tabs[2]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await userEvent.click(tabs[1]!);
+    expect(await screen.findByRole('region', { name: 'Current operations' })).toBeTruthy();
+    await waitFor(() => expect(currentOp).toHaveBeenCalled());
   });
 });

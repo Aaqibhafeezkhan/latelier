@@ -39,6 +39,18 @@ describe('JsonTree', () => {
     expect(screen.queryByText('b:')).toBeNull();
   });
 
+  it('the expand toggle reports aria-expanded, and a clipped leaf value carries its full text as a title', () => {
+    render(<JsonTree value={{ a: { long: 'x'.repeat(200) } }} />);
+
+    const toggle = screen.getByRole('button', { name: 'Expand' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Collapse' }).getAttribute('aria-expanded')).toBe('true');
+
+    const full = `"${'x'.repeat(200)}"`;
+    expect(screen.getByText(full).getAttribute('title')).toBe(full);
+  });
+
   it('renders array nodes with index keys, collapsed by default', () => {
     render(<JsonTree value={{ arr: [1, 2, 3] }} />);
     expect(screen.getByText('arr:')).toBeTruthy();

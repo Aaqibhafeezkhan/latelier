@@ -1,6 +1,7 @@
 import React from 'react';
 import { api } from '../../api/atelier';
 import { notify } from '../../theme/notifications';
+import { logFailure } from '../../utils/rendererLog';
 import { BUILDER_DEFAULT_PCT } from './panelSizes';
 
 // One fixed id: a drag fires a write per release, and a failing store would
@@ -57,8 +58,9 @@ export function useWorkspacePanelPrefs(): {
         if (typeof ss === 'number') setShellSplit(ss);
         if (typeof collapsed === 'boolean') setSidebarCollapsed(collapsed);
         if (typeof builderC === 'boolean') setBuilderCollapsed(builderC);
-      } catch {
-        // keep defaults
+      } catch (err) {
+        // Keep the default layout; the log keeps the cause.
+        logFailure('reading the workspace layout preferences', err);
       } finally {
         if (active) setPrefsReady(true);
       }

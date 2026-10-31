@@ -27,6 +27,8 @@ const SET_SCHEMAS = new Map<string, z.ZodType>([
     }),
   ],
   ['ui.workspace.defaultPageSize', finite],
+  ['ui.workspace.defaultView', z.enum(['Table', 'Tree', 'JSON'])],
+  ['ui.editor.fontSize', z.number().int().min(10).max(20)],
   ['ui.workspace.leftWidth', finite],
   ['ui.workspace.refDrawerWidth', finite],
   ['ui.workspace.innerHSplit', finite],
@@ -36,6 +38,7 @@ const SET_SCHEMAS = new Map<string, z.ZodType>([
   ['ui.workspace.restoreTabs', z.boolean()],
   ['ui.workspace.documentEditorSize', z.object({ width: finite, height: finite.optional() })],
   ['ui.commandPalette.mru', z.array(z.string().max(512)).max(16)],
+  ['ui.connections.pinned', z.array(z.string().uuid()).max(500)],
 ]);
 
 // Connection ids are `crypto.randomUUID()`. One bounded character class and an

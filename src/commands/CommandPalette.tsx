@@ -1,4 +1,5 @@
 import React from 'react';
+import { UnstyledButton } from '@mantine/core';
 import {
   SpotlightRoot,
   SpotlightSearch,
@@ -18,6 +19,7 @@ import { isMacRenderer } from '../utils/platform';
 import { usePaletteContext } from './PaletteContext';
 import { groupRows, rankCommands } from './rank';
 import { GROUP_LABEL } from './types';
+import { _resetPaletteOpenerForTests, setPaletteOpener } from './paletteOpener';
 import type { Command } from './types';
 
 const MRU_CAP = 8;
@@ -34,6 +36,7 @@ const [paletteStore, paletteControls] = createSpotlight();
 /** Test-only: reset the palette open/query state between tests. */
 // eslint-disable-next-line react-refresh/only-export-components
 export function _resetPaletteStoreForTests(): void {
+  _resetPaletteOpenerForTests();
   paletteStore.setState({
     opened: false,
     empty: false,
@@ -88,15 +91,17 @@ export function usePaletteApi(): PaletteApi {
 
 interface ActionItemProps {
   cmd: Command;
+  id: string;
   index: number;
   isCursor: boolean;
   onActivate: (cmd: Command) => void;
   onHover: (index: number) => void;
 }
 
-function ActionItem({ cmd, isCursor, onActivate, onHover, index }: ActionItemProps) {
+function ActionItem({ cmd, id, isCursor, onActivate, onHover, index }: ActionItemProps) {
   return (
-    <button
+    <UnstyledButton
+      id={id}
       type="button"
       role="option"
       aria-selected={isCursor}
@@ -112,8 +117,6 @@ function ActionItem({ cmd, isCursor, onActivate, onHover, index }: ActionItemPro
         padding: '9px 16px',
         width: '100%',
         background: 'transparent',
-        border: 'none',
-        cursor: 'pointer',
         textAlign: 'left',
         fontFamily: 'inherit',
         fontSize: 13,
@@ -149,7 +152,7 @@ function ActionItem({ cmd, isCursor, onActivate, onHover, index }: ActionItemPro
           {formatShortcut(cmd.shortcut, isMacRenderer())}
         </span>
       )}
-    </button>
+    </UnstyledButton>
   );
 }
 
@@ -171,6 +174,8 @@ function PaletteContent({ onClose, recentIds, recordRecent }: PaletteContentProp
     [all, query, ctx, recentIds],
   );
   const groups = React.useMemo(() => groupRows(ranked), [ranked]);
+  const listId = React.useId();
+  const optionId = (cmdId: string) => `${listId}-opt-${cmdId}`;
 
   // `resetKey: query` resets the cursor to 0 whenever the query changes,
   // without touching state during render or using an effect — this component
@@ -178,6 +183,14 @@ function PaletteContent({ onClose, recentIds, recordRecent }: PaletteContentProp
   // it can't reset imperatively the way ConnectionSwitcher's search field does.
   const { index: safeCursor, setIndex: setCursor, move: moveCursor } =
     useRovingHighlight(ranked.length, query);
+
+  // Keyboard moves the cursor with the focus staying in the search input, so
+  // the highlighted row has to be scrolled into view by hand. (Optional call:
+  // jsdom has no scrollIntoView.)
+  const activeId = ranked[safeCursor] ? optionId(ranked[safeCursor].cmd.id) : undefined;
+  React.useEffect(() => {
+    if (activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeId]);
 
   const perform = React.useCallback(
     async (cmd: Command) => {
@@ -227,9 +240,14 @@ function PaletteContent({ onClose, recentIds, recordRecent }: PaletteContentProp
       <SpotlightSearch
         placeholder="Search actions, connections…"
         aria-label="Search commands"
+        role="combobox"
+        aria-expanded
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={activeId}
         onKeyDown={onKeyDown}
       />
-      <SpotlightActionsList>
+      <SpotlightActionsList id={listId} role="listbox" aria-label="Commands">
         {ranked.length === 0 ? (
           <div
             style={{
@@ -243,8 +261,9 @@ function PaletteContent({ onClose, recentIds, recordRecent }: PaletteContentProp
           </div>
         ) : (
           groups.map((group) => (
-            <div key={group.key}>
+            <div key={group.key} role="group" aria-labelledby={`${listId}-grp-${group.key}`}>
               <div
+                id={`${listId}-grp-${group.key}`}
                 style={{
                   padding: '8px 16px 4px',
                   fontSize: 10,
@@ -262,6 +281,7 @@ function PaletteContent({ onClose, recentIds, recordRecent }: PaletteContentProp
                 <ActionItem
                   key={cmd.id}
                   cmd={cmd}
+                  id={optionId(cmd.id)}
                   index={index}
                   isCursor={index === safeCursor}
                   onActivate={perform}
@@ -307,6 +327,15 @@ export function CommandPalette({ registerApi }: PaletteShellProps) {
       paletteControls.open();
     }
   }, [hints]);
+
+  // Capture phase, registered once: focus has usually moved onto the search
+  // input before Mantine reports the palette open, so the opener has to be
+  // known beforehand. See paletteOpener.ts.
+  React.useEffect(() => {
+    const track = (e: FocusEvent) => setPaletteOpener(e.target);
+    document.addEventListener('focusin', track, true);
+    return () => document.removeEventListener('focusin', track, true);
+  }, []);
 
   React.useEffect(() => {
     registerApi({
@@ -368,6 +397,7 @@ export function CommandPalette({ registerApi }: PaletteShellProps) {
   return (
     <>
       <SpotlightRoot
+        data-command-palette
         store={paletteStore}
         shortcut="mod + K"
         // Mantine's Modal applies `aria-label` to the outer root, not the

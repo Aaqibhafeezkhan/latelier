@@ -158,6 +158,9 @@ describe('chips', () => {
 
   it('quotes a string chip only when its plain text would read as something else', () => {
     expect(chipText('abc', 'array')).toBe('abc');
+    expect(chipText(-0, 'number')).toBe('-0');
+    expect(parseChipText(chipText(-0, 'number'), 'number')).toBe(-0);
+    expect(chipText(0, 'number')).toBe('0');
     expect(chipText('42', 'array')).toBe('"42"');
     expect(chipText('true', 'array')).toBe('"true"');
     expect(chipText(' a', 'array')).toBe('" a"');

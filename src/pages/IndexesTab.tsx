@@ -13,6 +13,7 @@ import {
   Table,
   Text,
   TextInput,
+  Tooltip,
 } from '@mantine/core';
 import { api, isIpcError } from '../api/atelier';
 import { confirmDestructive } from '../utils/confirm';
@@ -26,6 +27,8 @@ import type {
 } from '@shared/types';
 import type { IndexSuggestion } from '../utils/indexSuggestion';
 import { humanBytes } from '../utils/humanBytes';
+import { FeatureHint } from '../hints/FeatureHint';
+import { useFeatureHint } from '../hints/useFeatureHint';
 
 /**
  * A one-shot request from `ExplainDrawer`'s "Create an index for this
@@ -243,6 +246,8 @@ export function IndexesTab({
   // plain scrolling block instead — one scroller for the whole pane — so
   // this lays out at its natural content height and lets the page provide
   // the only scrollbar.
+  const usageHint = useFeatureHint('indexes.usage', !!indexes?.some((i) => i.usage));
+
   if (viewOn !== undefined) {
     return (
       <div style={{ padding: '10px 16px', fontSize: 12, color: T.textMuted, borderBottom: `1px solid ${T.border}` }}>
@@ -277,15 +282,15 @@ export function IndexesTab({
           + New index
         </Button>
 
-        <Button
+        <SubmitButton
           size="compact-xs"
           variant="subtle"
           onClick={() => void loadIndexes(target)}
           leftSection={I.sync}
-          disabled={loadingIndexes}
+          submitting={loadingIndexes}
         >
           Refresh
-        </Button>
+        </SubmitButton>
       </div>
 
       <div
@@ -387,7 +392,7 @@ export function IndexesTab({
                 <Table.Th>Key</Table.Th>
                 <Table.Th>Options</Table.Th>
                 <Table.Th>Size</Table.Th>
-                <Table.Th>Use</Table.Th>
+                <Table.Th data-hint-anchor="indexes.usage">Use</Table.Th>
                 <Table.Th style={{ width: 36 }} />
               </Table.Tr>
             </Table.Thead>
@@ -538,6 +543,7 @@ export function IndexesTab({
         )}
       </div>
 
+      <FeatureHint id="indexes.usage" visible={usageHint.visible} onDismiss={usageHint.dismiss} />
     </div>
   );
 }
@@ -757,36 +763,29 @@ function CreateIndexDrawer({
                   </option>
                 ))}
               </select>
-              <button
-                onClick={() => removeField(i)}
-                disabled={fields.length === 1}
-                aria-label={`Remove field ${i + 1}`}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: fields.length === 1 ? T.textGhost : T.textMuted,
-                  cursor: fields.length === 1 ? 'not-allowed' : 'pointer',
-                  fontSize: 14,
-                }}
-              >
-                ×
-              </button>
+              <Tooltip label={`Remove field ${i + 1}`} withArrow openDelay={400}>
+                <ActionIcon
+                  onClick={() => removeField(i)}
+                  disabled={fields.length === 1}
+                  aria-label={`Remove field ${i + 1}`}
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                >
+                  ×
+                </ActionIcon>
+              </Tooltip>
             </div>
           ))}
-          <button
+          <Button
+            variant="default"
+            size="compact-xs"
+            c={T.textMuted}
+            style={{ borderStyle: 'dashed' }}
             onClick={() => setFields((rows) => [...rows, { field: '', direction: 1 }])}
-            style={{
-              background: 'transparent',
-              border: `1px dashed ${T.border}`,
-              borderRadius: T.rs,
-              padding: '4px 8px',
-              fontSize: 11,
-              color: T.textMuted,
-              cursor: 'pointer',
-            }}
           >
             + Add field
-          </button>
+          </Button>
         </Section>
 
         <Section title="Options">

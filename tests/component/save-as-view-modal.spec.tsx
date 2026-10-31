@@ -4,7 +4,7 @@ import { act, render, screen, fireEvent, waitFor } from '../helpers/render';
 import { SaveAsViewModal } from '../../src/pages/Workspace/Aggregation/SaveAsViewModal';
 import { stagesToPipelineJson } from '../../src/pages/Workspace/Aggregation/pipeline';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
-import type { Stage } from '@shared/types';
+import type { CollectionCreateInput, Stage } from '@shared/types';
 
 afterEach(() => {
   uninstallAtelierMock();
@@ -141,5 +141,111 @@ describe('SaveAsViewModal', () => {
     await act(async () => resolve());
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('open_orders'));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  describe('duplicating a view (pipelineJson + initialName)', () => {
+    const PIPELINE = '[{"$match":{"_id":{"$oid":"64b64c0b4d3e7a0001a1b2c3"}}},{"$out":"kept_verbatim"}]';
+    function renderDuplicate(create: (input: { collection: string }) => Promise<{ name: string }>) {
+      installAtelierMock({ collection: { create } });
+      const onClose = vi.fn();
+      const onCreated = vi.fn();
+      render(
+        <SaveAsViewModal
+          connectionId="c1"
+          dbName="shop"
+          collection="orders"
+          pipelineJson={PIPELINE}
+          initialName="open_orders_copy"
+          title="Duplicate view"
+          onClose={onClose}
+          onCreated={onCreated}
+        />,
+      );
+      return { onClose, onCreated };
+    }
+
+    it('prefills the name and creates with the source and pipeline verbatim', async () => {
+      const create = vi.fn(async (input: { collection: string }) => ({ name: input.collection }));
+      const { onCreated } = renderDuplicate(create);
+
+      expect((screen.getByLabelText('View name') as HTMLInputElement).value).toBe('open_orders_copy');
+      expect(screen.getByText('Duplicate view')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Create view' }));
+
+      await waitFor(() =>
+        expect(create).toHaveBeenCalledWith({
+          connectionId: 'c1',
+          dbName: 'shop',
+          collection: 'open_orders_copy',
+          options: { viewOn: 'orders', pipeline: PIPELINE },
+        }),
+      );
+      expect(onCreated).toHaveBeenCalledWith('open_orders_copy');
+    });
+
+    it('sends the source view\'s collation with the create, and none when it has none', async () => {
+      const COLLATION = '{"locale":"fr","strength":{"$numberInt":"2"}}';
+      for (const collation of [COLLATION, undefined]) {
+        const create = vi.fn(async (input: CollectionCreateInput) => ({ name: input.collection }));
+        installAtelierMock({ collection: { create } });
+        const { unmount } = render(
+          <SaveAsViewModal
+            connectionId="c1"
+            dbName="shop"
+            collection="orders"
+            pipelineJson={PIPELINE}
+            initialName="v_copy"
+            collation={collation}
+            onClose={vi.fn()}
+            onCreated={vi.fn()}
+          />,
+        );
+        fireEvent.click(screen.getByRole('button', { name: 'Create view' }));
+        await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+        const options = create.mock.calls[0]![0].options as Record<string, unknown>;
+        expect(options).toEqual({ viewOn: 'orders', pipeline: PIPELINE, ...(collation ? { collation } : {}) });
+        expect('collation' in options).toBe(collation !== undefined);
+        unmount();
+        uninstallAtelierMock();
+      }
+    });
+
+    it('shows a name conflict inline and stays open', async () => {
+      const create = vi.fn(async (): Promise<{ name: string }> => {
+        throw { code: 'CONFLICT', message: 'a collection \'shop.open_orders_copy\' already exists' };
+      });
+      const { onClose } = renderDuplicate(create);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Create view' }));
+
+      expect((await screen.findByRole('alert')).textContent).toMatch(/already exists/);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('Escape on the untouched prefill closes without asking', async () => {
+      const { onClose } = renderDuplicate(vi.fn(async (input: { collection: string }) => ({ name: input.collection })));
+
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+      expect(screen.queryByRole('dialog', { name: 'Discard changes?' })).toBeNull();
+    });
+
+    it('Escape after editing the prefill asks to discard', async () => {
+      const { onClose } = renderDuplicate(vi.fn(async (input: { collection: string }) => ({ name: input.collection })));
+
+      await userEvent.type(screen.getByLabelText('View name'), 'x');
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+
+      expect(await screen.findByRole('dialog', { name: 'Discard changes?' })).toBeTruthy();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
+  it('throws when given neither stages nor pipelineJson', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() =>
+      render(<SaveAsViewModal connectionId="c1" dbName="shop" collection="orders" onClose={vi.fn()} onCreated={vi.fn()} />),
+    ).toThrow(/stages or pipelineJson/);
   });
 });

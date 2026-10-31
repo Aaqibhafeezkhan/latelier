@@ -3,6 +3,7 @@ import { api, isIpcError } from '../../api/atelier';
 import { notify } from '../../theme/notifications';
 import { disconnectConnection as disconnectWithNotify } from '../../features/connections/disconnectConnection';
 import { invalidateSampleSchemaCache } from '../../features/fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../../features/fieldSuggestions/sources/schemaEnumSource';
 import { useConnectionTransfer } from '../../features/connections/ConnectionTransferProvider';
 import type { ConnectionSummary } from '@shared/types';
 import type { WorkspaceTabsState } from '../../state/workspaceTabs';
@@ -210,6 +211,7 @@ export function useConnectionDialogs(deps: {
         return;
       }
       invalidateSampleSchemaCache(id);
+      invalidateSchemaEnumCache(id);
       settled();
       await closeTabsForConnection(id, 'Connection deleted, but its tabs could not be closed');
       removeConnectionLocal(id);

@@ -5,7 +5,7 @@
 ## Purpose
 
 Provide a single composable autocomplete system that surfaces field paths
-(and eventually values) in every place the user types a key or filter —
+and values in every place the user types a key or filter —
 the builder condition rows, the raw query textarea, and the aggregation
 stage bodies. One popover, one ranking, one set of sources; each surface
 just supplies a `SuggestionContext` and a trigger.
@@ -17,9 +17,10 @@ just supplies a `SuggestionContext` and a trigger.
   `useTextareaAutocomplete` hook for textarea consumers, caret-position
   helper, grammar detector for JSON-like bodies, first two field sources
   (`lastRunSource`, `sampleSchemaSource`), `meta:sampleSchema` IPC.
+- **Also in**: the four default value sources (§2) and their consumers,
+  the builder's value box and `$match` stage bodies (§8).
 - **Out** (deferred, see roadmap in `docs/field-suggestions-roadmap.md`):
-  value sources, index-aware source, schema-validator enum source,
-  AI-generated suggestions.
+  index-aware source, AI-generated suggestions.
 - **Extended by X03**: MQL operator autocomplete adds an
   `OperatorSuggestion` kind, `operatorSource`, and context-aware
   ranking. The infrastructure below stays identical; X03 plugs in as
@@ -100,8 +101,16 @@ blocking render. `useSuggestions` composes a fixed list per surface.
 
 ### Default value sources
 
-Empty until a consumer lands a `ValueSource`. When populated, consumers
-already routed on `ctx.target` will light up automatically.
+`DEFAULT_VALUE_SOURCES`, in this order. Each one emits `value === display`,
+a plain string, and its `DisplayType` as `type`. Consumers merge by
+`display` and sum frequencies.
+
+| Source | Kind | Cost | Notes |
+|---|---|---|---|
+| `lastRunValuesSource` | sync | free | Values the field held in the first 50 of `ctx.recentDocs`. An array leaf expands into its elements. Objects and arrays are skipped. |
+| `recentValuesSource` | async | 1 IPC per field | Values recorded from earlier runs (`recent:valuesForField`), cached per `(connId, db, coll, field)` for 5 minutes. A find records its filter's conditions; an aggregation run records its leading enabled `$match` stages (`fieldValueEntriesFromStages`: disabled stages are skipped, the first other stage ends the walk, Shell Syntax bodies are repaired first). Main re-filters by op and secret path. |
+| `schemaEnumSource` | async | 1 IPC per collection | The `enum` the validator's `$jsonSchema` declares for the field, along `properties.<seg>…`, or `items.enum` for an array field. Read from `meta:collectionDetails` (`options.validator`), parsed with `JSON.parse` so canonical numbers keep their sentinel form. Cached per `(connId, db, coll)` for 5 minutes, fails open to `[]`. Frequency 50, so these rank first. A validator without `$jsonSchema` yields nothing. |
+| `sampleValuesSource` | async | free | The field's values in the docs `sampleSchemaSource` already fetched (`getSampleDocs`, same cache entry and in-flight promise). Only for a low-cardinality field: more than 20 distinct values in the sample yields nothing. |
 
 ### Future drop-ins
 
@@ -199,9 +208,17 @@ Behavior:
 - Fixed-position listbox under the anchor's bounding rect.
 - Position updates on window resize + scroll (capture).
 - Keyboard: ↑/↓ to navigate (wraps), Enter or Tab to accept,
-  Escape to close.
-- `onMouseDown={(e) => e.preventDefault()}` on the listbox so clicking
-  an item doesn't blur the underlying input.
+  Escape to close. Opening on focus and accepting with Tab without
+  arrowing first are deliberate.
+- `onMouseDown={(e) => e.preventDefault()}` on the listbox and on the box
+  around it, so clicking an item or the footer doesn't blur the
+  underlying input.
+- Keyboard hint (`suggestions.keyboard`, X06): while undismissed, one
+  footer line under the list, outside the listbox, names the keys: Tab
+  inserts the highlighted item, Enter only once the user has arrowed to one. The
+  popover reads `useHints()` directly rather than `useFeatureHint`, so it
+  never takes the floating-hint slot. The first pick dismisses it; Reset
+  hints brings it back.
 - Highlight state is clamped at render time (no set-state-in-effect).
 - **`keyboardRef` is required when the anchor is a zero-size caret marker**
   (textarea consumers) — otherwise the keys never fire because the span
@@ -282,7 +299,7 @@ string-escape handling. At `caret`, classifies the position:
 | Inside a quoted **object key** | `{ kind: 'fieldName', token, replaceStart, replaceEnd, operatorContext? }` |
 | Bare identifier in object key mode (including `$`-prefixed) | `{ kind: 'fieldName', token, ..., operatorContext? }` |
 | Inside a value string starting with `$` | `{ kind: 'fieldRef', token, ... }` — `$` excluded from replace range |
-| Inside a value string with a known sibling key | `{ kind: 'valueFor', field, token, ... }` |
+| Inside a value string with a known sibling key | `{ kind: 'valueFor', field, operator?, token, ... }` |
 | Anywhere else | `null` |
 
 `stageOp` is optional. When provided, fieldName hits carry an
@@ -296,10 +313,19 @@ returns `null` — the popover just doesn't open. No wrong suggestions.
 Works identically for aggregation stage bodies and MQL filter objects;
 the shape is the same (nested objects, arrays, strings, numbers).
 
-The hook consumes only `fieldName` and `fieldRef` today; `valueFor` is
-detected but its context is suppressed (routed to `null`) until
-`DEFAULT_VALUE_SOURCES` lands a source. No consumer change is needed
-when that happens.
+When the key before a value string starts with `$` (`{age: {$gt: "…"}}`),
+`valueFor` reports that key as `operator` and walks out through the
+enclosing scopes to the nearest key that is not an operator, which
+becomes `field`. Array scopes are walked past. When every enclosing key
+is an operator (`{$expr: {$eq: "…"}}`), the hit is `null`. A string
+element of an array (`$in: ["…"]`) is not a `valueFor` position.
+
+The textarea hook consumes only `fieldName` and `fieldRef`. The CodeMirror
+stage-body source (`stageBodyCompletions.ts`) also consumes `valueFor`,
+but only in a `$match` stage, where a key names a source field: it runs
+`DEFAULT_VALUE_SOURCES` for `{ field, operator }`, merges by display, and
+keeps only string-typed or untyped values with no quote, backslash or line
+break, since the caret is inside a quoted string.
 
 ## 9. Behavior — lifecycle
 
@@ -310,7 +336,8 @@ when that happens.
 3. `useSuggestions` runs sync sources, schedules async sources, returns
    a ranked list.
 4. Popover opens below the input or at the caret rect.
-5. User navigates with arrows, accepts with Enter/Tab (or mouse click).
+5. User navigates with arrows and accepts with Tab, or with Enter once
+   an item has been arrowed to (or with a mouse click).
 6. On accept, consumer splices the path into its value and moves the
    caret past it.
 7. On Escape or blur, popover closes.
@@ -327,6 +354,30 @@ when that happens.
   cache. The generation is global, so an invalidation anywhere makes
   every fetch in flight skip its cache write (its caller still gets the
   answer); that errs toward a refetch, never toward a stale entry.
+- `schemaEnumSource` caches the parsed `$jsonSchema` per `(connId, db,
+  coll)` with a 5-minute TTL and the same generation guard. A failed
+  `meta:collectionDetails` read (timeout, permissions, a missing
+  collection) is logged with `console.warn` and cached as "no schema" for
+  15 seconds only, so the enum appears once the read works. A validator
+  that is not JSON is a bug, not a passing state: it is logged too and
+  cached for the full TTL. `invalidateSchemaEnumCache` takes the same
+  arguments as `invalidateSampleSchemaCache` and is called:
+  - by Structure's Edit rules, for the collection, once
+    `collection:modify` succeeds;
+  - next to every `invalidateSampleSchemaCache` call that can change or
+    replace a collection's options, with the same scope:
+    `SaveAsCollectionModal`, `AggregationTab`'s confirmed `$out` /
+    `$merge`, `AuditLogModal` Revert, `ScriptTab` after every run, and
+    the connection dialogs' delete;
+  - by collection rename (both names), collection drop, database drop
+    (the whole connection, since the cache has no per-database scope),
+    and a saved `ConnectionForm` edit (the same id can now reach another
+    server), none of which the sample cache hooks (see below).
+  Data writes (`useDocumentDialogs`, `DeleteConfirm`, `UpdateConfirm`,
+  Quick Edit, `ImportDialog`) leave it alone, since they cannot change
+  the validator.
+- `sampleValuesSource` has no cache of its own; it reads the
+  `sampleSchemaSource` entry, so every invalidation below covers it.
 - Every write the renderer completes, except those listed after this,
   calls it, so fresh fields and the Update drawer's type warning
   reflect the write immediately. Each site names the collection from the
@@ -354,6 +405,9 @@ when that happens.
     write to any collection and the renderer cannot tell which.
   - The connection dialogs (`ConnectionManager`, `useConnectionDialogs`)
     for connection changes.
+  - A saved `ConnectionForm` edit, for the whole connection: the same id
+    can now reach another server, so the old server's sample must not
+    serve for the rest of the TTL.
 - Writes that can fail part-way invalidate on failure too, since an
   earlier part may already have landed and an extra resample costs
   nothing: a rejected delete-many, update-many, `$merge` or Revert, a
@@ -412,14 +466,20 @@ on app restart).
   (race-guarded).
 - A rejecting async source never leaves `loading` stuck and never drops the
   other sources' items.
-- `valueFor` hits are detected but do not open the popover until
-  value sources land.
+- A string value in a `$match` stage body offers the field's values from
+  `DEFAULT_VALUE_SOURCES`, string values only; other stages offer none.
+- `{age: {$gt: "…"}}` resolves to field `age`, operator `$gt`; a scope of
+  operator keys only gives no hit.
+- The builder value box offers the validator's `$jsonSchema` enum values
+  first, then values from the results, recorded history and a
+  low-cardinality sample.
+- A successful aggregation run records the values of its leading enabled
+  `$match` stages.
+- The popover shows a keyboard hint footer until the first pick.
 - `$`-prefixed bare keys open the popover (previously suppressed);
   the operator source (X03) consumes these hits. `fieldRef` and
   `valueFor` branches remain unchanged.
 - Cache invalidation on writes (§9 "Caching" lists every wired path and the ones left to the TTL).
-- *(Follow-up)* First `ValueSource` + consumer wiring (builder
-  value input).
 - *(Follow-up)* Accessibility pass (`aria-activedescendant`,
   `role="combobox"` wrapper, loading-state hints).
 
@@ -435,10 +495,19 @@ on app restart).
   `$or` arrays, operator-object keys (→ `null`), value-side strings
   (→ `valueFor`), escaped quotes, and replace-range correctness.
 
+- **field-value-entries.spec.ts** — recorded entries from a filter and
+  from a pipeline's leading `$match` stages.
+- **schema-enum-source.spec.ts**, **sample-values-source.spec.ts**,
+  **last-run-values-source.spec.ts** — the value sources.
+- **stageBodyCompletions.spec.ts** — field, operator and `$match` value
+  completions in a stage body.
+
 ### Component
 
 - **field-suggestions-hook.spec.tsx** — drives `useSuggestions` with a
   stub source; asserts sync + async merge, dedupe, ranking, race-guard.
+- **value-suggestions-popover.spec.tsx** — the builder value box with
+  each source; **SuggestionPopover.spec.tsx** — keys and the hint footer.
 
 ### Manual / E2E
 
@@ -448,6 +517,10 @@ on app restart).
   appears near the caret → accept.
 - Query bar: type `{ user.na` → dotted-path suggestions appear.
 - Stage body `"$sta` → field-ref suggestions with the `$` preserved.
+- `$match` stage body `{status: "` → values from the sampled docs
+  (`w07-field-autocomplete.e2e.ts`).
+- After an aggregation run with `$match {status: "x"}`, the builder value
+  box for `status` offers `x`.
 
 ## 15. Roadmap reference
 

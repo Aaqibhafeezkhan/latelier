@@ -1,10 +1,10 @@
 import React from 'react';
-import { Modal } from '@mantine/core';
+import { Button, Modal } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { api, getErrorMessage } from '../../api/atelier';
 import { confirmDestructive } from '../../utils/confirm';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
-import { submittingProps } from '../../components/SubmitButton';
+import { SubmitButton } from '../../components/SubmitButton';
 import type { BuilderState } from '@shared/types';
 
 interface SaveModalProps {
@@ -185,38 +185,17 @@ export function SaveModal({
               wrong. What actually carries Enter to Save is the form's
               `onSubmit`; neutering that reds
               `save-modal-dialog-shell.spec.tsx`'s Enter test immediately. */}
-          <button
-            type="button"
-            onClick={() => void requestClose()}
-            style={{
-              padding: '6px 14px',
-              fontSize: 12,
-              border: `1px solid ${T.border}`,
-              borderRadius: T.rs,
-              background: 'none',
-              color: T.textMuted,
-              cursor: 'pointer',
-            }}
-          >
+          <Button type="button" variant="default" size="xs" c={T.textMuted} onClick={() => void requestClose()}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <SubmitButton
             type="submit"
+            size="xs"
             disabled={!fieldsValid} // #91 — real disabled excludes `saving`, see SubmitButton.tsx
-            {...submittingProps(saving)}
-            style={{
-              padding: '6px 14px',
-              fontSize: 12,
-              fontWeight: 600,
-              border: `1px solid ${canSubmit ? T.accent : T.border}`,
-              borderRadius: T.rs,
-              background: canSubmit ? T.accent : T.surfaceRaised,
-              color: canSubmit ? T.accentText : T.textGhost,
-              cursor: canSubmit ? 'pointer' : 'not-allowed',
-            }}
+            submitting={saving}
           >
             {saving ? 'Saving…' : 'Save'}
-          </button>
+          </SubmitButton>
         </div>
       </form>
     </Modal>

@@ -16,7 +16,16 @@ export type GrammarHit =
       operatorContext?: OperatorContext;
     }
   | { kind: 'fieldRef'; token: string; replaceStart: number; replaceEnd: number }
-  | { kind: 'valueFor'; field: string; token: string; replaceStart: number; replaceEnd: number };
+  | {
+      kind: 'valueFor';
+      /** The source field the value is compared with. */
+      field: string;
+      /** The `$` operator between the field and the value, as in `{age: {$gt: "…"}}`. */
+      operator?: string;
+      token: string;
+      replaceStart: number;
+      replaceEnd: number;
+    };
 
 interface Scope {
   type: 'obj' | 'arr';
@@ -53,6 +62,48 @@ function resolveOperatorContext(
   if (stageOp === '$project') return 'projectValue';
   if (stageOp === '$set' || stageOp === '$addFields') return 'addFieldsValue';
   return undefined;
+}
+
+/** Query operators whose value is a list of clauses, each over the same fields. */
+const LOGICAL_OPS = new Set(['$and', '$or', '$nor']);
+/** Operators that sit between a field and its condition without naming a field. */
+const PASS_THROUGH_OPS = new Set(['$elemMatch', '$not']);
+
+/**
+ * The field a string value is compared with, as a dotted path, and the `$`
+ * operator in between, if any. `{address: {city: "…"}}` is `address.city`,
+ * `{items: {$elemMatch: {qty: {$gt: "…"}}}}` is `items.qty` with `$gt`, and a
+ * logical operator's clause list is walked through. Anything else on the
+ * way (an exact-match array, `$expr`, `$geoWithin`, a logical operator whose
+ * value is not a list) returns null: no suggestion beats one for the wrong
+ * field.
+ */
+function resolveValueTarget(
+  scopes: Scope[],
+  innermostKey: string,
+): { field: string; operator?: string } | null {
+  const operator = innermostKey.startsWith('$') ? innermostKey : undefined;
+  const segments = operator ? [] : [innermostKey];
+  for (let d = scopes.length - 2; d >= 0; d--) {
+    const scope = scopes[d]!;
+    // An array's own scope carries no key; the key that owns it, one level
+    // out, decides whether it may be crossed.
+    if (scope.type === 'arr') continue;
+    const key = scope.lastKey;
+    if (key === null) return null;
+    const holdsArray = scopes[d + 1]!.type === 'arr';
+    if (LOGICAL_OPS.has(key)) {
+      if (!holdsArray) return null;
+    } else if (holdsArray) {
+      return null;
+    } else if (key.startsWith('$')) {
+      if (!PASS_THROUGH_OPS.has(key)) return null;
+    } else {
+      segments.unshift(key);
+    }
+  }
+  if (segments.length === 0) return null;
+  return operator ? { field: segments.join('.'), operator } : { field: segments.join('.') };
 }
 
 export function detectAggGrammar(
@@ -191,13 +242,12 @@ export function detectAggGrammar(
       // this true, can't add any case beyond what 'value' already covers.
       // Verified against the full test suite.
       if (prevModeAtStringStart === 'value' && prevKeyAtStringStart) {
-        return {
-          kind: 'valueFor',
-          field: prevKeyAtStringStart,
-          token: inner,
-          replaceStart,
-          replaceEnd,
-        };
+        // Nothing inside a string touches `scopes`, so it is still the stack
+        // at the opening quote, and its top is the scope whose key is
+        // `prevKeyAtStringStart`.
+        const target = resolveValueTarget(scopes, prevKeyAtStringStart);
+        if (!target) return null;
+        return { kind: 'valueFor', ...target, token: inner, replaceStart, replaceEnd };
       }
     }
     return null;

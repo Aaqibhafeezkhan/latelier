@@ -13,6 +13,7 @@ import {
   limitWarning,
   parseSortString,
   projectionProblem,
+  requireFilterJson,
   sortProblem,
   emptyBuilder,
   sortFieldPatch,
@@ -864,6 +865,43 @@ describe('filterProblem', () => {
       );
     });
   }
+});
+
+// One rule decides runnability: the Run gate (`filterProblem`) and the text
+// the runner sends (`currentFilterJson`) used to judge Unicode-padded text
+// differently — `String.prototype.trim` strips NBSP, BOM and em space, and
+// `JSON.parse` refuses them — so Run refused what the runner would send.
+describe('filterProblem and currentFilterJson agree', () => {
+  const OID = '{"$oid":"507f1f77bcf86cd799439011"}';
+  const rows: [string, string, string | null][] = [
+    ['empty', '', null],
+    ['spaces', '   ', null],
+    ['NBSP-padded valid document', '\u00a0{"a":1}\u00a0', '{"a":1}'],
+    ['a lone BOM', '\ufeff', null],
+    ['BOM-prefixed valid document', '\ufeff{"a":1}', '{"a":1}'],
+    ['em-space-padded valid document', '\u2003{"a":1}\u2003', '{"a":1}'],
+    ['invalid JSON', '{"a":', null],
+    ['an array', '[1]', null],
+    ['a bare ObjectId sentinel', OID, null],
+    ['a valid document', '{"status":"active"}', '{"status":"active"}'],
+  ];
+  for (const [label, queryRaw, sent] of rows) {
+    it(`${label}: refused by both or sent as ${JSON.stringify(sent)}`, () => {
+      const s = makeTabState({ queryRaw });
+      expect(currentFilterJson(s) === null).toBe(filterProblem(queryRaw) !== null);
+      expect(currentFilterJson(s)).toBe(sent);
+    });
+  }
+
+  it('requireFilterJson returns the trimmed text the runner sends', () => {
+    expect(requireFilterJson(makeTabState({ queryRaw: '\u00a0{"a":1} ' }))).toBe('{"a":1}');
+  });
+
+  it('requireFilterJson throws with the reason rather than widening to {}', () => {
+    expect(() => requireFilterJson(makeTabState({ queryRaw: '[1]' }))).toThrow(
+      'No runnable filter after the Run gate passed: A filter must be a document, like { "status": "active" }.',
+    );
+  });
 });
 
 describe('findProblem', () => {

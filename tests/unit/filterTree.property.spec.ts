@@ -50,6 +50,11 @@ const listItemArb: fc.Arbitrary<unknown> = fc.oneof(
   oidArb.map(($oid) => ({ $oid })),
   isoDateArb.map(($date) => ({ $date })),
 );
+// The canonical EJSON date. It is not a row the drawer can edit, so it
+// reaches the printer as raw text.
+const canonicalDateArb = fc
+  .integer({ min: 0, max: 4_000_000_000_000 })
+  .map((ms) => ({ $date: { $numberLong: String(ms) } }));
 
 const safeCondArb: fc.Arbitrary<CondNode> = fc.oneof(
   fc.record({
@@ -201,8 +206,8 @@ const listFilterTextArb: fc.Arbitrary<string> = fc
     fc.record({
       field: fieldNameArb,
       op: fc.constantFrom(...LIST_OPS),
-      items: fc.array(listItemArb, { maxLength: 3 }),
-      extra: fc.option(fc.oneof(listItemArb, fc.constant(true)), { nil: undefined }),
+      items: fc.array(fc.oneof(listItemArb, canonicalDateArb), { maxLength: 3 }),
+      extra: fc.option(fc.oneof(listItemArb, canonicalDateArb, fc.constant(true)), { nil: undefined }),
     }),
     { minLength: 1, maxLength: 3 },
   )
@@ -215,6 +220,25 @@ const listFilterTextArb: fc.Arbitrary<string> = fc
   });
 
 describe('parsed text prints back', () => {
+  it('a field holding the canonical date, bare or under an operator, prints its own text', () => {
+    fc.assert(
+      fc.property(
+        fieldNameArb,
+        canonicalDateArb,
+        fc.constantFrom(undefined, '$eq', '$gt', '$lte'),
+        (field, date, op) => {
+          const text = JSON.stringify({ [field]: op === undefined ? date : { [op]: date } });
+          const parsed = parseFilter(text);
+          expect(parsed.ok).toBe(true);
+          if (!parsed.ok) return;
+          expect(parsed.root.children.map((c) => c.kind)).toEqual(['raw']);
+          expect(printFilter(parsed.root)).toEqual({ ok: true, json: text });
+        },
+      ),
+      { numRuns: 60 },
+    );
+  });
+
   it('a filter of list operators and sentinels, empty lists included, always prints, and prints its own text', () => {
     fc.assert(
       fc.property(listFilterTextArb, (text) => {

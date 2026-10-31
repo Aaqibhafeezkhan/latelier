@@ -9,16 +9,20 @@ import {
   Drawer,
   Group,
   Modal,
+  PasswordInput,
   Stack,
   Table,
   Text,
   TextInput,
 } from '@mantine/core';
 import { api, isIpcError } from '../api/atelier';
+import { logFailure } from '../utils/rendererLog';
+import { notify } from '../theme/notifications';
 import { confirmDestructive } from '../utils/confirm';
 import { DisclosureToggle } from '../components/DisclosureToggle';
 import { SubmitButton } from '../components/SubmitButton';
 import { useDialogFocusReturn } from '../hooks/useDialogFocusReturn';
+import { RoleRowsEditor } from './RoleRowsEditor';
 import type { DbInfo } from '@shared/ipc';
 import type {
   AuthMechanism,
@@ -112,14 +116,14 @@ export function UsersTab({
 
   // Fetch full connection (auth_username / auth_database) for self-protection.
   React.useEffect(() => {
-    void api.conn.get(conn.id).then(setConnFull).catch(() => { /* non-fatal */ });
+    void api.conn.get(conn.id).then(setConnFull).catch((err) => logFailure('loading the connection for self-protection', err));
   }, [conn.id]);
 
   React.useEffect(() => {
     void api.prefs
       .get<string>(LAST_DB_KEY)
       .then((v) => v && setPicked(v))
-      .catch(() => { /* non-fatal */ });
+      .catch((err) => logFailure(`reading preference ${LAST_DB_KEY}`, err));
   }, []);
 
   const loadDatabases = React.useCallback(async () => {
@@ -182,7 +186,10 @@ export function UsersTab({
 
   const onPickDb = (next: string) => {
     setPicked(next);
-    void api.prefs.set(LAST_DB_KEY, next).catch(() => { /* ok */ });
+    void api.prefs.set(LAST_DB_KEY, next).catch((err) => {
+      logFailure(`saving preference ${LAST_DB_KEY}`, err);
+      notify.warning('The selected database will not be remembered.', { title: 'Preference not saved' });
+    });
   };
 
   if (runtime.status !== 'connected') {
@@ -197,12 +204,9 @@ export function UsersTab({
     return (
       <div style={{ padding: 20, color: T.warn }}>
         {dbError}
-        <button
-          onClick={() => void loadDatabases()}
-          style={{ marginLeft: 8, background: 'none', border: 'none', color: T.accent, cursor: 'pointer' }}
-        >
+        <Button variant="subtle" size="compact-xs" c={T.accent} ml={8} onClick={() => void loadDatabases()}>
           Retry
-        </button>
+        </Button>
       </div>
     );
   }
@@ -301,9 +305,9 @@ export function UsersTab({
           + New user
         </Button>
 
-        <Button size="compact-xs" variant="subtle" onClick={() => void loadUsers()} leftSection={I.sync} disabled={loading}>
+        <SubmitButton size="compact-xs" variant="subtle" onClick={() => void loadUsers()} leftSection={I.sync} submitting={loading}>
           Refresh
-        </Button>
+        </SubmitButton>
       </div>
 
       <div
@@ -580,18 +584,6 @@ function roleLabel(r: UserRoleRef): string {
   return `${r.role}@${r.db}`;
 }
 
-function iconBtnStyle(T: typeof themeVars): React.CSSProperties {
-  return {
-    background: 'transparent',
-    border: 'none',
-    color: T.textGhost,
-    cursor: 'pointer',
-    padding: 4,
-    fontSize: 13,
-    lineHeight: 1,
-  };
-}
-
 // ─── Create / Edit drawer ──────────────────────────────────────────────────
 
 function UserDrawer({
@@ -667,16 +659,6 @@ function UserDrawer({
     if (discard) close();
   };
 
-  const addRole = () => {
-    setRoles((r) => [...r, { role: 'read', db: dbName }]);
-  };
-  const updateRole = (i: number, patch: Partial<UserRoleRef>) => {
-    setRoles((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
-  };
-  const removeRole = (i: number) => {
-    setRoles((r) => r.filter((_, idx) => idx !== i));
-  };
-
   const submit = async () => {
     if (submitting) return;
     setError(null);
@@ -713,11 +695,13 @@ function UserDrawer({
     const mechanisms: AuthMechanism[] = [];
     if (scram256) mechanisms.push('SCRAM-SHA-256');
     if (scram1) mechanisms.push('SCRAM-SHA-1');
+    // The role rows warn on trimmed names; send what they checked.
+    const trimmedRoles = roles.map((r) => ({ role: r.role.trim(), db: r.db.trim() }));
 
     setSubmitting(true);
     try {
       if (editing && editedUser) {
-        const patch: UserUpdateInput['patch'] = { roles };
+        const patch: UserUpdateInput['patch'] = { roles: trimmedRoles };
         if (!isExternal && password.length > 0) patch.password = password;
         if (!isExternal && mechanisms.length > 0) patch.mechanisms = mechanisms;
         if (customDataEnabled) patch.customData = customData || '{}';
@@ -733,7 +717,7 @@ function UserDrawer({
           dbName,
           username: username.trim(),
           password,
-          roles,
+          roles: trimmedRoles,
           mechanisms: mechanisms.length > 0 ? mechanisms : ['SCRAM-SHA-256'],
         };
         if (customDataEnabled && customData.trim()) create.customData = customData;
@@ -809,64 +793,42 @@ function UserDrawer({
 
         {!isExternal && (
           <DrawerSection title="Password">
-            <input
+            {/* Mantine's reveal toggle is out of the tab order by default;
+                `visibilityToggleFocusable` puts it back so the keyboard can
+                reach it. It is a toggle button: the name stays fixed and
+                Mantine's aria-pressed carries the state — a name that flipped
+                to "Hide" would announce as "Hide password, pressed". */}
+            <PasswordInput
               aria-label="Password"
-              type="password"
+              size="xs"
+              spellCheck={false}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => setPassword(e.currentTarget.value)}
               placeholder={editing ? 'Leave blank to keep current password' : ''}
-              style={drawerInputStyle(T)}
+              visibilityToggleFocusable
+              visibilityToggleButtonProps={{ 'aria-label': 'Show password' }}
             />
-            <input
+            <PasswordInput
               aria-label="Confirm password"
-              type="password"
+              size="xs"
+              mt={6}
+              spellCheck={false}
               value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
+              onChange={(e) => setConfirm(e.currentTarget.value)}
               placeholder="Confirm"
-              style={{ ...drawerInputStyle(T), marginTop: 6 }}
+              visibilityToggleFocusable
+              visibilityToggleButtonProps={{ 'aria-label': 'Show confirm password' }}
             />
           </DrawerSection>
         )}
 
         <DrawerSection title="Roles">
-          {roles.map((r, i) => (
-            <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-              <input
-                aria-label={`Role name ${i + 1}`}
-                value={r.role}
-                onChange={(e) => updateRole(i, { role: e.target.value })}
-                style={drawerInputStyle(T)}
-              />
-              <span style={{ fontSize: 12, color: T.textMuted, alignSelf: 'center' }}>@</span>
-              <input
-                aria-label={`Role db ${i + 1}`}
-                value={r.db}
-                onChange={(e) => updateRole(i, { db: e.target.value })}
-                style={{ ...drawerInputStyle(T), maxWidth: 130 }}
-              />
-              <button
-                onClick={() => removeRole(i)}
-                aria-label={`Remove role ${i + 1}`}
-                style={iconBtnStyle(T)}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-          <button
-            onClick={addRole}
-            style={{
-              background: 'transparent',
-              border: `1px dashed ${T.border}`,
-              borderRadius: T.rs,
-              padding: '4px 8px',
-              fontSize: 11,
-              color: T.textMuted,
-              cursor: 'pointer',
-            }}
-          >
-            + Add role
-          </button>
+          <RoleRowsEditor
+            connectionId={connectionId}
+            defaultDb={dbName}
+            rows={roles}
+            onChange={setRoles}
+          />
         </DrawerSection>
 
         {!isExternal && (

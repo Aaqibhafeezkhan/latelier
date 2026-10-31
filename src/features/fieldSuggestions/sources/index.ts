@@ -4,6 +4,8 @@ import { lastRunValuesSource } from './lastRunValuesSource';
 import { fieldOperatorSource, operatorSource } from './operatorSource';
 import { recentValuesSource } from './recentValuesSource';
 import { sampleSchemaSource } from './sampleSchemaSource';
+import { sampleValuesSource } from './sampleValuesSource';
+import { schemaEnumSource } from './schemaEnumSource';
 
 export {
   fieldOperatorSource,
@@ -12,6 +14,8 @@ export {
   operatorSource,
   recentValuesSource,
   sampleSchemaSource,
+  sampleValuesSource,
+  schemaEnumSource,
 };
 export {
   invalidateSampleSchemaCache,
@@ -21,6 +25,7 @@ export {
   invalidateRecentValuesCache,
   setRecentValuesCacheTtl,
 } from './recentValuesSource';
+export { invalidateSchemaEnumCache, setSchemaEnumCacheTtl } from './schemaEnumSource';
 
 /**
  * Default field-name composition. Used by the `useSuggestions` hook when a
@@ -37,9 +42,14 @@ export const DEFAULT_FIELD_SOURCES: readonly FieldSource[] = [
 
 /**
  * Default value-position composition: the current results first (sync,
- * instant), then values persisted from earlier runs (async, per-field).
+ * instant), then values persisted from earlier runs (async, per-field), the
+ * validator's `$jsonSchema` enum (async, per collection) and the values of a
+ * low-cardinality field in the cached sample (async, shares the field
+ * sample's fetch).
  */
 export const DEFAULT_VALUE_SOURCES: readonly ValueSource[] = [
   lastRunValuesSource,
   recentValuesSource,
+  schemaEnumSource,
+  sampleValuesSource,
 ];

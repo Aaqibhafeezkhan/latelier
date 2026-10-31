@@ -28,6 +28,7 @@ Provide a single, well-typed, versioned SQLite store for every piece of persiste
   PRAGMA foreign_keys = ON;
   PRAGMA busy_timeout = 5000;
   PRAGMA secure_delete = ON;
+  PRAGMA temp_store = MEMORY;  -- VACUUM's temp copy of still-plaintext rows never reaches disk (X21)
   ```
 - On first run the file is created and migrations run to the latest version.
 - On subsequent runs migrations with version > `schema_version.version` run in a transaction.
@@ -41,10 +42,11 @@ export function openDatabase(userDataDir: string): Database {
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   db.pragma('secure_delete = ON');
+  db.pragma('temp_store = MEMORY');
   // VACUUM when an upgrade ran migrations: erases bytes freed before
   // secure_delete was on. Then fold and truncate the WAL.
-  if (runMigrations(db) > 0) db.exec('VACUUM');
-  db.pragma('wal_checkpoint(TRUNCATE)');
+  if (runMigrations(db) > 0) vacuumAndTruncateWal(db, 'after migrations', log);
+  else truncateWal(db);
   return db;
 }
 ```
@@ -187,6 +189,39 @@ CREATE TABLE app_state (
 
 UPDATE schema_version SET version = 1;
 ```
+
+### 3.1 Encrypted columns and the column key (migration 016, [X21](./X21-encryption-at-rest.md))
+
+Five columns hold values that came out of the user's MongoDB data and are stored as sealed BLOBs in their existing TEXT-affinity columns: `recent_queries.payload_json`, `recent_field_values.value`, `audit_log.summary_json`, `saved_queries.payload_json`, `workspace_tabs.state_json`. The repositories seal on write and open on read through `ColumnCipher` (`electron/db/columnCipher.ts`); their row types keep `string`. A TEXT cell in those columns is plaintext written before X21 and is sealed once by `encryptLegacyRows` on the next boot. Schema names (`db_name`, `collection`, `field`, reference rules, schema paths inside tab state) stay plaintext: they are SQL predicates.
+
+```sql
+CREATE TABLE column_keys (
+  id           INTEGER PRIMARY KEY CHECK (id = 1),
+  wrapped      BLOB NOT NULL,              -- safeStorage ciphertext of base64(enc || mac), or the raw 64 bytes
+  is_plaintext INTEGER NOT NULL DEFAULT 0, -- 1 when no usable keychain existed; re-wrapped once one appears
+  created_at   TEXT NOT NULL
+);
+
+-- Rebuilt by 016 (the 30-day cache is dropped, not converted):
+CREATE TABLE recent_field_values (
+  id TEXT PRIMARY KEY,
+  connection_id TEXT NOT NULL,
+  db_name TEXT NOT NULL,
+  collection TEXT NOT NULL,
+  field TEXT NOT NULL,
+  value BLOB NOT NULL,          -- sealed, padded to a 32-byte multiple
+  value_mac TEXT NOT NULL,      -- HMAC of the value scoped to (connection, db, collection, field)
+  val_type TEXT NOT NULL,
+  last_used_at TEXT NOT NULL,
+  use_count INTEGER NOT NULL DEFAULT 1,
+  FOREIGN KEY (connection_id) REFERENCES connections(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX recent_field_values_uniq ON recent_field_values(value_mac);
+CREATE INDEX recent_field_values_lookup
+  ON recent_field_values(connection_id, db_name, collection, field, last_used_at DESC);
+```
+
+A migration that only reshapes these tables (add, drop or rename a column; a rebuild that copies the column verbatim under the same table name) is unaffected. A migration that changes the content of an encrypted column cannot be written in SQL; it needs a post-open data step with the key (X21 §8).
 
 ## 4. Base repository pattern
 

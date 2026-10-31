@@ -474,11 +474,10 @@ describe('parseConnectionExport', () => {
     }
   });
 
-  it('drops a __proto__ key instead of carrying it into the parsed entry', async () => {
+  it('rejects a __proto__ key instead of carrying it into the parsed entry', async () => {
     const text = (await plain()).replace('"name": "Prod"', '"name": "Prod", "__proto__": {"x": 1}');
-    const entry = parseConnectionExport(text).connections[0]!;
-    expect(Object.hasOwn(entry, '__proto__')).toBe(false);
-    expect(Object.getPrototypeOf(entry)).toBe(Object.prototype);
+    expect(() => parseConnectionExport(text)).toThrow(/Unrecognized key: "__proto__"/);
+    await expectCode(() => parseConnectionExport(text), 'VALIDATION');
     expect(({} as Record<string, unknown>).x).toBeUndefined();
   });
 });

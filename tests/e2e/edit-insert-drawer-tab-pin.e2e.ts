@@ -65,7 +65,7 @@ test('the Document Editor keeps saving to the tab it was opened on after switchi
       // Back to orders (tab 1), open Edit on the shared-id row.
       await ws.tabByName('orders').click();
       await expect(ws.tabByName('orders')).toHaveAttribute('aria-selected', 'true');
-      await win.locator('button[title="Edit document"]').first().click();
+      await win.getByRole('button', { name: /^Edit document/ }).first().click();
       const editor = win.getByRole('dialog', { name: 'Edit document' });
       await expect(editor).toBeVisible({ timeout: 5000 });
 
@@ -277,7 +277,7 @@ test('the Document Editor survives switching to a Script tab (no active collecti
       await ws.tabByName('orders').click();
       await expect(ws.tabByName('orders')).toHaveAttribute('aria-selected', 'true');
 
-      await win.locator('button[title="Edit document"]').first().click();
+      await win.getByRole('button', { name: /^Edit document/ }).first().click();
       const editor = win.getByRole('dialog', { name: 'Edit document' });
       await expect(editor).toBeVisible({ timeout: 5000 });
       const sku = editor.getByRole('textbox', { name: 'sku' });

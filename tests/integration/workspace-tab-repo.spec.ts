@@ -4,7 +4,7 @@ import {
   WorkspaceTabRepo,
   type WorkspaceTabRow,
 } from '../../electron/db/repositories/WorkspaceTabRepo';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher, cellType } from '../helpers/db';
 
 function seedConnection(tmp: TempDb, id: string): void {
   const now = new Date().toISOString();
@@ -38,7 +38,7 @@ describe('WorkspaceTabRepo', () => {
 
   beforeEach(() => {
     tmp = createTempDb();
-    repo = new WorkspaceTabRepo(tmp.db);
+    repo = new WorkspaceTabRepo(tmp.db, createTempCipher());
     seedConnection(tmp, 'conn');
   });
 
@@ -102,6 +102,15 @@ describe('WorkspaceTabRepo', () => {
     repo.insert(makeRow({ id: 'a', state_json: '{"view":"Tree"}' }));
     repo.updateState('a', '{"view":"JSON"}');
     expect(repo.findById('a')!.state_json).toBe('{"view":"JSON"}');
+    expect(cellType(tmp.db, 'workspace_tabs', 'state_json', 'a')).toBe('blob');
+  });
+
+  it('a state cell copied onto another tab reads as empty state rather than decrypting there', () => {
+    repo.insert(makeRow({ id: 'a', collection: 'a', state_json: '{"view":"Tree"}' }));
+    repo.insert(makeRow({ id: 'b', collection: 'b', position: 1, state_json: '{"view":"JSON"}' }));
+    tmp.db.prepare("UPDATE workspace_tabs SET state_json = (SELECT state_json FROM workspace_tabs WHERE id = 'a') WHERE id = 'b'").run();
+    expect(repo.findById('b')!.state_json).toBe('');
+    expect(repo.findById('a')!.state_json).toBe('{"view":"Tree"}');
   });
 
   it('deleteById returns changes count', () => {

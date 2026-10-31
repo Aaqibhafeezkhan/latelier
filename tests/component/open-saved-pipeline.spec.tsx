@@ -55,6 +55,10 @@ const PIPELINE: SavedQuerySummary = {
   updatedAt: now,
 };
 
+// The whole Workspace page mounts here; the first test in the file also pays the
+// cold module load, which outlasts findBy's 1 s default on a loaded CI runner.
+const SLOW_MOUNT = { timeout: 10_000 };
+
 afterEach(() => {
   uninstallAtelierMock();
   vi.restoreAllMocks();
@@ -89,7 +93,7 @@ describe('opening a saved pipeline from the Saved list', () => {
     const open = vi.fn<IpcApi['tabs']['openAggregation']>(async () => TAB as never);
     mount(open);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open "Top spenders" in a new tab' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open "Top spenders" in a new tab' }, SLOW_MOUNT));
 
     await waitFor(() =>
       expect(open).toHaveBeenCalledWith({
@@ -108,7 +112,7 @@ describe('opening a saved pipeline from the Saved list', () => {
       throw Object.assign(new Error('saved query 7d1c4e0a-uuid not found'), { code: 'NOT_FOUND' });
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open "Top spenders" in a new tab' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open "Top spenders" in a new tab' }, SLOW_MOUNT));
 
     await waitFor(() =>
       expect(error).toHaveBeenCalledWith('It no longer exists.', { title: 'Could not open “Top spenders”' }),
@@ -123,7 +127,7 @@ describe('opening a saved pipeline from the Saved list', () => {
       });
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open "Top spenders" in a new tab' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open "Top spenders" in a new tab' }, SLOW_MOUNT));
 
     await waitFor(() =>
       expect(error).toHaveBeenCalledWith(

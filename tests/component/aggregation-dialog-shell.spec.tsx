@@ -7,6 +7,13 @@ import { SavePipelineModal } from '../../src/pages/Workspace/Aggregation/SavePip
 import { SaveAsCollectionModal } from '../../src/pages/Workspace/Aggregation/SaveAsCollectionModal';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { invalidateSampleSchemaCache } from '../../src/features/fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
+
+// Spied so each write path can be checked for dropping the cached enum suggestions.
+vi.mock('../../src/features/fieldSuggestions/sources/schemaEnumSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/features/fieldSuggestions/sources/schemaEnumSource')>()),
+  invalidateSchemaEnumCache: vi.fn(),
+}));
 
 // Mocked at the exact module SaveAsCollectionModal imports; the rest stays
 // real because AggregationTab reaches the suggestion sources through their
@@ -20,6 +27,7 @@ afterEach(() => {
   uninstallAtelierMock();
   vi.restoreAllMocks();
   vi.mocked(invalidateSampleSchemaCache).mockClear();
+  vi.mocked(invalidateSchemaEnumCache).mockClear();
 });
 
 /**
@@ -477,6 +485,32 @@ describe('SavePipelineModal — dialog shell + guard (X15 T6)', () => {
       expect(create).toHaveBeenCalledTimes(1);
       resolve({});
     });
+
+    it('renders a failed save as a red alert, not the warning colour', async () => {
+      installAtelierMock({
+        saved: {
+          create: (async () => {
+            throw { code: 'INTERNAL', message: 'disk full' };
+          }) as never,
+        },
+      });
+      render(
+        <SavePipelineModal
+          connectionId="c1"
+          dbName="shop"
+          collection="orders"
+          stages={[{ id: 1, op: '$match', body: '{}', enabled: true }]}
+          onClose={vi.fn()}
+          onSaved={() => undefined}
+        />,
+      );
+      fireEvent.change(nameInput(), { target: { value: 'Top skus' } });
+      fireEvent.click(saveButton());
+
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toBe('disk full');
+      expect(alert.getAttribute('style')).toContain('color: var(--atelier-red)');
+    });
   });
 });
 
@@ -747,6 +781,7 @@ describe('SaveAsCollectionModal — dialog shell + guard (X15 T6)', () => {
       await waitFor(() =>
         expect(invalidateSampleSchemaCache).toHaveBeenCalledExactlyOnceWith('c1', 'reports', 'monthlyByAccount'),
       );
+      expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('c1', 'reports', 'monthlyByAccount');
     });
 
     it('drops it as well when the write fails, since a $merge may have written part-way', async () => {
@@ -774,6 +809,7 @@ describe('SaveAsCollectionModal — dialog shell + guard (X15 T6)', () => {
 
       await screen.findByText(/merge failed/);
       expect(invalidateSampleSchemaCache).toHaveBeenCalledExactlyOnceWith('c1', 'shop', 'monthlyByAccount');
+      expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('c1', 'shop', 'monthlyByAccount');
     });
 
     it('leaves the sample alone when the submit is blocked by a mismatched confirmation', async () => {
@@ -788,6 +824,7 @@ describe('SaveAsCollectionModal — dialog shell + guard (X15 T6)', () => {
       await settle();
       expect(written.length).toBe(0);
       expect(invalidateSampleSchemaCache).not.toHaveBeenCalled();
+      expect(invalidateSchemaEnumCache).not.toHaveBeenCalled();
     });
 
     /**

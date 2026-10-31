@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '../helpers/render';
 import { ErrorBoundary } from '../../src/components/ErrorBoundary';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
+import type { IpcApi } from '@shared/ipc';
 
 function Thrower({ shouldThrow }: { shouldThrow: boolean }) {
   if (shouldThrow) {
@@ -38,6 +39,20 @@ describe('<ErrorBoundary>', () => {
     expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Report' })).toBeTruthy();
     expect(screen.queryByText('thrower ok')).toBeNull();
+  });
+
+  it('announces the fallback as an alert and moves focus to its heading', () => {
+    render(
+      <ErrorBoundary>
+        <Thrower shouldThrow />
+      </ErrorBoundary>,
+    );
+
+    const alert = screen.getByRole('alert');
+    const heading = screen.getByRole('heading', { name: 'Something went wrong' });
+    expect(alert.contains(heading)).toBe(true);
+    expect(heading.getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(heading);
   });
 
   it('logs the caught error via console.error with the boundary tag', () => {
@@ -111,5 +126,41 @@ describe('<ErrorBoundary>', () => {
 
     expect(screen.getByText('never throws')).toBeTruthy();
     expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('sends the caught error to the main log with its stack and the component stack', () => {
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    installAtelierMock({ app: { log } });
+
+    render(
+      <ErrorBoundary>
+        <Thrower shouldThrow />
+      </ErrorBoundary>,
+    );
+
+    expect(log).toHaveBeenCalledTimes(1);
+    const sent = log.mock.calls[0]![0];
+    expect(sent).toMatchObject({ level: 'error', message: 'boom', source: 'errorBoundary' });
+    // The error's own stack first, then the component stack naming the thrower.
+    expect(sent.stack).toMatch(/^Error: boom\n/);
+    expect(sent.stack).toMatch(/\n\s*at Thrower/);
+  });
+
+  it('cuts a stack longer than the channel accepts instead of losing the line', () => {
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    installAtelierMock({ app: { log } });
+    function DeepThrower(): React.ReactNode {
+      const err = new Error('deep');
+      err.stack = `Error: deep\n${'    at frame (x.js:1:1)\n'.repeat(1000)}`;
+      throw err;
+    }
+
+    render(
+      <ErrorBoundary>
+        <DeepThrower />
+      </ErrorBoundary>,
+    );
+
+    expect(log.mock.calls[0]![0].stack).toHaveLength(8000);
   });
 });

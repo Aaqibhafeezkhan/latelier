@@ -1,3 +1,4 @@
+import { UnstyledButton } from '@mantine/core';
 import { themeVars } from '../../../theme/themeVars';
 import { I } from '../../../icons';
 import type { Stage } from '@shared/types';
@@ -125,7 +126,7 @@ export function PipelineOutline({
               <div style={{ display: 'flex', justifyContent: 'center', height: 12 }}>
                 <div style={{ borderLeft: `1.5px dashed ${T.border}`, height: '100%' }} />
               </div>
-              <button
+              <UnstyledButton
                 type="button"
                 onClick={() => onSelect(stage.id)}
                 aria-label={`Jump to stage ${idx + 1} (${stage.op})`}
@@ -135,12 +136,7 @@ export function PipelineOutline({
                   gap: 7,
                   width: '100%',
                   padding: '5px 12px',
-                  margin: 0,
-                  border: 'none',
                   font: 'inherit',
-                  color: 'inherit',
-                  textAlign: 'left',
-                  cursor: 'pointer',
                   opacity: stage.enabled ? 1 : 0.5,
                   background: activeId === stage.id ? T.accentSoft : 'transparent',
                   borderLeft:
@@ -192,13 +188,14 @@ export function PipelineOutline({
                       color: T.textGhost,
                       flexShrink: 0,
                       textDecoration: stage.enabled ? 'none' : 'line-through',
+                      fontVariantNumeric: 'tabular-nums',
                     }}
                   >
                     {fmt(count)}
                     {stale ? ' ⚠' : ''}
                   </span>
                 )}
-              </button>
+              </UnstyledButton>
             </div>
           );
         })}

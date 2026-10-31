@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActionIcon, Tooltip } from '@mantine/core';
+import { ActionIcon, Button, Tooltip, UnstyledButton } from '@mantine/core';
 import { themeVars } from '../../../theme/themeVars';
 import { I } from '../../../icons';
 import type { Stage, StageOp } from '@shared/types';
@@ -184,7 +184,9 @@ function StageOpPicker({ onPick, renderTrigger, align = 'center' }: StageOpPicke
       const op = filtered[focusEffective];
       if (op) pick(op);
     } else if (e.key === 'Escape') {
-      setOpen(false);
+      e.preventDefault();
+      e.stopPropagation();
+      close();
     }
   };
 
@@ -297,7 +299,7 @@ function StageOpPicker({ onPick, renderTrigger, align = 'center' }: StageOpPicke
                 })}
               </div>
               <div style={{ borderTop: `1px solid ${T.border}` }}>
-                <button
+                <UnstyledButton
                   onClick={() => setCustomMode(true)}
                   style={{
                     display: 'flex',
@@ -305,16 +307,12 @@ function StageOpPicker({ onPick, renderTrigger, align = 'center' }: StageOpPicke
                     gap: 8,
                     width: '100%',
                     padding: '8px 12px',
-                    border: 'none',
-                    background: 'transparent',
-                    cursor: 'pointer',
                     fontSize: 11.5,
                     color: T.textMuted,
-                    textAlign: 'left',
                   }}
                 >
                   {I.plus} Other / custom stage…
-                </button>
+                </UnstyledButton>
               </div>
             </>
           )}
@@ -342,22 +340,16 @@ function StageOpPicker({ onPick, renderTrigger, align = 'center' }: StageOpPicke
                     padding: '4px 8px',
                   }}
                 />
-                <button
+                <Button
+                  variant="light"
+                  size="compact-xs"
+                  fz={11}
                   onClick={submitCustom}
                   aria-label="Add custom stage"
                   disabled={!cleanCustomName}
-                  style={{
-                    fontSize: 11,
-                    padding: '4px 10px',
-                    border: `1px solid ${T.accentBorder}`,
-                    borderRadius: T.rs,
-                    background: T.accentSoft,
-                    color: T.accent,
-                    cursor: cleanCustomName ? 'pointer' : 'not-allowed',
-                  }}
                 >
                   Add
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -420,23 +412,17 @@ function AddStagePill({ onAdd }: { onAdd: (op: StageOp | string) => void }) {
         onPick={onAdd}
         align="center"
         renderTrigger={(_open, toggle) => (
-          <button
+          <Button
+            variant="default"
+            size="compact-xs"
+            radius="xl"
+            c={T.textMuted}
             onClick={toggle}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              border: `1.5px dashed ${T.border}`,
-              borderRadius: 20,
-              background: 'transparent',
-              padding: '5px 16px',
-              cursor: 'pointer',
-              color: T.textMuted,
-              fontSize: 12,
-            }}
+            leftSection={I.plus}
+            style={{ borderStyle: 'dashed' }}
           >
-            {I.plus} Add stage
-          </button>
+            Add stage
+          </Button>
         )}
       />
     </div>
@@ -711,7 +697,7 @@ function StageRow({
           align="left"
           renderTrigger={(_open, toggle) => (
             <OperatorTooltip name={stage.op} prefClass="stage" placement="right">
-              <button
+              <UnstyledButton
                 onClick={(e) => {
                   e.stopPropagation();
                   toggle();
@@ -726,12 +712,10 @@ function StageRow({
                   background: c.bg,
                   color: c.text,
                   flexShrink: 0,
-                  border: 'none',
-                  cursor: 'pointer',
                 }}
               >
                 {stage.op}
-              </button>
+              </UnstyledButton>
             </OperatorTooltip>
           )}
         />
@@ -752,21 +736,16 @@ function StageRow({
         {/* The accessible leaf for expand/collapse (S6852 — see the row div's
             comment above): only the summary text becomes a real <button>,
             same shape as the sortable column header in TableView.tsx. */}
-        <button
+        <UnstyledButton
           type="button"
+          data-stage-summary={stage.id}
           aria-expanded={active}
           onClick={(e) => {
             e.stopPropagation();
             onToggleActive();
           }}
           style={{
-            background: 'none',
-            border: 'none',
-            padding: 0,
-            margin: 0,
             font: 'inherit',
-            textAlign: 'left',
-            cursor: 'pointer',
             fontSize: 11.5,
             color: bodyErr ? T.red : T.textMuted,
             flex: 1,
@@ -777,7 +756,7 @@ function StageRow({
           }}
         >
           {bodyErr ? '(invalid)' : summary}
-        </button>
+        </UnstyledButton>
         {typeof count === 'number' && (
           <span
             style={{
@@ -788,6 +767,7 @@ function StageRow({
               borderRadius: T.rx,
               padding: '1px 5px',
               flexShrink: 0,
+              fontVariantNumeric: 'tabular-nums',
             }}
             title={stale ? 'Stale (edited since last run)' : undefined}
           >
@@ -797,25 +777,22 @@ function StageRow({
         )}
         <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
           <Tooltip label={stage.enabled ? 'Disable' : 'Enable'} withArrow>
-            <button
+            <Button
+              variant={stage.enabled ? 'light' : 'default'}
+              size="compact-xs"
+              h={18}
+              px={5}
+              fz={9}
+              fw={700}
+              c={stage.enabled ? undefined : T.textGhost}
               onClick={(e) => {
                 e.stopPropagation();
                 onToggleEnabled();
               }}
               aria-label={stage.enabled ? 'Disable stage' : 'Enable stage'}
-              style={{
-                fontSize: 9,
-                fontWeight: 700,
-                padding: '2px 5px',
-                borderRadius: T.rx,
-                cursor: 'pointer',
-                border: `1px solid ${stage.enabled ? T.accentBorder : T.border}`,
-                background: stage.enabled ? T.accentSoft : 'transparent',
-                color: stage.enabled ? T.accent : T.textGhost,
-              }}
             >
               {stage.enabled ? 'ON' : 'OFF'}
-            </button>
+            </Button>
           </Tooltip>
           <Tooltip label="Move up" withArrow>
             <ActionIcon
@@ -914,54 +891,25 @@ function StageRow({
             )}
             <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
               <Tooltip label="Copy body" withArrow>
-                <button
-                  onClick={onCopy}
-                  style={{
-                    fontSize: 11,
-                    padding: '3px 9px',
-                    border: `1px solid ${T.border}`,
-                    borderRadius: T.rs,
-                    background: T.surfaceRaised,
-                    color: T.textMuted,
-                    cursor: 'pointer',
-                  }}
-                >
+                <Button variant="default" size="compact-xs" fz={11} c={T.textMuted} onClick={onCopy}>
                   Copy
-                </button>
+                </Button>
               </Tooltip>
               <Tooltip label="Pretty-print" withArrow>
-                <button
-                  onClick={onFormat}
-                  style={{
-                    fontSize: 11,
-                    padding: '3px 9px',
-                    border: `1px solid ${T.border}`,
-                    borderRadius: T.rs,
-                    background: T.surfaceRaised,
-                    color: T.textMuted,
-                    cursor: 'pointer',
-                  }}
-                >
+                <Button variant="default" size="compact-xs" fz={11} c={T.textMuted} onClick={onFormat}>
                   Format
-                </button>
+                </Button>
               </Tooltip>
               <Tooltip label={`Run up to this stage (${formatShortcut('⇧⌘↵', isMacRenderer())})`} withArrow>
-                <button
+                <Button
+                  variant="light"
+                  size="compact-xs"
+                  fz={11}
                   onClick={onRunToStage}
                   disabled={previewLoading}
-                  style={{
-                    fontSize: 11,
-                    padding: '3px 9px',
-                    border: `1px solid ${T.accentBorder}`,
-                    borderRadius: T.rs,
-                    background: T.accentSoft,
-                    color: T.accent,
-                    cursor: previewLoading ? 'default' : 'pointer',
-                    opacity: previewLoading ? 0.6 : 1,
-                  }}
                 >
                   Run to here
-                </button>
+                </Button>
               </Tooltip>
               <div style={{ flex: 1 }} />
             </div>
@@ -986,24 +934,23 @@ function StageRow({
                 justifyContent: 'space-between',
               }}
             >
-              <span>Stage preview {typeof count === 'number' && `· ${fmt(count)} docs`}</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                Stage preview {typeof count === 'number' && `· ${fmt(count)} docs`}
+                {stale && <span title="Stage edited after last run"> · ⚠ stale</span>}
+              </span>
               <Tooltip label="Refresh preview" withArrow>
-                <button
+                <Button
+                  variant="default"
+                  size="compact-xs"
+                  h={18}
+                  px={6}
+                  fz={10}
+                  c={previewLoading ? undefined : T.textMuted}
                   onClick={onRefreshPreview}
                   disabled={previewLoading}
-                  style={{
-                    fontSize: 10,
-                    padding: '1px 6px',
-                    border: `1px solid ${T.border}`,
-                    borderRadius: T.rx,
-                    background: T.surfaceRaised,
-                    color: T.textMuted,
-                    cursor: previewLoading ? 'default' : 'pointer',
-                    opacity: previewLoading ? 0.6 : 1,
-                  }}
                 >
                   Refresh
-                </button>
+                </Button>
               </Tooltip>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
@@ -1087,6 +1034,38 @@ export function StageAccordion(props: AccordionProps) {
     onRefreshPreview,
   } = props;
 
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const prevIdsRef = React.useRef<number[]>(stages.map((s) => s.id));
+
+  // Keep keyboard focus anchored when a stage appears or disappears: the
+  // button that held it (a picker option, the stage's own delete button) is
+  // gone, and focus would otherwise drop to <body>. Only a single add or a
+  // single removal moves focus, and only when focus is already lost or inside
+  // the accordion, so loading a pipeline or an edit elsewhere never steals it.
+  React.useLayoutEffect(() => {
+    const prev = prevIdsRef.current;
+    const ids = stages.map((s) => s.id);
+    prevIdsRef.current = ids;
+    const added = ids.filter((id) => !prev.includes(id));
+    const removed = prev.filter((id) => !ids.includes(id));
+    const root = rootRef.current;
+    if (!root || added.length + removed.length !== 1) return;
+    const focused = document.activeElement;
+    if (focused && focused !== document.body && !root.contains(focused)) return;
+    const summary = (id: number | undefined) =>
+      id === undefined ? null : root.querySelector<HTMLElement>(`[data-stage-summary="${id}"]`);
+    if (added.length === 1) {
+      summary(added[0])?.focus();
+      return;
+    }
+    const at = prev.indexOf(removed[0]);
+    (
+      summary(ids[at]) ??
+      summary(ids[at - 1]) ??
+      root.querySelector<HTMLElement>('[data-add-stage-tail] button')
+    )?.focus();
+  }, [stages]);
+
   const [dragStageId, setDragStageId] = React.useState<number | null>(null);
   const [dragOverStageId, setDragOverStageId] = React.useState<number | null>(null);
 
@@ -1106,7 +1085,7 @@ export function StageAccordion(props: AccordionProps) {
   };
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
+    <div ref={rootRef} style={{ flex: 1, overflowY: 'auto', padding: '14px 16px' }}>
       <div
         style={{
           display: 'flex',
@@ -1163,7 +1142,9 @@ export function StageAccordion(props: AccordionProps) {
         </div>
       ))}
 
-      <AddStagePill onAdd={(op) => onAdd(op)} />
+      <div data-add-stage-tail>
+        <AddStagePill onAdd={(op) => onAdd(op)} />
+      </div>
 
       <div
         style={{

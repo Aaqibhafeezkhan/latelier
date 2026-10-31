@@ -41,6 +41,12 @@ export class AppStateService {
     this.emit(key, null);
   }
 
+  /** Forgets every cached value, after the table was emptied underneath (the dev reset). */
+  reset(): void {
+    this.cache.clear();
+    this.loaded.clear();
+  }
+
   /** Subscribe to in-process changes for `key`. Returns an unsubscribe fn. */
   subscribe<T>(key: string, cb: AppStateListener<T>): () => void {
     let set = this.listeners.get(key);

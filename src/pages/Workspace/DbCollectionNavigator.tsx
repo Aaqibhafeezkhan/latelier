@@ -1,4 +1,5 @@
 import React from 'react';
+import { ActionIcon, Button, Tooltip } from '@mantine/core';
 import {
   List,
   useDynamicRowHeight,
@@ -8,6 +9,7 @@ import {
 import type { CollectionInfo, DbInfo } from '@shared/ipc';
 import type { ConnectionSummary, ProbeErrorCode } from '@shared/types';
 import { api, getErrorMessage } from '../../api/atelier';
+import { logFailure } from '../../utils/rendererLog';
 import { notify } from '../../theme/notifications';
 import { copyToClipboard } from '../../utils/clipboard';
 import { disconnectConnection } from '../../features/connections/disconnectConnection';
@@ -22,6 +24,7 @@ import {
 import { CreateCollectionDrawer } from './CreateCollectionDrawer';
 import { RenameCollectionModal } from './RenameCollectionModal';
 import { ModifyViewModal } from './ModifyViewModal';
+import { SaveAsViewModal } from './Aggregation/SaveAsViewModal';
 import { ImportDialog } from './ImportDialog';
 import { DropCollectionConfirm } from './DropCollectionConfirm';
 import { DropDatabaseConfirm } from './DropDatabaseConfirm';
@@ -314,7 +317,11 @@ export function DbCollectionNavigator({
       backfilledRef.current.add(c.id);
       const id = c.id;
       void (async () => {
-        const runtime = await api.mongo.status(id).catch(() => null);
+        // No status just means no error banner to backfill; the log keeps the cause.
+        const runtime = await api.mongo.status(id).catch((err) => {
+          logFailure('reading connection status', err);
+          return null;
+        });
         if (!runtime || runtime.status !== 'error' || !runtime.errorMessage) return;
         const message = runtime.errorMessage;
         dispatch({ type: 'connectErrorBackfill', id, message, code: runtime.errorCode });
@@ -393,11 +400,13 @@ export function DbCollectionNavigator({
     (id: string) => {
       const next = expandedConnId === id ? null : id;
       if (expandedConnId && expandedConnId !== next) {
-        void api.prefs.set(connExpandedKey(expandedConnId), false).catch(() => {});
+        const key = connExpandedKey(expandedConnId);
+        void api.prefs.set(key, false).catch((err) => logFailure(`saving preference ${key}`, err));
       }
-      void api.prefs.set(connExpandedKey(id), next === id).catch(() => {});
+      const expandedKey = connExpandedKey(id);
+      void api.prefs.set(expandedKey, next === id).catch((err) => logFailure(`saving preference ${expandedKey}`, err));
       if (next === id && isKnownNotConnected(connections.find((c) => c.id === id))) {
-        void api.mongo.connect(id).catch(() => {});
+        void api.mongo.connect(id).catch((err) => logFailure('connect', err));
       }
       dispatch({ type: 'expandedConnSet', id: next });
     },
@@ -458,6 +467,7 @@ export function DbCollectionNavigator({
     createCollDb,
     renameTarget,
     modifyViewTarget,
+    duplicateViewTarget,
     dropCollTarget,
     dropDbTarget,
     importTarget,
@@ -477,6 +487,9 @@ export function DbCollectionNavigator({
     handleCollectionRenamed,
     cancelModifyView,
     handleViewModified,
+    openDuplicateView,
+    cancelDuplicateView,
+    handleViewDuplicated,
     cancelDropColl,
     handleCollectionDropped,
     cancelDropDb,
@@ -496,7 +509,7 @@ export function DbCollectionNavigator({
   }, []);
 
   const reconnect = React.useCallback((id: string) => {
-    void api.mongo.connect(id).catch(() => {});
+    void api.mongo.connect(id).catch((err) => logFailure('reconnect', err));
   }, []);
 
   const retryDatabases = React.useCallback((cid: string) => void loadDbs(cid), [loadDbs]);
@@ -912,20 +925,28 @@ export function DbCollectionNavigator({
               collection: row.coll.name,
             }),
         }]),
-    row.coll.type === 'view'
-      ? {
-          kind: 'item',
-          label: 'Modify view',
-          icon: I.edit,
-          onClick: () =>
-            setModifyViewTarget({
-              connectionId: row.connectionId,
-              dbName: row.dbName,
-              collection: row.coll.name,
-            }),
-        }
-      : {
-          kind: 'item',
+    ...(row.coll.type === 'view'
+      ? [
+          {
+            kind: 'item' as const,
+            label: 'Modify view',
+            icon: I.edit,
+            onClick: () =>
+              setModifyViewTarget({
+                connectionId: row.connectionId,
+                dbName: row.dbName,
+                collection: row.coll.name,
+              }),
+          },
+          {
+            kind: 'item' as const,
+            label: 'Duplicate view…',
+            icon: I.copy,
+            onClick: () => openDuplicateView(row.connectionId, row.dbName, row.coll.name),
+          },
+        ]
+      : [{
+          kind: 'item' as const,
           label: 'Rename collection',
           icon: I.edit,
           onClick: () =>
@@ -934,7 +955,7 @@ export function DbCollectionNavigator({
               dbName: row.dbName,
               collection: row.coll.name,
             }),
-        },
+        }]),
     {
       kind: 'item',
       label: row.coll.type === 'view' ? 'Drop view' : 'Drop collection',
@@ -947,7 +968,7 @@ export function DbCollectionNavigator({
         }),
       destructive: true,
     },
-  ], [openFromRow, setRenameTarget, setModifyViewTarget, setDropCollTarget, setImportTarget, onOpenReferences]);
+  ], [openFromRow, setRenameTarget, setModifyViewTarget, openDuplicateView, setDropCollTarget, setImportTarget, onOpenReferences]);
 
   const buildDbMenu = React.useCallback((row: Extract<TreeRow, { kind: 'db' }>): MenuItem[] => [
     {
@@ -1202,26 +1223,20 @@ export function DbCollectionNavigator({
             }}
           />
         </div>
-        <button
-          onClick={() => {
-            if (connectionId) void refreshAll(connectionId);
-          }}
-          aria-label="Refresh"
-          title="Refresh connection"
-          disabled={!connectionId || !isConnected}
-          style={{
-            background: 'none',
-            border: `1px solid ${T.border}`,
-            borderRadius: T.rs,
-            padding: '4px 6px',
-            cursor: connectionId && isConnected ? 'pointer' : 'not-allowed',
-            color: T.textMuted,
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          {I.sync}
-        </button>
+        <Tooltip label="Refresh connection" withArrow openDelay={400}>
+          <ActionIcon
+            variant="default"
+            size={24}
+            c={connectionId && isConnected ? T.textMuted : undefined}
+            onClick={() => {
+              if (connectionId) void refreshAll(connectionId);
+            }}
+            aria-label="Refresh"
+            disabled={!connectionId || !isConnected}
+          >
+            {I.sync}
+          </ActionIcon>
+        </Tooltip>
       </div>
 
       {/* Tree (connection → DB → collection). The container owns ARIA + keyboard
@@ -1293,6 +1308,21 @@ export function DbCollectionNavigator({
           returnFocusTo={menuTrigger}
           onClose={cancelModifyView}
           onSaved={handleViewModified}
+        />
+      )}
+
+      {duplicateViewTarget && (
+        <SaveAsViewModal
+          connectionId={duplicateViewTarget.connectionId}
+          dbName={duplicateViewTarget.dbName}
+          collection={duplicateViewTarget.viewOn}
+          pipelineJson={duplicateViewTarget.pipelineJson}
+          collation={duplicateViewTarget.collation}
+          initialName={`${duplicateViewTarget.view}_copy`}
+          title="Duplicate view"
+          description={`A copy of ${duplicateViewTarget.view} on ${duplicateViewTarget.dbName}.${duplicateViewTarget.viewOn} with the same pipeline and collation.`}
+          onClose={cancelDuplicateView}
+          onCreated={handleViewDuplicated}
         />
       )}
 
@@ -1561,15 +1591,6 @@ function ConnErrorRow({
   onRetry: () => void;
   onReenterPassword?: (trigger: HTMLElement) => void;
 }) {
-  const buttonStyle: React.CSSProperties = {
-    padding: '3px 10px',
-    fontSize: 11,
-    border: `1px solid ${T.border}`,
-    borderRadius: T.rs,
-    background: T.surface,
-    color: T.text,
-    cursor: 'pointer',
-  };
   return (
     <div
       id={navigatorRowDomId(row.id)}
@@ -1593,30 +1614,37 @@ function ConnErrorRow({
       </div>
       {/* A denied macOS keychain stays denied until relaunch, so Retry cannot succeed. */}
       {row.code !== 'KEYCHAIN_BLOCKED' && (
-        <button
+        <Button
           type="button"
+          variant="default"
+          size="compact-xs"
+          fz={11}
+          c={T.text}
           aria-label={row.retryLabel}
           onClick={(e) => {
             e.stopPropagation();
             onRetry();
           }}
-          style={buttonStyle}
         >
           Retry
-        </button>
+        </Button>
       )}
       {row.code === 'SECRET_UNREADABLE' && onReenterPassword && (
-        <button
+        <Button
           type="button"
+          variant="default"
+          size="compact-xs"
+          fz={11}
+          c={T.text}
+          ml={6}
           aria-label={`Re-enter password for ${row.conn.name}`}
           onClick={(e) => {
             e.stopPropagation();
             onReenterPassword(e.currentTarget);
           }}
-          style={{ ...buttonStyle, marginLeft: 6 }}
         >
           Re-enter password
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -1745,26 +1773,23 @@ function ConnectionRow({
           question. `stopPropagation` keeps the click off the row's own
           expand/collapse. */}
       {conn.status === 'connecting' && (
-        <button
+        <Button
           type="button"
+          variant="default"
+          size="compact-xs"
+          h={18}
+          px={6}
+          fz={10}
+          c={T.text}
           aria-label={`Cancel connecting to ${conn.name}`}
           onClick={(e) => {
             e.stopPropagation();
             onCancel();
           }}
-          style={{
-            fontSize: 10,
-            padding: '1px 6px',
-            border: `1px solid ${T.border}`,
-            borderRadius: T.rx,
-            background: T.surface,
-            color: T.text,
-            cursor: 'pointer',
-            flexShrink: 0,
-          }}
+          style={{ flexShrink: 0 }}
         >
           Cancel
-        </button>
+        </Button>
       )}
       {dbCount !== null && (
         <span style={{ fontSize: 10, color: T.textGhost }}>{dbCount}</span>
@@ -1907,52 +1932,31 @@ function HoverBarButton({
   label,
   icon,
   onClick,
-  disabled,
-  disabledTitle,
 }: {
   T: Theme;
   label: string;
   icon: React.ReactNode;
   onClick: (e: React.MouseEvent) => void;
-  disabled?: boolean;
-  disabledTitle?: string;
 }) {
   return (
-    <button
-      aria-label={label}
-      title={disabled ? (disabledTitle ?? label) : label}
-      disabled={disabled}
-      onClick={(e) => {
-        if (disabled) {
-          e.stopPropagation();
-          return;
-        }
-        onClick(e);
-      }}
-      style={{
-        background: 'none',
-        border: 'none',
-        padding: 2,
-        borderRadius: T.rx,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        color: disabled ? T.textGhost : T.textMuted,
-        display: 'inline-flex',
-        alignItems: 'center',
-      }}
-      onMouseEnter={(e) => {
-        if (disabled) return;
-        (e.currentTarget as HTMLButtonElement).style.background = T.surface;
-        (e.currentTarget as HTMLButtonElement).style.color = T.text;
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = 'none';
-        (e.currentTarget as HTMLButtonElement).style.color = disabled
-          ? T.textGhost
-          : T.textMuted;
-      }}
-    >
-      {icon}
-    </button>
+    <Tooltip label={label} withArrow openDelay={400}>
+      <ActionIcon
+        variant="subtle"
+        color="gray"
+        size={20}
+        // The CSS variables (not an inline `c`) so the hover brightening the
+        // old onMouseEnter handler did stays a stylesheet :hover rule.
+        style={{
+          '--ai-color': T.textMuted,
+          '--ai-hover-color': T.text,
+          '--ai-hover': T.surface,
+        } as React.CSSProperties}
+        aria-label={label}
+        onClick={onClick}
+      >
+        {icon}
+      </ActionIcon>
+    </Tooltip>
   );
 }
 
@@ -1989,7 +1993,15 @@ function CollRow({
       // on the container, this row is only named via `aria-activedescendant`.
       onClick={onClick}
       onContextMenu={onContextMenu}
-      title={coll.type === 'view' ? 'View' : coll.type === 'timeseries' ? 'Time-series' : undefined}
+      title={
+        coll.type === 'view'
+          ? 'View'
+          : coll.type === 'timeseries'
+            ? 'Time-series'
+            : coll.capped
+              ? 'Capped collection'
+              : undefined
+      }
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -2028,7 +2040,7 @@ function CollRow({
       >
         {coll.name}
       </span>
-      {coll.type !== 'collection' && (
+      {(coll.type !== 'collection' || coll.capped) && (
         <span
           style={{
             fontSize: 9,
@@ -2041,7 +2053,7 @@ function CollRow({
             background: T.surface,
           }}
         >
-          {coll.type === 'view' ? 'VIEW' : 'TS'}
+          {coll.type === 'view' ? 'VIEW' : coll.type === 'timeseries' ? 'TS' : 'CAPPED'}
         </span>
       )}
       {isActive && (

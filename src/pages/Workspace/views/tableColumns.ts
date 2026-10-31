@@ -1,6 +1,6 @@
-import { isRecord } from '../../../utils/displayValue';
+import { isRecord, toDisplayValue } from '../../../utils/displayValue';
 import { getAtSegments } from '../documentDiff';
-import type { TableColumnConfig } from '@shared/types';
+import type { ReferenceRule, TableColumnConfig } from '@shared/types';
 import type { SortDir } from '../builder';
 
 /**
@@ -152,4 +152,32 @@ export function ariaSortFor(
  */
 export function getValueAtPath(doc: unknown, path: string): unknown {
   return getAtSegments(doc as Record<string, unknown>, path.split('.'))?.value;
+}
+
+/**
+ * A reference rule on a dotted path under `field` (e.g. `address.userId` for
+ * the `address` column) that the object cell can carry a chip for, since the
+ * column's own key never matches such a rule. Only a rule whose target is a
+ * leaf counts — the same `toDisplayValue` classification the Tree uses to
+ * decide expansion, so an ObjectId `{$oid}` sentinel is a leaf, not an
+ * object. Candidates are tried in `localeCompare` order so the choice is
+ * stable.
+ */
+export function nestedReferenceFor(
+  field: string,
+  doc: unknown,
+  refsByField: Map<string, ReferenceRule> | undefined,
+): { rule: ReferenceRule; path: string; value: unknown } | null {
+  if (!refsByField) return null;
+  const prefix = `${field}.`;
+  const candidates = [...refsByField.entries()]
+    .filter(([k]) => k.startsWith(prefix))
+    .sort(([a], [b]) => a.localeCompare(b));
+  for (const [path, rule] of candidates) {
+    const value = getValueAtPath(doc, path);
+    const type = toDisplayValue(value).type;
+    if (value === undefined || type === 'object' || type === 'array') continue;
+    return { rule, path, value };
+  }
+  return null;
 }

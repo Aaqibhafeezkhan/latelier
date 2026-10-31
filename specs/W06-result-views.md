@@ -63,15 +63,25 @@ Row layout (matches existing mock):
 - For `_id` of type `ObjectId`, show last 8 hex chars. For non-Object-id `_id`, show up to 12 chars of the EJSON stringification, prefixed with the type badge.
 
 ### Selection
-- Single-select: clicking the collapsed row header selects the doc (blue left border). Cmd/Ctrl-click toggles selection for multi-select.
-- Selection is consumed by W08 for `Edit document` / `Delete document(s)` actions.
+- A plain click on the collapsed row header does not select: it expands or collapses the row (the chevron button does the same). Selecting is Cmd/Ctrl-click on the row, or the per-row select toggle (checkbox) at the row's left; both toggle that row into or out of the multi-selection (blue left border and tinted background on selected rows). There is no single-select-by-click mode.
+- Selection is a set of row indices shared by Table, Tree and JSON, so it survives a view switch and is cleared whenever the result set changes (new run, page change, tab switch).
+- Selection is consumed by W08 for `Edit document` / `Delete document(s)` actions; Edit and Delete also have their own buttons on each row.
+
+### Full value of a leaf
+- The expanded field grid truncates a value to its column. A leaf (non-object, non-array) row carries the same `⤢` affordance as a Table cell (`FullValuePopover`): revealed on hover, on focus and while the row is the field tree's active row, it opens a read-only popover with the untruncated value (strings quoted). The trigger is out of Tab order (`tabIndex={-1}`), so Tab does not walk every leaf; the keyboard path is Enter below.
+- Keyboard: Enter or Space on an active leaf opens it (on an expandable row they still toggle), and focus moves into the dropdown (`role="dialog"`, `tabIndex=-1`, named "Full value"), so a screen reader lands on the value. Escape closes it, does not bubble to the outer Table/Tree grid, and focus returns to the field tree, whose arrow keys and `aria-activedescendant` carry on from the same row.
+- The popover belongs to the active leaf: making another row active, collapsing the leaf's parent, or a different document closes it, and a closed popover never swallows the next Escape.
+- The same field grid is the Table view's expanded-row panel, so both get it.
 
 ## 3. JSON view
 
 - Each doc in its own card (matches mock).
 - Uses `JSON.stringify(EJSON.parse(...), null, 2)` output with light syntax highlighting (keys bold; strings green; numbers blue; booleans orange; null grey — colors from tokens).
 - Syntax highlighting is computed at render time by a tiny tokenizer in `utils/jsonHighlight.ts` — do NOT bring in `prismjs` or `highlight.js` for iteration 1.
-- The "card" is selectable (click toggles selection).
+- Active card: the card list is one tab stop (`role="tree"`, cards are `treeitem`s) with `aria-activedescendant` naming the active card, outlined while the list has focus — the same model as Tree and Table rows.
+  - A plain click makes the card active; Cmd/Ctrl-click toggles it into the multi-selection; the per-card select toggle is the other way in.
+  - Arrows, Home and End move the active card. `E` edits it (on the list, or on one of the card's own buttons). Shift+F10 or the ContextMenu key opens its document menu.
+  - Enter and Space only keep the active card: a card has nothing to expand.
 
 ## 4. Table view
 
@@ -80,24 +90,29 @@ Row layout (matches existing mock):
   - Ensure `_id` is first, then the current preview fields in order, then the remaining keys alphabetically.
 - Column widths: default auto with `max-width: 200px` + ellipsis overflow. User can drag column separators to resize (persisted in tab state as `state.columns.{field}.width`).
 - Nested objects/arrays show as `{N}` / `[N]` badges that expand into a small popover showing the nested JSON.
+- Any cell with a value has a hover/focus-revealed `⤢` that opens the full, untruncated value in a popover (`FullValuePopover`, shared with Tree leaves).
+- Double-click copies a cell's value. The cell's native title says so next to the drag hint ("Drag to add … to builder · double-click to copy"); no per-cell tooltip component, which would mount one floating instance per cell of a virtualized grid.
 - Right-click on a row → context menu: `Edit`, `Delete`, `Copy`, `Copy as JSON`.
 
 ## 5. Common
 
 ### Loading & empty
-- Loading (between Run click and response): overlay with subtle spinner, keep previous docs visible ("stale but readable").
+- Loading (between Run click and response):
+  - first load (no run has landed in the tab yet): eight skeleton rows stand in for the body, inside a `role="status"` region labelled "Loading results";
+  - any re-run, including one after an empty or errored result: keep the body (previous docs, if any) visible ("stale but readable") under a "Loading…" strip, itself `role="status"`, so the layout does not jump. Only one of the two status regions shows at a time.
 - Empty (`documents.length === 0`): centered placeholder "No matching documents" with a helpful link "Clear filter" (resets builder).
 - Errored: the error pill in W05 conveys the state; the result area keeps the previous docs visible with a small amber "stale" badge.
 
 ### Keyboard
-- `j` / `k` move selection down / up (when result area focused).
-- `Enter` expands the selected row in Tree view.
-- `d` in Table/Tree deletes the selected doc (with confirm; W08).
-- `Space` toggles expansion.
+Each view is one tab stop (`role="tree"` for Tree and JSON, the grid for Table) with `aria-activedescendant` naming the active row, outlined while the view has focus. Keys act on the active row and only when the view itself has focus (a key typed on a button inside the row is that button's).
+- `ArrowDown` / `ArrowUp` move the active row; `Home` / `End` jump to the first / last. There is no `j` / `k`.
+- `Enter` or `Space`: in Tree, expands or collapses the active row; in Table, selects only the active row (or clears it if it was already the sole selection); in JSON, only keeps the card active (a card has nothing to expand). `Cmd/Ctrl+Enter` is Run, never a row action.
+- `E` edits the active document in all three views (unmodified key only).
+- `Shift+F10` or the ContextMenu key opens the document menu for the active row in Table and JSON.
+- Not implemented: a `d` shortcut to delete the selected document(s). Deleting is through the row's Delete button or the document menu (W08).
 
 ### Performance
-- Virtualize Table view rows with `react-window` when `documents.length > 200`.
-- Tree view also virtualized when > 200 rows.
+- Table, Tree and JSON rows are always virtualized with `react-window` (no row-count threshold).
 
 ## 6. Acceptance criteria
 
@@ -108,6 +123,9 @@ Row layout (matches existing mock):
 - EJSON values (ObjectId, Date, Long, Decimal) render with correct type badges.
 - Column resize in Table persists across relaunches.
 - Switching view modes is instant (no extra fetch).
+- A truncated leaf value in Tree or an expanded Table row can be read in full by mouse (`⤢`) and keyboard (Enter on the active leaf); Escape closes it without bubbling.
+- The JSON view has an active card driven by click and arrow keys, and `E` edits it.
+- A first load shows skeleton rows; a re-run keeps the previous rows.
 
 ## 7. Test cases
 

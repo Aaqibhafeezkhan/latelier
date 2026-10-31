@@ -41,7 +41,7 @@ test('audit undo: deleting a document offers Undo on the toast, and Undo restore
       await expect(win.getByText('undo-me')).toBeVisible({ timeout: 8000 });
 
       // Per-row Delete, then confirm.
-      await win.locator('button[title="Delete document"]').first().click();
+      await win.getByRole('button', { name: /^Delete document/ }).first().click();
       await expect(win.getByText('Delete document?')).toBeVisible({ timeout: 4000 });
       await win.getByRole('button', { name: 'Delete', exact: true }).click();
 

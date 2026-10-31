@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { IPC_CHANNELS } from '@shared/ipc';
 import type { Router } from '../router.ts';
 import { IdInputSchema, NonEmpty, zodValidator } from '../validators.ts';
+import { StageSchema } from '../schemas/saved.ts';
 import type { WorkspaceStateService, TabStatePatch } from '../../services/WorkspaceStateService.ts';
 
 /**
@@ -68,6 +69,15 @@ const OpenAggregationInput = z.object({
   collection: z.string(),
   savedId: z.string().optional(),
   name: z.string().optional(),
+  // A pipeline the renderer built itself ("Open as pipeline"). Without this
+  // key `z.object` strips it, and the tab opens on the default empty stages.
+  initialState: z
+    .object({
+      stages: z.array(StageSchema),
+      activeStageId: z.number().int().nullable().optional(),
+      dirty: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 const OpenDefaultInput = z.object({

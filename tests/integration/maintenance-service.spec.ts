@@ -3,7 +3,7 @@ import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo'
 import { RecentFieldValueRepo } from '../../electron/db/repositories/RecentFieldValueRepo';
 import { AuditRepo } from '../../electron/db/repositories/AuditRepo';
 import { MaintenanceService } from '../../electron/services/MaintenanceService';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher } from '../helpers/db';
 
 const CONNECTION_ID = 'conn-maint';
 
@@ -55,7 +55,7 @@ describe('RecentQueryRepo.deleteOlderThan + MaintenanceService.purgeExpired', ()
   });
 
   it('deleteOlderThan removes rows older than the threshold and keeps newer rows', () => {
-    const repo = new RecentQueryRepo(tmp.db);
+    const repo = new RecentQueryRepo(tmp.db, createTempCipher());
     insertRecent(tmp.db, 'old', "datetime('now', '-90 days')");
     insertRecent(tmp.db, 'old2', "datetime('now', '-31 days')");
     insertRecent(tmp.db, 'fresh', "datetime('now', '-1 day')");
@@ -75,7 +75,7 @@ describe('RecentQueryRepo.deleteOlderThan + MaintenanceService.purgeExpired', ()
   });
 
   it('MaintenanceService.runIfNeeded calls deleteOlderThan on first run and skips inside the 24h window', () => {
-    const repo = new RecentQueryRepo(tmp.db);
+    const repo = new RecentQueryRepo(tmp.db, createTempCipher());
     insertRecent(tmp.db, 'old', "datetime('now', '-60 days')");
     tmp.db.prepare("UPDATE recent_queries SET ran_at = datetime('now', '-60 days') WHERE id = 'old'").run();
 
@@ -89,7 +89,7 @@ describe('RecentQueryRepo.deleteOlderThan + MaintenanceService.purgeExpired', ()
       },
     };
 
-    const svc = new MaintenanceService({ recentRepo: repo, recentFieldValueRepo: new RecentFieldValueRepo(tmp.db), auditRepo: new AuditRepo(tmp.db), checkpoint: () => {} });
+    const svc = new MaintenanceService({ recentRepo: repo, recentFieldValueRepo: new RecentFieldValueRepo(tmp.db, createTempCipher()), auditRepo: new AuditRepo(tmp.db, createTempCipher()), checkpoint: () => {} });
 
     // First run — old row gone, lastRunAt set.
     svc.runIfNeeded(appState);
@@ -123,7 +123,7 @@ describe('RecentQueryRepo.deleteOlderThan + MaintenanceService.purgeExpired', ()
       set: <T>(key: string, value: T) => void store.set(key, value),
     };
 
-    new MaintenanceService({ recentRepo: new RecentQueryRepo(tmp.db), recentFieldValueRepo: new RecentFieldValueRepo(tmp.db), auditRepo: new AuditRepo(tmp.db), checkpoint: () => {} }).runIfNeeded(appState);
+    new MaintenanceService({ recentRepo: new RecentQueryRepo(tmp.db, createTempCipher()), recentFieldValueRepo: new RecentFieldValueRepo(tmp.db, createTempCipher()), auditRepo: new AuditRepo(tmp.db, createTempCipher()), checkpoint: () => {} }).runIfNeeded(appState);
 
     const ids = (tmp.db.prepare('SELECT id FROM audit_log ORDER BY id').all() as { id: string }[]).map((r) => r.id);
     expect(ids).toEqual(['audit-89d', 'audit-now']);
@@ -131,15 +131,14 @@ describe('RecentQueryRepo.deleteOlderThan + MaintenanceService.purgeExpired', ()
 
   describe('RecentFieldValueRepo.deleteOlderThan + MaintenanceService.purgeExpired', () => {
     const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+    // Through the repo: the column only accepts sealed cells.
     const insertFieldValue = (id: string, value: string, lastUsedAt: string) =>
-      tmp.db.prepare(`
-        INSERT INTO recent_field_values
-          (id, connection_id, db_name, collection, field, value, val_type, last_used_at)
-        VALUES (?, ?, 'mydb', 'items', 'status', ?, 'string', ?)
-      `).run(id, CONNECTION_ID, value, lastUsedAt);
+      new RecentFieldValueRepo(tmp.db, createTempCipher()).upsert({
+        id, connectionId: CONNECTION_ID, dbName: 'mydb', collection: 'items', field: 'status', value, valType: 'string', lastUsedAt,
+      });
 
     it('deleteOlderThan removes rows older than the threshold and keeps newer rows', () => {
-      const repo = new RecentFieldValueRepo(tmp.db);
+      const repo = new RecentFieldValueRepo(tmp.db, createTempCipher());
       insertFieldValue('old-91d', 'value-old-91', daysAgo(91));
       insertFieldValue('old-31d', 'value-old-31', daysAgo(31));
       insertFieldValue('fresh-1d', 'value-fresh', daysAgo(1));
@@ -151,8 +150,8 @@ describe('RecentQueryRepo.deleteOlderThan + MaintenanceService.purgeExpired', ()
     });
 
     it('MaintenanceService.runIfNeeded calls deleteOlderThan on recent_field_values', () => {
-      const queryRepo = new RecentQueryRepo(tmp.db);
-      const fieldValueRepo = new RecentFieldValueRepo(tmp.db);
+      const queryRepo = new RecentQueryRepo(tmp.db, createTempCipher());
+      const fieldValueRepo = new RecentFieldValueRepo(tmp.db, createTempCipher());
       insertFieldValue('field-31d', 'value-31', daysAgo(31));
       insertFieldValue('field-fresh', 'value-fresh', daysAgo(1));
 
@@ -164,7 +163,7 @@ describe('RecentQueryRepo.deleteOlderThan + MaintenanceService.purgeExpired', ()
         },
       };
 
-      new MaintenanceService({ recentRepo: queryRepo, recentFieldValueRepo: fieldValueRepo, auditRepo: new AuditRepo(tmp.db), checkpoint: () => {} }).runIfNeeded(appState);
+      new MaintenanceService({ recentRepo: queryRepo, recentFieldValueRepo: fieldValueRepo, auditRepo: new AuditRepo(tmp.db, createTempCipher()), checkpoint: () => {} }).runIfNeeded(appState);
 
       const remaining = fieldValueRepo.list({ connectionId: CONNECTION_ID, dbName: 'mydb', collection: 'items', field: 'status' });
       expect(remaining.map((r) => r.id)).toEqual(['field-fresh']);

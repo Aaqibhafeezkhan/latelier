@@ -3,6 +3,7 @@ import { notifications } from '@mantine/notifications';
 import { act, render, screen, waitFor, fireEvent } from '../helpers/render';
 import { installAtelierMock } from '../helpers/atelierMock';
 import { UpdateReadyPrompt } from '../../src/features/updates/UpdateReadyPrompt';
+import type { IpcApi } from '@shared/ipc';
 import type { UpdateState } from '../../shared/types';
 
 afterEach(() => {
@@ -95,5 +96,28 @@ describe('UpdateReadyPrompt', () => {
     await act(async () => {});
     view.unmount();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends a failed state read to the main log and shows nothing', async () => {
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    installAtelierMock({
+      updates: {
+        getState: async () => {
+          throw { code: 'INTERNAL', message: 'updater offline' };
+        },
+        onState: () => () => {},
+      },
+      app: { log },
+    });
+    render(<UpdateReadyPrompt />);
+
+    await waitFor(() =>
+      expect(log).toHaveBeenCalledWith({
+        level: 'warn',
+        message: 'reading the update state failed: updater offline',
+        source: 'component',
+      }),
+    );
+    expect(screen.queryByText(/is ready/)).toBeNull();
   });
 });

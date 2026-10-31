@@ -3,6 +3,7 @@ import { renderHook, act } from '../helpers/render';
 import { ObjectId } from 'bson';
 import { useReferenceDrawer } from '../../src/pages/Workspace/useReferenceDrawer';
 import { ejsonParse, ejsonStringify } from '../../src/utils/ejson';
+import type { IpcApi } from '@shared/ipc';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import type {
   CollectionTab,
@@ -99,6 +100,23 @@ describe('useReferenceDrawer — EJSON persistence round-trip', () => {
     expect((result.current.refStack[0]!.value as ObjectId).toHexString()).toBe(
       oid.toHexString(),
     );
+  });
+
+  it('drops a frame whose stored value is corrupt, keeps the rest, and logs it without the value', async () => {
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    installAtelierMock({ app: { log } });
+    const good: PersistedReferenceFrame = { id: 'ok', rule: RULE, valueEjson: ejsonStringify('fine'), label: 'a' };
+    const bad: PersistedReferenceFrame = { id: 'bad', rule: RULE, valueEjson: '{"secret": ', label: 'b' };
+    const tabs: WorkspaceTab[] = [makeCollectionTab('t1', [bad, good])];
+
+    const { result } = renderHook(() => useReferenceDrawer('t1', tabs, vi.fn(), 't1'));
+
+    expect(result.current.refStack.map((f) => f.id)).toEqual(['ok']);
+    expect(log).toHaveBeenCalledTimes(1);
+    const [line] = log.mock.calls[0]!;
+    expect(line.level).toBe('warn');
+    expect(line.message).toContain('rule r1');
+    expect(line.message).not.toContain('secret');
   });
 
   it('persists a pushed ObjectId frame as canonical EJSON (round-trips back to ObjectId)', async () => {

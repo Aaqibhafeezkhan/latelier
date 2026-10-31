@@ -1,4 +1,5 @@
 import React from 'react';
+import { ActionIcon } from '@mantine/core';
 import { I } from '../../../icons';
 import { isRecord, toDisplayValue, type DisplayType } from '../../../utils/displayValue';
 import { DRAGGED_FIELD_MIME, type DraggedField } from '../builder';
@@ -9,6 +10,7 @@ import { flattenVisibleFieldRows, type FlatFieldRow } from './docFieldFlatten';
 import { isContextMenuKey, anchorFromRect } from '../../../utils/contextMenuKey';
 import { childKey, pathCoversSubtree, rootKey } from './fieldPathKey';
 import { TYPE_HUES, TYPE_THEMED } from '../typeColors';
+import { FullValuePopover } from './FullValuePopover';
 
 // Shared FIELD | VALUE | TYPE column layout — the Tree view's expanded-row
 // header (TreeView's sticky overlay) and the Table view's row-expand panel
@@ -108,6 +110,11 @@ interface FieldNodeProps {
   // is keyed by path (see `rowId`'s docstring above) — to decide whether to
   // paint the active-row outline.
   activePath: string | null;
+  // The path whose full-value popover is open, or `null`. Held once in
+  // `DocFieldTree` (so Enter on the active row can open it) and compared
+  // here by path, like `activePath`.
+  fullValuePath: string | null;
+  onFullValueChange: (path: string, opened: boolean) => void;
 }
 
 function FieldNodeImpl({
@@ -128,12 +135,21 @@ function FieldNodeImpl({
   rowId,
   onActivate,
   activePath,
+  fullValuePath,
+  onFullValueChange,
 }: FieldNodeProps) {
   const dv = toDisplayValue(value);
   const isExpandable = dv.type === 'object' || dv.type === 'array';
   const isExpanded = isExpandable && expandedPaths.has(path);
   const isCopied = copiedPath === path;
   const isActive = path === activePath;
+  const fullValueOpen = fullValuePath === path;
+  const [hovered, setHovered] = React.useState(false);
+  // The trigger is out of Tab order (Enter on the active leaf is the
+  // keyboard path), but a click still focuses it and the popover returns
+  // focus to it on close, so focus has to reveal it as hover does
+  // (WCAG 2.4.11) — same reasoning as the Table cell's `focused`.
+  const [focused, setFocused] = React.useState(false);
   const rule = refsByField?.get(fieldPath);
 
   const childEntries: Array<[string, unknown]> = React.useMemo(() => {
@@ -208,6 +224,10 @@ function FieldNodeImpl({
           e.stopPropagation();
           onOpenMenu({ anchor: { x: e.clientX, y: e.clientY }, fieldPath, value });
         }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         title={
           draggable
             ? `Drag to add "${fieldPath} $eq …" to builder · double-click to copy`
@@ -267,30 +287,24 @@ function FieldNodeImpl({
               }}
             >
               {isExpandable ? (
-                <button
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size={14}
+                  c={isCopied ? '#fff' : 'var(--atelier-text-ghost)'}
                   onClick={(e) => {
                     e.stopPropagation();
                     onToggle(path);
                   }}
                   aria-label={isExpanded ? 'Collapse' : 'Expand'}
                   style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 14,
-                    height: 14,
-                    padding: 0,
-                    background: 'none',
-                    border: 'none',
-                    color: isCopied ? '#fff' : 'var(--atelier-text-ghost)',
-                    cursor: 'pointer',
                     flexShrink: 0,
                     transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
                     transition: 'transform 120ms',
                   }}
                 >
                   {I.chevD}
-                </button>
+                </ActionIcon>
               ) : (
                 <span style={{ width: 14, flexShrink: 0 }} />
               )}
@@ -305,6 +319,7 @@ function FieldNodeImpl({
                 gap: 6,
                 minWidth: 0,
                 overflow: 'hidden',
+                position: 'relative',
               }}
             >
               <span
@@ -320,6 +335,22 @@ function FieldNodeImpl({
               >
                 {dv.type === 'string' ? `"${dv.display}"` : dv.display}
               </span>
+              {/* A leaf's value is truncated to the column; this shows all
+                  of it. Revealed on hover or while the row is active, so a
+                  keyboard user sees which row Enter will open it for. */}
+              {!isExpandable && draggable && (
+                <FullValuePopover
+                  display={dv.display}
+                  isString={dv.type === 'string'}
+                  opened={fullValueOpen}
+                  onChange={(opened) => onFullValueChange(path, opened)}
+                  visible={hovered || focused || isActive || fullValueOpen}
+                  ariaLabel="Expand field value"
+                  // Tab must not walk every leaf of a wide document.
+                  tabIndex={-1}
+                  focusOnOpen
+                />
+              )}
               {rule && (
                 <ReferenceChip
                   rule={rule}
@@ -358,6 +389,8 @@ function FieldNodeImpl({
             rowId={rowId}
             onActivate={onActivate}
             activePath={activePath}
+            fullValuePath={fullValuePath}
+            onFullValueChange={onFullValueChange}
           />
         ))}
     </>
@@ -380,7 +413,8 @@ export const FieldNode = React.memo(FieldNodeImpl, (prev, next) => {
     prev.onRefHoverLeave !== next.onRefHoverLeave ||
     prev.onRefOpen !== next.onRefOpen ||
     prev.rowId !== next.rowId ||
-    prev.onActivate !== next.onActivate
+    prev.onActivate !== next.onActivate ||
+    prev.onFullValueChange !== next.onFullValueChange
   ) {
     return false;
   }
@@ -398,6 +432,13 @@ export const FieldNode = React.memo(FieldNodeImpl, (prev, next) => {
   if (
     prev.activePath !== next.activePath &&
     (pathCoversSubtree(next.path, prev.activePath) || pathCoversSubtree(next.path, next.activePath))
+  ) {
+    return false;
+  }
+  if (
+    prev.fullValuePath !== next.fullValuePath &&
+    (pathCoversSubtree(next.path, prev.fullValuePath) ||
+      pathCoversSubtree(next.path, next.fullValuePath))
   ) {
     return false;
   }
@@ -542,8 +583,40 @@ export function DocFieldTree({
     [flatRows, roving.setActiveIndex],
   );
 
+  const [fullValuePath, setFullValuePath] = React.useState<string | null>(null);
+  // The popover belongs to the active leaf. Anything that makes another row
+  // active, or takes the leaf away (a collapse, a re-run, another document),
+  // closes it — otherwise the state outlives its unmounted popover, keeps
+  // eating Escape, and reopens when the user arrows back. Adjusted during
+  // render, not in an effect, so no frame paints the stale popover.
+  if (fullValuePath !== null && activeRow?.path !== fullValuePath) {
+    setFullValuePath(null);
+  }
+  const handleFullValueChange = React.useCallback(
+    (path: string, opened: boolean) => {
+      // Only the open popover ever reports a close (Mantine's `onClose`
+      // no-ops on a closed one), so a close can clear the shared state.
+      setFullValuePath(opened ? path : null);
+      if (opened) handleActivate(path);
+    },
+    [handleActivate],
+  );
+
   const handleTreeKeyDown = React.useCallback(
     (e: React.KeyboardEvent) => {
+      // First, and only while a full-value popover is open: Escape closes it
+      // and stops there, whether it came from the tree, the popover's
+      // trigger or (React bubbles through portals) the dropdown itself.
+      // Focus comes back to the tree, which a keyboard open left for the
+      // dropdown; after a click open the popover's own `returnFocus` then
+      // puts it back on the trigger.
+      if (e.key === 'Escape' && fullValuePath !== null) {
+        e.preventDefault();
+        e.stopPropagation();
+        setFullValuePath(null);
+        containerRef.current?.focus();
+        return;
+      }
       roving.onKeyDown(e);
       if (e.defaultPrevented) return;
       // Mirrors FieldNode's own guard: only Enter/Space typed while this
@@ -570,14 +643,17 @@ export function DocFieldTree({
       // ⌘/Ctrl+Enter is Run (PanelBody's handler), never this row's action.
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) return;
       if (e.key !== 'Enter' && e.key !== ' ') return;
-      if (!activeRow?.expandable) return;
+      if (!activeRow) return;
       if (e.key === ' ') e.preventDefault();
-      onToggle(activeRow.path);
+      // An expandable row toggles; a leaf has nothing to expand, so it
+      // shows its full value instead (the mouse's ⤢ affordance).
+      if (activeRow.expandable) onToggle(activeRow.path);
+      else if (activeRow.value !== undefined) setFullValuePath(activeRow.path);
     },
     // `roving` itself is a fresh object every render; depend on the one
     // function this actually calls instead.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [roving.onKeyDown, activeRow, onToggle, onOpenMenu],
+    [roving.onKeyDown, activeRow, onToggle, onOpenMenu, fullValuePath],
   );
 
   return (
@@ -641,6 +717,8 @@ export function DocFieldTree({
           rowId={fieldRowDomId}
           onActivate={handleActivate}
           activePath={highlightRow?.path ?? null}
+          fullValuePath={fullValuePath}
+          onFullValueChange={handleFullValueChange}
         />
       ))}
     </div>

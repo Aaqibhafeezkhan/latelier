@@ -1,8 +1,8 @@
 import React from 'react';
 import { api } from '../../api/atelier';
-import { ejsonParse, isEjsonDocument, isPlainDocument } from '../../utils/ejson';
+import { ejsonParse, isPlainDocument } from '../../utils/ejson';
 import { suggestIndex } from '../../utils/indexSuggestion';
-import { compileFindOptions, parseSortString } from './builder';
+import { compileFindOptions, filterProblem, optionsProblem, parseSortString } from './builder';
 import { useCollectionWorkspace } from './context';
 import type { ExplainRunResult } from './Aggregation/ExplainDrawer';
 import type { ExplainVerbosity } from '@shared/types';
@@ -10,7 +10,9 @@ import type { ExplainVerbosity } from '@shared/types';
 /** `suggestIndex`'s filter argument — an unparseable or non-document filter is treated as empty rather than thrown. */
 function parseFilterDoc(raw: string): Record<string, unknown> {
   try {
-    const parsed = ejsonParse(raw);
+    // Trimmed like the text `runExplain` sends: padding with Unicode spaces
+    // `JSON.parse` refuses would otherwise prefill an empty index.
+    const parsed = ejsonParse(raw.trim());
     return isPlainDocument(parsed) ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
@@ -32,14 +34,22 @@ export function useFindExplain(readFilterText: () => string): {
 } {
   const { state, actions, meta } = useCollectionWorkspace();
   const findOptions = React.useMemo(() => compileFindOptions(state.builder), [state.builder]);
+  const optionError = React.useMemo(() => optionsProblem(state.builder), [state.builder]);
   const { connectionId, dbName, collection } = meta;
 
   const runExplain = React.useCallback(
     (verbosity: ExplainVerbosity) => {
       // The rule (never widen a refused filter to `{}`) applies even to a
       // read-only path like Explain.
-      const text = readFilterText();
-      if (!isEjsonDocument(text)) return Promise.reject(new Error('No runnable filter'));
+      // The Run gate's rule, and the trimmed text `currentFilterJson` sends:
+      // `filterProblem` accepts Unicode-space padding the main process's
+      // `JSON.parse` would refuse.
+      const raw = readFilterText();
+      const problem = filterProblem(raw);
+      if (problem !== null) return Promise.reject(new Error(problem));
+      const text = raw.trim();
+      // Same for the options: the builder's message, not the server's refusal.
+      if (optionError !== null) return Promise.reject(new Error(optionError));
       return api.query.explain({
         connectionId,
         dbName,
@@ -47,10 +57,13 @@ export function useFindExplain(readFilterText: () => string): {
         filter: text,
         sort: findOptions.sort,
         projection: findOptions.projection,
+        collation: findOptions.collation,
+        hint: findOptions.hint,
+        readPreference: findOptions.readPreference,
         verbosity,
       });
     },
-    [connectionId, dbName, collection, findOptions.sort, findOptions.projection, readFilterText],
+    [connectionId, dbName, collection, findOptions, optionError, readFilterText],
   );
 
   // Same inputs `runExplain` reads — the button only appears on the explain

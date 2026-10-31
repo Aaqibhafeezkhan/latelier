@@ -82,7 +82,7 @@ Width 206 px (matches mock), full vertical height of the content area, scrollabl
 └──────────────────────────┘
 ```
 
-Row height ≈ 24 px. The connection is the top-level tree node (Path 2 — see §7); DBs are its children, collections are grandchildren. Each row type renders a leading type icon (connection dot / DB / coll / view / timeseries); non-standard collections (`view`, `timeseries`) also carry an uppercase badge at the end of the row. DB rows also carry a hover action bar on the right (§5b).
+Row height ≈ 24 px. The connection is the top-level tree node (Path 2 — see §7); DBs are its children, collections are grandchildren. Each row type renders a leading type icon (connection dot / DB / coll / view / timeseries); non-standard collections (`view`, `timeseries`, capped) also carry an uppercase badge at the end of the row. DB rows also carry a hover action bar on the right (§5b).
 
 ---
 
@@ -242,7 +242,7 @@ Same as collection row minus Rename (views are immutable by name), plus:
 
 | Item            | Icon | Destructive | IPC requirement                                |
 |-----------------|------|-------------|------------------------------------------------|
-| Duplicate view  | Copy | no          | 🚧 not built (an open navigator issue tracks it); would call `collection:create` with `viewOn` + `pipeline` |
+| Duplicate view  | Copy | no          | ✅ `meta:collectionDetails` for `viewOn` + `pipeline`, then `collection:create` with both verbatim. Opens the "Save pipeline as view" dialog titled "Duplicate view", name prefilled `<view>_copy`; a name already taken (NamespaceExists, a `CONFLICT`) shows inline. Closing with the prefill untouched asks nothing. Creating refreshes the database. The copy keeps the source view's collation (`meta:collectionDetails` returns it as EJSON) |
 | Modify view     | Edit | no          | ✅ `meta:collectionDetails` to prefill, `collection:modify` (`collMod`) to save. A dialog with a "Source collection" input and a plain "Pipeline" textarea (resizable), prefilled as readable JSON (`0`, not `{"$numberInt":"0"}`); a pipeline that is not a JSON array is refused inline. Escape, the close button, the backdrop and Cancel ask "Discard changes?" once either field differs from what was loaded, and nothing closes the dialog while a save is in flight. Saving refreshes the database |
 | Drop view       | Trash| **yes**     | ✅ `collection:drop` (§12)                      |
 
@@ -428,7 +428,7 @@ While any mutation IPC is in flight (drop / rename / create): affected row shows
 - Right-clicking a collection opens the collection context menu from §5.2 at the cursor, clamped to viewport. Rename and Drop are live.
 - Right-clicking a DB row opens the DB context menu from §5.2. Create, Refresh, Copy-name and Drop are live.
 - Right-clicking the connection row opens the Connection context menu from §5.2, with Disconnect ↔ Reconnect swapped based on live status.
-- View rows show the view icon and `VIEW` badge; timeseries rows show `TS`.
+- View rows show the view icon and `VIEW` badge; timeseries rows show `TS`; a capped collection shows `CAPPED` and the row title "Capped collection".
 - `aria-level` is 1 / 2 / 3 for connection / DB / collection; `aria-expanded` is present on connection and DB rows; `aria-selected` is present on the active collection.
 - Keyboard map required rows (↑ / ↓ / ← / → / Enter / Home / End / Escape) fully wired across all three tree levels.
 - Focused row has an outline-style ring distinct from the active-tab highlight; arrow-key nav does not move the active highlight.
@@ -441,7 +441,7 @@ While any mutation IPC is in flight (drop / rename / create): affected row shows
 
 ### Deferred (blocked on IPC / sub-specs)
 
-- Duplicate view is the one menu action not built yet (the open "Navigator: Duplicate view" issue tracks it); it stays out of the view menu until it is. Drop collection, drop database, rename, create and modify view are live and go through the confirmation modals and dialogs of W02a–d.
+- Every menu action is built: drop collection, drop database, rename, create, modify view and duplicate view are live and go through the confirmation modals and dialogs of W02a–d.
 - Inline per-DB error cards for `listCollections` failures (§8).
 - Keyboard stretch (Home / End are live; `*` expand-siblings and letter type-ahead remain deferred).
 
@@ -498,7 +498,7 @@ The following channels are **prerequisites** for the matching §5 actions. Each 
 | `mongo:dropCollection`    | `{ connectionId; dbName; collection }`                              | `{ dropped: boolean }`  | no            | W02a           |
 | `mongo:dropDatabase`      | `{ connectionId; dbName }`                                          | `{ dropped: boolean }`  | no            | W02b           |
 | `mongo:renameCollection`  | `{ connectionId; dbName; collection; newName; dropTarget?: boolean }` | `{ newNamespace: string }` | no         | W02c           |
-| `mongo:createCollection`  | `{ connectionId; dbName; name; options? }` (options covers capped, timeseries, viewOn+pipeline) | `{ namespace: string }` | no | W02d, hover bar |
+| `mongo:createCollection`  | `{ connectionId; dbName; name; options? }` (options covers capped, timeseries, clustered, viewOn+pipeline) | `{ namespace: string }` | no | W02d, hover bar |
 | `collection:modify`       | `{ connectionId; dbName; collection; options }`: either `validator`/`validationLevel`/`validationAction`, or `viewOn` + `pipeline` together | `{ ok: true }` | no | Modify view, W16 §15 |
 | `conn:getUri`             | `{ id }`                                                            | `{ uri: string }`, never with the password | no | Copy connection string |
 
@@ -518,7 +518,7 @@ The destructive and creation flows each need their own spec before shipping:
 | W02a   | Drop collection confirmation modal | `mongo:dropCollection` |
 | W02b   | Drop database confirmation modal (type-to-confirm) | `mongo:dropDatabase` |
 | W02c   | Rename collection modal + tab-namespace migration | `mongo:renameCollection` |
-| W02d   | Create collection modal (name + capped/timeseries/view options) | `mongo:createCollection` |
+| W02d   | Create collection modal (name + capped/timeseries/clustered/view options) | `mongo:createCollection` |
 
 Each sub-spec must follow the destructive-action convention in §5c. They can be authored in parallel; none of them block W02's context-menu skeleton from shipping (an item whose backing IPC + modal had not landed rendered disabled with a tooltip; all four have landed).
 

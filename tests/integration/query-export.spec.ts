@@ -15,7 +15,7 @@ import { registerQueryChannels } from '../../electron/ipc/handlers/query';
 import { createRouter } from '../../electron/ipc/router';
 import type { Envelope } from '../../shared/ipc';
 import type { Logger } from '../../electron/log';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher } from '../helpers/db';
 import { getSharedMongoUri, makeConnection, makeReader } from '../helpers/mongo';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
 import { serializeJsonArray, serializeJsonl, serializeCsv, type ExportColumn } from '../../src/pages/Workspace/exportFormat';
@@ -40,7 +40,7 @@ describe('QueryService.exportToFile', () => {
     });
 
     tmp = createTempDb();
-    const recentRepo = new RecentQueryRepo(tmp.db);
+    const recentRepo = new RecentQueryRepo(tmp.db, createTempCipher());
     const recentSvc = new RecentQueryService(recentRepo);
     // A 5-document cap so the "cap hit" case doesn't need to seed 100k rows.
     svc = new QueryService(pool, recentSvc, 5);
@@ -402,7 +402,7 @@ describe('QueryService.exportToFile', () => {
     const client = await pool.write(connId).client();
     await client.db(dbName).collection(collName).insertOne({ n: -1, tag: 'not-a-number' });
     const log: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const logged = new QueryService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db)), 5, log);
+    const logged = new QueryService(pool, new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())), 5, log);
     const spy = vi.spyOn(fs, 'unlink').mockRejectedValueOnce(new Error('EBUSY: locked'));
 
     await expect(
@@ -480,7 +480,7 @@ describe.skipIf(process.platform === 'win32')('query:export file mode', () => {
     });
 
     tmp = createTempDb();
-    const recentRepo = new RecentQueryRepo(tmp.db);
+    const recentRepo = new RecentQueryRepo(tmp.db, createTempCipher());
     const recentSvc = new RecentQueryService(recentRepo);
     svc = new QueryService(pool, recentSvc, 5);
   });

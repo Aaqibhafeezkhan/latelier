@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { HINT_REGISTRY } from '../../src/hints/registry';
 import type { FeatureHintId } from '../../shared/types';
+import { MONITOR_POLL_MS } from '../../src/utils/monitorPoll';
 import { queryRunKey } from '../../src/utils/queryRunKey';
 
 describe('HINT_REGISTRY', () => {
@@ -10,6 +11,12 @@ describe('HINT_REGISTRY', () => {
     'tabs.pin',
     'saved.create',
     'palette.discover',
+    'suggestions.keyboard',
+    'startup.restore',
+    'monitor.live',
+    'monitor.profiler',
+    'indexes.usage',
+    'find.options',
   ];
 
   it('contains every FeatureHintId exactly once', () => {
@@ -26,6 +33,15 @@ describe('HINT_REGISTRY', () => {
       expect(c.body.length).toBeLessThanOrEqual(200);
       expect(c.title.trim()).toBe(c.title);
     }
+  });
+
+  it('orders the behaviour hints after the original catalog', () => {
+    const order: FeatureHintId[] = ['startup.restore', 'monitor.live', 'monitor.profiler', 'indexes.usage', 'find.options'];
+    expect(order.map((id) => HINT_REGISTRY[id].priority)).toEqual([60, 70, 80, 90, 100]);
+  });
+
+  it('derives the monitor poll interval from the constant the tab polls on', () => {
+    expect(HINT_REGISTRY['monitor.live'].body).toContain(`every ${MONITOR_POLL_MS / 1000} s`);
   });
 
   it('gives the primary-path Run hint the lowest priority number', () => {
@@ -122,17 +138,24 @@ describe('queryRunKey', () => {
       limit: 10,
       skip: 5,
       projection: ['b', 'a'],
+      collation: '{"locale":"en"}',
+      hint: '_id_',
+      maxTimeMS: 500,
+      readPreference: 'nearest',
     });
     const SEP = '\x1f';
     expect(key).toBe(
-      ['c1', 'db', 'orders', '{"x":1}', `m${SEP}a${SEP}b`, '{"x":1}', 10, 5].join(SEP),
+      [
+        'c1', 'db', 'orders', '{"x":1}', `m${SEP}a${SEP}b`, '{"x":1}', 10, 5,
+        '{"locale":"en"}', '_id_', 500, 'nearest',
+      ].join(SEP),
     );
   });
 
   it('joins every field into an exact key when the optional fields are all absent', () => {
     const key = queryRunKey({ ...base });
     const SEP = '\x1f';
-    expect(key).toBe(['c1', 'db', 'orders', '', `m${SEP}`, '', '', 0].join(SEP));
+    expect(key).toBe(['c1', 'db', 'orders', '', `m${SEP}`, '', '', 0, '', '', '', ''].join(SEP));
   });
 
   it('sorts three distinct fields into exact code-unit order', () => {
@@ -142,7 +165,7 @@ describe('queryRunKey', () => {
     const key = queryRunKey({ ...base, projection: ['cherry', 'Apple', 'banana'] });
     const SEP = '\x1f';
     expect(key).toBe(
-      ['c1', 'db', 'orders', '', `m${SEP}Apple${SEP}banana${SEP}cherry`, '', '', 0].join(SEP),
+      ['c1', 'db', 'orders', '', `m${SEP}Apple${SEP}banana${SEP}cherry`, '', '', 0, '', '', '', ''].join(SEP),
     );
   });
 });

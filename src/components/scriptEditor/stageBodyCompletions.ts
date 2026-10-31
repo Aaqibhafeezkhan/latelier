@@ -5,11 +5,17 @@ import type {
   CompletionSource,
 } from '@codemirror/autocomplete';
 import { detectAggGrammar } from '../../features/fieldSuggestions/aggGrammar';
-import { DEFAULT_FIELD_SOURCES, operatorSource } from '../../features/fieldSuggestions/sources';
+import { VALUE_SUGGESTION_OPS } from '../../features/fieldSuggestions/operators';
+import {
+  DEFAULT_FIELD_SOURCES,
+  DEFAULT_VALUE_SOURCES,
+  operatorSource,
+} from '../../features/fieldSuggestions/sources';
 import type {
   FieldSuggestion,
   OperatorSuggestion,
   SuggestionContext,
+  ValueSuggestion,
 } from '../../features/fieldSuggestions/types';
 
 /**
@@ -33,6 +39,9 @@ export interface StageBodyCompletionOpts {
    */
   getStageOp: () => string | undefined;
 }
+
+/** What can extend a token typed inside a quoted string. */
+const QUOTED_VALID_FOR = /^[^"'\n]*$/;
 
 function fieldToCompletion(s: FieldSuggestion): Completion {
   return {
@@ -111,6 +120,53 @@ async function collectOptions(ctx: SuggestionContext): Promise<Completion[]> {
 }
 
 /**
+ * Value completions for a string in a `$match` body, merged by display text
+ * across sources the way `useSuggestions` merges them. The caret sits inside
+ * a quoted string, so only string values fit: a number or boolean inserted
+ * there would become the string `"42"`. A value holding a quote, a backslash
+ * or a line break would end or corrupt the string literal, so it is left out
+ * rather than escaped.
+ */
+async function collectValueOptions(
+  ctx: SuggestionContext & { target: { field: string; operator?: string } },
+): Promise<Completion[]> {
+  const batches = await Promise.all(DEFAULT_VALUE_SOURCES.map((src) => src(ctx)));
+  const values = new Map<string, ValueSuggestion>();
+  for (const s of batches.flat()) {
+    if (s.type !== undefined && s.type !== 'string') continue;
+    if (/["'\\\n\r]/.test(s.display)) continue;
+    const existing = values.get(s.display);
+    values.set(
+      s.display,
+      existing ? { ...existing, frequency: (existing.frequency ?? 0) + (s.frequency ?? 0) } : s,
+    );
+  }
+  return [...values.values()].map((v) => ({
+    label: v.display,
+    type: 'text',
+    boost: Math.min(v.frequency ?? 0, 50) / 50,
+  }));
+}
+
+/**
+ * Where the contents of the string literal holding `from` end: the offset of
+ * its closing `quote`, skipping escaped characters, or of the line end when
+ * the string is not closed on its line, or of the text's end.
+ */
+function stringContentEnd(doc: string, from: number, quote: string | undefined): number {
+  let i = from;
+  // Stryker disable next-line EqualityOperator: one more pass at
+  // `i === doc.length` reads `undefined`, matches nothing and steps past the
+  // end, which the `Math.min` below clamps back to `doc.length`.
+  while (i < doc.length) {
+    const c = doc[i];
+    if (c === quote || c === '\n' || c === '\r') return i;
+    i += c === '\\' ? 2 : 1;
+  }
+  return Math.min(i, doc.length);
+}
+
+/**
  * CodeMirror completion source for aggregation stage bodies (T2.4). Stage
  * bodies are top-level `{ … }` objects, not `db.<coll>.<method>(…)` calls, so
  * `mongoCompletions`'s tree-based `detectFieldPosition` never fires there —
@@ -118,10 +174,12 @@ async function collectOptions(ctx: SuggestionContext): Promise<Completion[]> {
  * (it parses off plain text + caret offset, so it's unaffected by the object
  * literal parsing as a bare JS block).
  *
- * Only the `fieldName` grammar hit is handled: it's the sole position where
- * both a schema field name and a `$operator` key are valid — the exact
- * behavior `useTextareaAutocomplete`'s key-position branch had. Value
- * positions (`fieldRef`/`valueFor`) are out of scope for this ticket.
+ * A `fieldName` hit offers schema field names and `$operator` keys, the
+ * exact behavior `useTextareaAutocomplete`'s key-position branch had. A
+ * `valueFor` hit in a `$match` stage offers values of the field it compares
+ * (the grammar resolves `{age: {$gt: "…"}}` to `age`); in any other stage a
+ * key names an output field, not a source one, so nothing is offered there.
+ * `fieldRef` positions are not handled.
  */
 export function stageBodyCompletionSource(opts: StageBodyCompletionOpts): CompletionSource {
   return (ctx: CompletionContext): Promise<CompletionResult | null> | null => {
@@ -129,7 +187,23 @@ export function stageBodyCompletionSource(opts: StageBodyCompletionOpts): Comple
     if (!suggestionCtx) return null;
 
     const doc = ctx.state.doc.toString();
-    const hit = detectAggGrammar(doc, ctx.pos, opts.getStageOp());
+    const stageOp = opts.getStageOp();
+    const hit = detectAggGrammar(doc, ctx.pos, stageOp);
+    if (hit?.kind === 'valueFor') {
+      if (stageOp !== '$match') return null;
+      // Same gate as the builder's value box: `{a: {$regex: "…"}}` takes a
+      // pattern, not one of a's values.
+      if (hit.operator !== undefined && !VALUE_SUGGESTION_OPS.has(hit.operator)) return null;
+      const target = { field: hit.field, operator: hit.operator };
+      // A pick replaces the whole value, not just what precedes the caret:
+      // `"p|ending"` + `paid` must give `"paid"`, never `"paidending"`.
+      const to = stringContentEnd(doc, hit.replaceEnd, doc[hit.replaceStart - 1]);
+      return collectValueOptions({ ...suggestionCtx, target }).then((options) =>
+        options.length === 0
+          ? null
+          : { from: hit.replaceStart, to, options, validFor: QUOTED_VALID_FOR },
+      );
+    }
     if (!hit || hit.kind !== 'fieldName') return null;
 
     const scopedCtx: SuggestionContext = hit.operatorContext
@@ -152,7 +226,7 @@ export function stageBodyCompletionSource(opts: StageBodyCompletionOpts): Comple
     // valid in-bounds index and never `undefined`.
     // Stryker disable next-line ConditionalExpression,EqualityOperator,StringLiteral: see comment above — replaceStart is never negative, and doc[replaceStart-1] is never out of bounds when the guard passes.
     const quoteBefore = hit.replaceStart > 0 && /["']/.test(doc[hit.replaceStart - 1] ?? '');
-    const validFor = quoteBefore ? /^[^"'\n]*$/ : /^[\w$.]*$/;
+    const validFor = quoteBefore ? QUOTED_VALID_FOR : /^[\w$.]*$/;
 
     return collectOptions(scopedCtx).then((options): CompletionResult | null => {
       if (options.length === 0) return null;

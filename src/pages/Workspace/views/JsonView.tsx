@@ -1,7 +1,9 @@
 import React from 'react';
+import { ActionIcon, Tooltip } from '@mantine/core';
 import {
   List,
   useDynamicRowHeight,
+  useListRef,
   type RowComponentProps,
 } from 'react-window';
 import { I } from '../../../icons';
@@ -9,7 +11,8 @@ import { ejsonStringify } from '../../../utils/ejson';
 import { docKey, isRecord } from '../../../utils/displayValue';
 import { tokenizeJson, type Token, type TokenKind } from '../../../utils/jsonHighlight';
 import { copyToClipboard } from '../../../utils/clipboard';
-import { anchorFromRect, isEditKey } from '../../../utils/contextMenuKey';
+import { anchorForRow, anchorFromRect, isContextMenuKey, isEditKey } from '../../../utils/contextMenuKey';
+import { useRovingFocus } from '../../../hooks/useRovingFocus';
 import { useCollectionWorkspace } from '../context';
 import { useResultSelection } from '../resultSelection';
 import { getDocId } from './docId';
@@ -205,6 +208,11 @@ interface DocCardProps {
   idx: number;
   isSelected: boolean;
   isCopied: boolean;
+  // The row the list's roving focus names while the list has focus — a
+  // different channel from selection, so a card can be either or both.
+  isActive: boolean;
+  rowId: string;
+  onActivate: (idx: number) => void;
   collapsedKeys: Set<string>;
   hiddenFields: Set<string>;
   onToggleCollapse: (key: string) => void;
@@ -226,6 +234,9 @@ function DocCard({
   idx,
   isSelected,
   isCopied,
+  isActive,
+  rowId,
+  onActivate,
   collapsedKeys,
   hiddenFields,
   onToggleCollapse,
@@ -244,39 +255,43 @@ function DocCard({
     }
   }, [doc, hiddenFields]);
 
-  // A plain click no longer does anything to selection — it used to toggle
-  // this card into/out of the multi-selection, which surprised anyone who'd
-  // learned Table or Tree's own click behavior first. ⌘/Ctrl+click still
+  // A plain click makes this the active card, so the next Arrow key moves
+  // on from it. It does not touch selection — toggling on a plain click
+  // surprised anyone who'd learned Table or Tree first. ⌘/Ctrl+click still
   // toggles it, matching the other two views; the visible checkbox below is
   // the plain-click-free way in.
   const handleCardClick = (e: React.MouseEvent) => {
+    onActivate(idx);
     if (e.metaKey || e.ctrlKey) onToggle(idx);
   };
 
   return (
     <div
       onClick={handleCardClick}
-      // JSON has no roving row focus; the card is "focused" when one of its
-      // own controls is, and `E` there opens the editor like it does on a
-      // Table or Tree row. Only buttons live inside, so no typing reaches it.
+      // `E` with one of this card's own buttons focused edits this card. `E`
+      // on the list itself (the active card) is the list's handler; a key
+      // typed on a button inside never reaches that one's own-target guard.
+      // Only buttons live inside, so no typing reaches it.
       onKeyDown={(e) => {
         if (!isEditKey(e)) return;
         e.preventDefault();
         onEdit(doc);
       }}
-      // `group`, deliberately not `button`. `button` is "children
-      // presentational" in ARIA, and this card holds real <button>s — the
-      // corner actions below, and the JSON body's own collapse toggles at
-      // :111 via HighlightedJson — which such a role may not contain at any
-      // depth (axe's nested-interactive). `group` is not children
-      // presentational, so the controls inside stay exposed, and it is honest:
-      // this is a document and the things you can do to it.
-      //
-      // It also keeps S6848 closed. That rule wants a role on an element with
-      // a handler, not specifically an interactive one — the `role="group"`
-      // context menus in TableView carry an onClick and came back clean on the
-      // #18 scan. So the wide-area click survives without either finding.
-      role="group"
+      // `treeitem` of the list's `tree`, as Tree view rows are. Not `button`:
+      // that role is "children presentational" in ARIA, and this card holds
+      // real <button>s (the corner actions, and the JSON body's collapse
+      // toggles), which axe's nested-interactive forbids inside one. No
+      // Tab stop: `tabIndex={-1}` keeps the card out of the tab order (the
+      // list owns the single stop and `aria-activedescendant`) but lets a
+      // click focus it, so `onFocus` hands that focus straight to the list;
+      // otherwise the next Arrow key would target the card and the list's
+      // own-target guard would swallow it.
+      id={rowId}
+      role="treeitem"
+      tabIndex={-1}
+      onFocus={(e) => {
+        if (e.target === e.currentTarget) e.currentTarget.closest<HTMLElement>('[role="tree"]')?.focus();
+      }}
       aria-label={`Document ${idx + 1}`}
       style={{
         border: `1px solid ${isSelected ? 'var(--atelier-accent-border)' : 'var(--atelier-border)'}`,
@@ -285,93 +300,72 @@ function DocCard({
         padding: '8px 10px',
         cursor: 'default',
         position: 'relative',
+        outline: isActive ? '2px solid var(--atelier-accent)' : undefined,
+        outlineOffset: isActive ? '-2px' : undefined,
       }}
     >
       <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4 }}>
         <SelectToggle selected={isSelected} docLabel={getDocId(doc)} onToggle={() => onToggle(idx)} />
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onCopy(doc, idx);
-          }}
-          title="Copy JSON"
-          style={{
-            background: 'var(--atelier-surface)',
-            border: '1px solid var(--atelier-border)',
-            borderRadius: 'var(--atelier-radius-xs)',
-            padding: '2px 5px',
-            cursor: 'pointer',
-            color: isCopied ? 'var(--atelier-accent)' : 'var(--atelier-text-muted)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 3,
-            fontSize: 10,
-          }}
-        >
-          {isCopied ? I.check : I.copy}
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit(doc);
-          }}
-          title="Edit"
-          style={{
-            background: 'var(--atelier-surface)',
-            border: '1px solid var(--atelier-border)',
-            borderRadius: 'var(--atelier-radius-xs)',
-            padding: '2px 5px',
-            cursor: 'pointer',
-            color: 'var(--atelier-text-muted)',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          {I.edit}
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(doc);
-          }}
-          title="Delete"
-          style={{
-            background: 'var(--atelier-surface)',
-            border: '1px solid var(--atelier-border)',
-            borderRadius: 'var(--atelier-radius-xs)',
-            padding: '2px 5px',
-            cursor: 'pointer',
-            color: 'var(--atelier-red)',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          {I.trash}
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            const viaKeyboard = e.detail === 0;
-            onOpenRowMenu(doc, anchorFromRect(e.currentTarget.getBoundingClientRect()), {
-              returnFocusTo: viaKeyboard ? e.currentTarget : undefined,
-              focusMenuOnOpen: viaKeyboard,
-            });
-          }}
-          title="More actions"
-          aria-label={`More actions for document ${getDocId(doc)}`}
-          style={{
-            background: 'var(--atelier-surface)',
-            border: '1px solid var(--atelier-border)',
-            borderRadius: 'var(--atelier-radius-xs)',
-            padding: '2px 5px',
-            cursor: 'pointer',
-            color: 'var(--atelier-text-muted)',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          {I.more}
-        </button>
+        <Tooltip label="Copy JSON" withArrow openDelay={400}>
+          <ActionIcon
+            variant="default"
+            size="sm"
+            c={isCopied ? 'var(--atelier-accent)' : 'var(--atelier-text-muted)'}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCopy(doc, idx);
+            }}
+            aria-label={`Copy JSON for document ${getDocId(doc)}`}
+          >
+            {isCopied ? I.check : I.copy}
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Edit" withArrow openDelay={400}>
+          <ActionIcon
+            variant="default"
+            size="sm"
+            c="var(--atelier-text-muted)"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(doc);
+            }}
+            aria-label={`Edit document ${getDocId(doc)}`}
+          >
+            {I.edit}
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Delete" withArrow openDelay={400}>
+          <ActionIcon
+            variant="default"
+            size="sm"
+            c="var(--atelier-red)"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(doc);
+            }}
+            aria-label={`Delete document ${getDocId(doc)}`}
+          >
+            {I.trash}
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="More actions" withArrow openDelay={400}>
+          <ActionIcon
+            variant="default"
+            size="sm"
+            c="var(--atelier-text-muted)"
+            onClick={(e) => {
+              e.stopPropagation();
+              const viaKeyboard = e.detail === 0;
+              onOpenRowMenu(doc, anchorFromRect(e.currentTarget.getBoundingClientRect()), {
+                returnFocusTo: viaKeyboard ? e.currentTarget : undefined,
+                focusMenuOnOpen: viaKeyboard,
+              });
+            }}
+            aria-label={`More actions for document ${getDocId(doc)}`}
+          >
+            {I.more}
+          </ActionIcon>
+        </Tooltip>
       </div>
       <HighlightedJson
         json={json}
@@ -389,6 +383,10 @@ interface JsonRowProps {
   documents: unknown[];
   selectedIndices: Set<number>;
   copiedIdx: number | null;
+  /** Roving `highlightIndex`: `-1` while the list doesn't have focus. */
+  activeIndex: number;
+  rowId: (index: number) => string;
+  setActiveIndex: (index: number) => void;
   collapsedKeys: Set<string>;
   hiddenFields: Set<string>;
   onToggleCollapse: (key: string) => void;
@@ -405,6 +403,9 @@ function JsonRow({
   documents,
   selectedIndices,
   copiedIdx,
+  activeIndex,
+  rowId,
+  setActiveIndex,
   collapsedKeys,
   hiddenFields,
   onToggleCollapse,
@@ -422,6 +423,9 @@ function JsonRow({
         idx={index}
         isSelected={selectedIndices.has(index)}
         isCopied={copiedIdx === index}
+        isActive={index === activeIndex}
+        rowId={rowId(index)}
+        onActivate={setActiveIndex}
         collapsedKeys={collapsedKeys}
         hiddenFields={hiddenFields}
         onToggleCollapse={onToggleCollapse}
@@ -494,6 +498,53 @@ export function JsonView({ documents }: JsonViewProps) {
   // estimate is intentionally generous; useDynamicRowHeight refines on render.
   const rowHeight = useDynamicRowHeight({ defaultRowHeight: 180 });
 
+  // The list is the widget's single tab stop, wired like TreeView's: the
+  // scroll has to happen in the same handler that moves the index, so the
+  // row `aria-activedescendant` names is mounted.
+  const listRef = useListRef(null);
+  const roving = useRovingFocus({
+    count: documents.length,
+    idPrefix: 'json-row-',
+    resetKey: documents,
+    scrollToIndex: (i) => listRef.current?.scrollToRow({ index: i, align: 'auto' }),
+  });
+  const handleListKeyDown = React.useCallback(
+    (e: React.KeyboardEvent) => {
+      roving.onKeyDown(e);
+      if (e.defaultPrevented) return;
+      // A key bubbling up from a card's own button is that button's.
+      if (e.target !== e.currentTarget) return;
+      if (documents.length === 0) return;
+      const doc = documents[roving.activeIndex];
+      if (isContextMenuKey(e)) {
+        e.preventDefault();
+        // The active card may have been scrolled out and unmounted: open
+        // anyway, anchored to the list, and bring the card back.
+        const rowEl = document.getElementById(roving.rowId(roving.activeIndex));
+        const anchor = anchorForRow(rowEl, listRef.current?.element ?? null);
+        if (!anchor) return;
+        if (!rowEl) listRef.current?.scrollToRow({ index: roving.activeIndex, align: 'auto' });
+        handleOpenRowMenu(doc, anchor, {
+          returnFocusTo: listRef.current?.element ?? null,
+          focusMenuOnOpen: true,
+        });
+        return;
+      }
+      if (isEditKey(e)) {
+        e.preventDefault();
+        onEditDoc(doc);
+        return;
+      }
+      // Enter and Space only (re)name the active card, which a card has
+      // nothing to expand. Space would otherwise page-scroll the list.
+      if (e.key === ' ') e.preventDefault();
+    },
+    // `roving` itself is a fresh object every render; depend on the members
+    // this actually reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [roving.onKeyDown, roving.activeIndex, roving.rowId, documents, listRef, handleOpenRowMenu, onEditDoc],
+  );
+
   // Memoize so react-window receives a stable rowProps reference. A fresh
   // object literal on every render would force all visible rows to re-render
   // even when nothing they depend on changed (TableView does this too).
@@ -502,6 +553,9 @@ export function JsonView({ documents }: JsonViewProps) {
       documents,
       selectedIndices,
       copiedIdx,
+      activeIndex: roving.highlightIndex,
+      rowId: roving.rowId,
+      setActiveIndex: roving.setActiveIndex,
       collapsedKeys,
       hiddenFields,
       onToggleCollapse: toggleCollapse,
@@ -515,6 +569,9 @@ export function JsonView({ documents }: JsonViewProps) {
       documents,
       selectedIndices,
       copiedIdx,
+      roving.highlightIndex,
+      roving.rowId,
+      roving.setActiveIndex,
       collapsedKeys,
       hiddenFields,
       toggleCollapse,
@@ -540,6 +597,16 @@ export function JsonView({ documents }: JsonViewProps) {
         </div>
       )}
       <List<JsonRowProps>
+        // react-window labels its container `role="list"`, which would leave
+        // the `treeitem` cards with no valid parent (aria-required-parent).
+        role="tree"
+        aria-label="Documents"
+        listRef={listRef}
+        tabIndex={roving.containerProps.tabIndex}
+        aria-activedescendant={roving.containerProps['aria-activedescendant']}
+        onFocus={roving.containerProps.onFocus}
+        onBlur={roving.containerProps.onBlur}
+        onKeyDown={handleListKeyDown}
         rowComponent={JsonRow}
         rowCount={documents.length}
         rowHeight={rowHeight}

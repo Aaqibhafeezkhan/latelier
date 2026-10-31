@@ -186,6 +186,46 @@ describe('TableView — rendering and interaction', () => {
     expect(container.textContent).toMatch(/users|→|↗/);
   });
 
+  it('renders a chip on the parent object cell for a dotted rule and opens it with the nested path and value', () => {
+    const rule: ReferenceRule = {
+      id: 'r2',
+      connectionId: 'c1',
+      sourceDb: 'app',
+      sourceCollection: 'orders',
+      sourceField: 'address.userId',
+      targetDb: 'app',
+      targetCollection: 'users',
+      targetField: '_id',
+      projection: [],
+      displayTemplate: undefined,
+      enabled: true,
+      createdAt: '2026-04-01T00:00:00Z',
+      updatedAt: '2026-04-01T00:00:00Z',
+    };
+    const refsByField = new Map<string, ReferenceRule>([['address.userId', rule]]);
+    const oid = { $oid: '507f1f77bcf86cd799439011' };
+    const docs = [{ _id: 'o1', address: { userId: oid, city: 'x' } }];
+    const onRefOpen = vi.fn();
+    const { getByTitle } = render(
+      <CollectionWorkspaceProvider
+        state={emptyState()}
+        actions={emptyWorkspaceActions()}
+        meta={emptyWorkspaceMeta()}
+      >
+        <TableView
+          documents={docs}
+          onColumnResize={vi.fn()}
+          refsByField={refsByField}
+          onRowExpand={vi.fn()}
+          onRefOpen={onRefOpen}
+        />
+      </CollectionWorkspaceProvider>,
+    );
+    const cell = getByTitle(/Drag to add "address /);
+    fireEvent.click(within(cell).getByRole('button', { name: /users/ }));
+    expect(onRefOpen).toHaveBeenCalledWith(rule, 'address.userId', oid);
+  });
+
   // AC1 — row expand reuses the Tree's field-tree renderer. `nested` itself
   // is already visible as a *column* before expansion (unlike Tree view,
   // Table always shows every derived field as a header) — the un-expanded
@@ -235,6 +275,13 @@ describe('TableView — rendering and interaction', () => {
     fireEvent.click(expandBtn);
 
     expect(getByText(`"${longValue}"`)).toBeTruthy();
+  });
+
+  it('a cell with a value advertises both drag-to-filter and double-click-to-copy in its title', () => {
+    const { getByTitle } = renderTable([{ _id: 1, note: 'hello' }]);
+    expect(getByTitle(/Drag to add "note/).getAttribute('title')).toBe(
+      'Drag to add "note $eq …" to builder · double-click to copy',
+    );
   });
 
   // AC6 regressions — behaviour that must survive the memo/gutter/dynamic-
@@ -927,6 +974,8 @@ describe('TableView — rendering and interaction', () => {
       // but leaves it unflushed, which is a false negative, not proof the
       // fix is missing (confirmed against a real probe: logging inside the
       // handler shows it firing either way; only the flushed DOM differs).
+      // A Table cell's trigger stays a Tab stop; only the Tree leaf's opts out.
+      expect(expandBtn.hasAttribute('tabindex')).toBe(false);
       fireEvent.focus(expandBtn);
 
       expect(expandBtn.style.opacity).toBe('1');
@@ -993,6 +1042,15 @@ describe('TableView — rendering and interaction', () => {
 
       fireEvent.click(getByRole('button', { name: 'Delete document 1' }));
       expect(openDelete).toHaveBeenCalledWith(docs[0]);
+    });
+
+    it('shows the Delete document tooltip when keyboard focus lands on the icon button', async () => {
+      const { getByRole } = renderTable([{ _id: 1, sku: 'a' }]);
+
+      fireEvent.focus(getByRole('button', { name: 'Delete document 1' }));
+
+      const tip = await screen.findByRole('tooltip');
+      expect(tip.textContent).toBe('Delete document');
     });
 
     it('is not a data column: FieldsControl lists no "Actions" entry', () => {

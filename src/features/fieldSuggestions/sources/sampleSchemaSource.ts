@@ -22,6 +22,8 @@ interface CacheEntry {
   suggestions: FieldSuggestion[];
   /** W17 — the same fetched sample, digested a second way. */
   structureEntries: SchemaSampleEntry[];
+  /** The sampled docs themselves, for `sampleValuesSource`. */
+  sampleDocs: unknown[];
 }
 
 const cache = new Map<string, CacheEntry>();
@@ -79,9 +81,10 @@ async function loadEntry(
         fetchedAt: Date.now(),
         suggestions: digested.map((s) => ({ ...s, source: 'sampleSchema' })),
         structureEntries: summarizeSchema(res.docs),
+        sampleDocs: res.docs,
       };
     } catch {
-      entry = { fetchedAt: Date.now(), suggestions: [], structureEntries: [] };
+      entry = { fetchedAt: Date.now(), suggestions: [], structureEntries: [], sampleDocs: [] };
     } finally {
       // An invalidation may already have dropped this entry and a newer fetch
       // taken its key; only remove our own.
@@ -109,6 +112,18 @@ export async function getStructureEntries(
   collection: string,
 ): Promise<SchemaSampleEntry[]> {
   return (await loadEntry(connectionId, dbName, collection)).structureEntries;
+}
+
+/**
+ * The sampled docs behind `sampleSchemaSource`, for value suggestions. Shares
+ * the same cache entry and in-flight fetch, so it costs no extra round trip.
+ */
+export async function getSampleDocs(
+  connectionId: string,
+  dbName: string,
+  collection: string,
+): Promise<unknown[]> {
+  return (await loadEntry(connectionId, dbName, collection)).sampleDocs;
 }
 
 /**

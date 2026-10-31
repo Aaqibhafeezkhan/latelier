@@ -1,3 +1,4 @@
+import { ActionIcon, Tooltip } from '@mantine/core';
 import { I } from '../../../icons';
 
 interface SelectToggleProps {
@@ -22,30 +23,28 @@ interface SelectToggleProps {
 export function SelectToggle({ selected, docLabel, onToggle }: SelectToggleProps) {
   const label = `${selected ? 'Deselect' : 'Select'} document ${docLabel}`;
   return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggle();
-      }}
-      aria-pressed={selected}
-      aria-label={label}
-      title={label}
-      style={{
-        background: selected ? 'var(--atelier-accent-soft)' : 'var(--atelier-surface)',
-        border: `1px solid ${selected ? 'var(--atelier-accent-border)' : 'var(--atelier-border)'}`,
-        borderRadius: 'var(--atelier-radius-xs)',
-        padding: '2px 5px',
-        margin: 0,
-        font: 'inherit',
-        cursor: 'pointer',
-        color: selected ? 'var(--atelier-accent)' : 'var(--atelier-text-ghost)',
-        display: 'flex',
-        alignItems: 'center',
-        flexShrink: 0,
-      }}
-    >
-      {I.check}
-    </button>
+    <Tooltip label={label} withArrow openDelay={400}>
+      <ActionIcon
+        type="button"
+        variant="default"
+        size="sm"
+        c={selected ? 'var(--atelier-accent)' : 'var(--atelier-text-ghost)'}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        aria-pressed={selected}
+        aria-label={label}
+        style={{
+          flexShrink: 0,
+          ...(selected && {
+            background: 'var(--atelier-accent-soft)',
+            borderColor: 'var(--atelier-accent-border)',
+          }),
+        }}
+      >
+        {I.check}
+      </ActionIcon>
+    </Tooltip>
   );
 }

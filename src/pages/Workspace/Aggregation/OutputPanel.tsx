@@ -2,7 +2,7 @@ import React from 'react';
 import { themeVars } from '../../../theme/themeVars';
 import { I } from '../../../icons';
 import type { AggregationLastRun, ResultViewMode } from '@shared/types';
-import { Button, Group, SegmentedControl } from '@mantine/core';
+import { Button, Group, SegmentedControl, VisuallyHidden } from '@mantine/core';
 import { ejsonStringifyReadable } from '../../../utils/ejson';
 import { copyToClipboard } from '../../../utils/clipboard';
 import { api, getErrorMessage } from '../../../api/atelier';
@@ -119,6 +119,13 @@ export function OutputPanel({
   const rows = lastRun?.rows ?? [];
   const err = lastRun?.error;
 
+  // Always mounted: a live region only announces text that changes after it
+  // exists, so start and finish of a run are both heard.
+  let statusText = '';
+  if (running) statusText = 'Running…';
+  else if (err) statusText = 'Run failed';
+  else if (lastRun) statusText = `Finished: ${rows.length} documents`;
+
   const copyAll = () => {
     if (rows.length === 0) return;
     void copyToClipboard(safeStringifyArray(rows), 'Output copied to the clipboard.');
@@ -183,7 +190,9 @@ export function OutputPanel({
         <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>Pipeline output</span>
         {lastRun && (
           <>
-            <span style={{ fontSize: 11, color: T.textMuted }}>{rows.length} docs</span>
+            <span style={{ fontSize: 11, color: T.textMuted, fontVariantNumeric: 'tabular-nums' }}>
+              {rows.length} docs
+            </span>
             <span style={{ fontSize: 11, color: T.textMuted }}>· {lastRun.durationMs}ms</span>
           </>
         )}
@@ -225,8 +234,12 @@ export function OutputPanel({
           position: 'relative',
         }}
       >
+        <VisuallyHidden role="status" aria-live="polite">
+          {statusText}
+        </VisuallyHidden>
         {running && (
           <div
+            aria-hidden="true"
             style={{
               position: 'absolute',
               top: 4,
@@ -257,21 +270,17 @@ export function OutputPanel({
               {err.code}
             </div>
             <div style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>{err.message}</div>
-            <button
+            <Button
+              variant="subtle"
+              size="compact-xs"
+              fz={11}
+              td="underline"
+              c={T.accent}
+              mt={8}
               onClick={() => setErrDetails((d) => !d)}
-              style={{
-                marginTop: 8,
-                fontSize: 11,
-                background: 'none',
-                border: 'none',
-                color: T.accent,
-                cursor: 'pointer',
-                textDecoration: 'underline',
-                padding: 0,
-              }}
             >
               {errDetails ? 'Hide details' : 'Show details'}
-            </button>
+            </Button>
             {errDetails && (
               <pre
                 style={{

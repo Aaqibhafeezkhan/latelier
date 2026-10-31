@@ -4,15 +4,16 @@ import { useTheme } from '../ThemeContext';
 import { useSettings } from '../pages/SettingsContext';
 import { useConnectionTransfer } from '../features/connections/ConnectionTransferProvider';
 import { AuditLogModal } from '../pages/AuditLogModal';
+import { ActivityLogModal } from '../pages/ActivityLogModal';
 import { ShortcutsModal } from './ShortcutsModal';
 import { useRegisterCommands } from './useRegisterCommands';
 
 /**
  * Registers commands available from every route: theme toggle, settings,
- * the audit log, the shortcuts cheat sheet, navigation jumps, and `New
- * connection`. Mount once near the App root, inside the router and theme
- * provider. Renders the audit log and shortcuts modals itself, since nothing
- * but these commands opens them.
+ * the audit log, the activity log, the shortcuts cheat sheet, navigation
+ * jumps, and `New connection`. Mount once near the App root, inside the
+ * router and theme provider. Renders the audit log, activity log and
+ * shortcuts modals itself, since nothing but these commands opens them.
  */
 export function GlobalCommands() {
   const navigate = useNavigate();
@@ -21,6 +22,7 @@ export function GlobalCommands() {
   const transfer = useConnectionTransfer();
   const [audit, setAudit] = useState<{ connectionId: string | null } | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
 
   // ⌘/ (Ctrl+/ elsewhere). A text field or editor keeps it: CodeMirror binds it
   // to toggle-comment, and typing a slash must never open a dialog.
@@ -60,6 +62,13 @@ export function GlobalCommands() {
         group: 'general',
         keywords: ['history', 'operations', 'changes'],
         perform: (ctx) => setAudit({ connectionId: ctx.connectionId }),
+      },
+      {
+        id: 'activity.open',
+        title: 'Show activity log',
+        group: 'general',
+        keywords: ['notifications', 'errors', 'warnings', 'history'],
+        perform: () => setActivityOpen(true),
       },
       {
         id: 'help.shortcuts',
@@ -129,6 +138,7 @@ export function GlobalCommands() {
       {audit && (
         <AuditLogModal initialConnectionId={audit.connectionId} onClose={() => setAudit(null)} />
       )}
+      {activityOpen && <ActivityLogModal onClose={() => setActivityOpen(false)} />}
       {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
     </>
   );

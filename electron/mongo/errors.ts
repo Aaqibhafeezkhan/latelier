@@ -116,7 +116,12 @@ export function classifyMongoOpError(
   if (e.code === 11 || e.codeName === 'UserNotFound') {
     return new SystemError('NOT_FOUND', msg, withExtra());
   }
-  if (e.code === 51003 || e.codeName === 'UserAlreadyExists') {
+  if (
+    e.code === 51003 ||
+    e.code === 51002 ||
+    e.codeName === 'UserAlreadyExists' ||
+    e.codeName === 'RoleAlreadyExists'
+  ) {
     return new SystemError('CONFLICT', msg, withExtra());
   }
   if (e.code === 31 || e.codeName === 'RoleNotFound') {

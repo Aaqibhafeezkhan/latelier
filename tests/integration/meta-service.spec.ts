@@ -268,6 +268,28 @@ describe('MetaService', () => {
       expect(JSON.parse(d.options.pipeline!)).toEqual([{ $match: { a: { $numberInt: '1' } } }]);
     });
 
+    it('returns a view\'s collation as canonical EJSON, and none for a view without one', async () => {
+      await setup();
+      await withDetailsDb(async (db) => {
+        await db.dropCollection('vc').catch(() => undefined);
+        await db.dropCollection('vn').catch(() => undefined);
+        await db.dropCollection('src').catch(() => undefined);
+        await db.createCollection('src');
+        await db.createCollection('vc', { viewOn: 'src', pipeline: [], collation: { locale: 'fr', strength: 2 } });
+        await db.createCollection('vn', { viewOn: 'src', pipeline: [] });
+      });
+
+      const read = (collection: string) =>
+        svc.collectionDetails({ connectionId: connId, dbName: DETAILS_DB, collection });
+
+      const withCollation = await read('vc');
+      expect(JSON.parse(withCollation.options.collation!)).toMatchObject({
+        locale: 'fr',
+        strength: { $numberInt: '2' },
+      });
+      expect('collation' in (await read('vn')).options).toBe(false);
+    });
+
     // A whole-number Double reads back from the driver as a JS number, and the
     // canonical writer then guesses its type from the value: 2^31 becomes a
     // Long, 1e18+128 a Long with rounded digits. Modify view and Edit rules

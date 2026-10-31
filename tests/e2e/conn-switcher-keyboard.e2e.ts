@@ -94,3 +94,44 @@ test('switcher: keyboard-only find-and-switch, and focus returns to the trigger'
     await expect(betaTrigger).toBeFocused({ timeout: 5000 });
   });
 });
+
+/**
+ * Reopening inside the exit transition. Mantine keeps the dropdown mounted for
+ * ~150ms after Escape, so the search field's `autoFocus` does not run again;
+ * focus stays on the trigger that reopened it and, before the fix, ↓/Escape/typing
+ * went nowhere. The component suite runs without transitions and cannot see it.
+ */
+test('switcher: reopening inside the exit transition focuses the search field', async () => {
+  const { host, port } = await startMemoryServer();
+
+  await withApp(async (app) => {
+    const win = await app.firstWindow();
+    await win.waitForLoadState('domcontentloaded');
+    await seedActiveConnection(win, { ...baseConnInput(host, port), name: 'Alpha Cluster' });
+    await seedConnection(win, { ...baseConnInput(host, port), name: 'Beta Cluster' });
+
+    const switcher = new WorkspacePage(win).switcher;
+    const trigger = switcher.trigger;
+    await expect(trigger).toBeVisible({ timeout: 8000 });
+
+    for (const reopen of ['keyboard', 'click'] as const) {
+      await trigger.click();
+      await expect(switcher.searchInput).toBeFocused({ timeout: 5000 });
+      await win.keyboard.press('Escape');
+
+      // No wait: the dropdown is still mounted, mid exit transition.
+      if (reopen === 'keyboard') {
+        await trigger.focus();
+        await win.keyboard.press('Enter');
+      } else {
+        await trigger.click();
+      }
+
+      await expect(switcher.searchInput).toBeFocused({ timeout: 5000 });
+      // The reopened popover owns the keyboard: Escape must close it.
+      await win.keyboard.press('Escape');
+      await expect(switcher.listbox).toHaveCount(0);
+      await expect(trigger).toBeFocused({ timeout: 5000 });
+    }
+  });
+});

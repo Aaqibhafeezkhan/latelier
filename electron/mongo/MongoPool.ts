@@ -413,6 +413,32 @@ export class MongoPool extends EventEmitter {
   }
 
   /**
+   * A client of its own, outside the connection's pool, for a command that
+   * must not queue behind the pool's operations: a `killOp` aimed at an op
+   * that holds every pooled connection (always the case at `maxPoolSize: 1`).
+   * Same URI, credentials and TLS as the pooled client. The caller closes it.
+   */
+  async openControlClient(id: string): Promise<MongoClient> {
+    const conn = this.repo.findById(id);
+    if (!conn) throw new NotFoundError(`connection ${id} not found`);
+    if (conn.ssh?.enabled) throw new ValidationError('SSH tunnels are not supported yet');
+    const { uri, opts } = this.connectArgs(id, conn);
+    const client = this.clientFactory(uri, { ...opts, maxPoolSize: 1 });
+    try {
+      await client.connect();
+    } catch (err) {
+      await client.close().catch((closeErr: unknown) => {
+        this.log?.warn('mongo', 'close failed (control client)', {
+          connectionId: id,
+          err: String(closeErr),
+        });
+      });
+      throw err;
+    }
+    return client;
+  }
+
+  /**
    * Refuses a read-only connection **now**, synchronously, and hands back the
    * only route to a writable handle. Nothing is connected until the caller
    * asks the grant for one.

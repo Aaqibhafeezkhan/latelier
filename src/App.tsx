@@ -9,7 +9,14 @@ import NewConnection from './pages/NewConnection';
 import Workspace from './pages/Workspace';
 import { HintsProvider } from './hints/HintsProvider';
 import { Splash } from './components/Splash';
-import { useTheme } from './ThemeContext';
+import {
+  applyEditorFontSize,
+  EDITOR_FONT_SIZE_PREF_KEY,
+  isEditorFontSize,
+  useTheme,
+} from './ThemeContext';
+import { api, getErrorMessage } from './api/atelier';
+import { notify } from './theme/notifications';
 import { mantineTheme } from './theme/mantineTheme';
 
 const SPLASH_DURATION_MS = 800;
@@ -58,6 +65,19 @@ export default function App() {
   // hook so Mantine and the legacy themeVars stay in lockstep. Routes keep their
   // own useTheme() calls; they share state via api.prefs broadcasts.
   const [dark] = useTheme();
+  // The editor font size is read once at boot; Settings applies changes live.
+  React.useEffect(() => {
+    api.prefs
+      .get<number>(EDITOR_FONT_SIZE_PREF_KEY)
+      .then((v) => {
+        if (isEditorFontSize(v)) applyEditorFontSize(v);
+      })
+      .catch((err) => {
+        notify.error(getErrorMessage(err, 'Could not read the editor font size.'), {
+          id: 'editor-font-size-read-failed',
+        });
+      });
+  }, []);
   return (
     <MantineProvider theme={mantineTheme} forceColorScheme={dark ? 'dark' : 'light'}>
       <ModalsProvider>

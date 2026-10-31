@@ -77,6 +77,9 @@ export function CreateCollectionDrawer({
   const [size, setSize] = React.useState('');
   const [max, setMax] = React.useState('');
 
+  const [clusteredEnabled, setClusteredEnabled] = React.useState(false);
+  const [clusteredName, setClusteredName] = React.useState('');
+
   const [timeseriesEnabled, setTimeseriesEnabled] = React.useState(false);
   const [timeField, setTimeField] = React.useState('');
   const [metaField, setMetaField] = React.useState('');
@@ -92,6 +95,15 @@ export function CreateCollectionDrawer({
 
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Which capped field the validation error is about, so it can take focus and
+  // be tied to the alert for assistive tech.
+  const [errorField, setErrorField] = React.useState<'size' | 'max' | null>(null);
+  const sizeRef = React.useRef<HTMLInputElement>(null);
+  const maxRef = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    if (errorField === 'size') sizeRef.current?.focus();
+    else if (errorField === 'max') maxRef.current?.focus();
+  }, [errorField, error]);
 
   const effectiveDbName = fixedDbName ?? dbNameInput.trim();
   const trimmedName = name.trim();
@@ -114,6 +126,8 @@ export function CreateCollectionDrawer({
     cappedEnabled ||
     size !== '' ||
     max !== '' ||
+    clusteredEnabled ||
+    clusteredName !== '' ||
     timeseriesEnabled ||
     timeField !== '' ||
     metaField !== '' ||
@@ -147,12 +161,14 @@ export function CreateCollectionDrawer({
   const submit = async () => {
     if (!canSubmit || submitting) return;
     setError(null);
+    setErrorField(null);
 
     const options: CollectionCreateOptions = {};
     if (cappedEnabled) {
       const n = Number(size);
       if (!Number.isInteger(n) || n <= 0) {
         setError('Capped size must be a positive integer of bytes.');
+        setErrorField('size');
         return;
       }
       options.capped = true;
@@ -161,6 +177,7 @@ export function CreateCollectionDrawer({
         const m = Number(max);
         if (!Number.isInteger(m) || m <= 0) {
           setError('Max document count must be a positive integer.');
+          setErrorField('max');
           return;
         }
         options.max = m;
@@ -172,6 +189,10 @@ export function CreateCollectionDrawer({
         ...(metaField.trim() ? { metaField: metaField.trim() } : {}),
         ...(granularity ? { granularity: granularity as 'seconds' | 'minutes' | 'hours' } : {}),
       };
+    }
+    if (clusteredEnabled) {
+      options.clustered = true;
+      if (clusteredName.trim()) options.clusteredIndexName = clusteredName.trim();
     }
     if (collationEnabled) {
       try {
@@ -256,20 +277,31 @@ export function CreateCollectionDrawer({
             aria-label="Capped"
             checked={cappedEnabled}
             onChange={(e) => setCappedEnabled(e.currentTarget.checked)}
+            disabled={clusteredEnabled}
             size="xs"
           />
           {cappedEnabled && (
             <Group gap="xs" pl="lg">
               <TextInput
+                ref={sizeRef}
+                type="number"
+                inputMode="numeric"
+                min={1}
                 label="Size (bytes)"
                 aria-label="Capped size (bytes)"
+                error={errorField === 'size' ? error : undefined}
                 value={size}
                 onChange={(e) => setSize(e.currentTarget.value)}
                 size="xs"
               />
               <TextInput
+                ref={maxRef}
+                type="number"
+                inputMode="numeric"
+                min={1}
                 label="Max documents (optional)"
                 aria-label="Capped max documents"
+                error={errorField === 'max' ? error : undefined}
                 value={max}
                 onChange={(e) => setMax(e.currentTarget.value)}
                 size="xs"
@@ -284,6 +316,7 @@ export function CreateCollectionDrawer({
             aria-label="Time series"
             checked={timeseriesEnabled}
             onChange={(e) => setTimeseriesEnabled(e.currentTarget.checked)}
+            disabled={clusteredEnabled}
             size="xs"
           />
           {timeseriesEnabled && (
@@ -312,6 +345,32 @@ export function CreateCollectionDrawer({
                 size="xs"
               />
             </Stack>
+          )}
+        </Stack>
+
+        <Stack gap={6}>
+          <Checkbox
+            label="Clustered collection (MongoDB 5.3+)"
+            aria-label="Clustered"
+            checked={clusteredEnabled}
+            onChange={(e) => setClusteredEnabled(e.currentTarget.checked)}
+            disabled={cappedEnabled || timeseriesEnabled}
+            description={
+              cappedEnabled || timeseriesEnabled
+                ? 'Not available with capped or time series collections.'
+                : undefined
+            }
+            size="xs"
+          />
+          {clusteredEnabled && (
+            <TextInput
+              label="Index name (optional)"
+              aria-label="Clustered index name"
+              value={clusteredName}
+              onChange={(e) => setClusteredName(e.currentTarget.value)}
+              size="xs"
+              pl="lg"
+            />
           )}
         </Stack>
 
@@ -379,7 +438,7 @@ export function CreateCollectionDrawer({
           </Text>
         )}
 
-        {error && (
+        {error && errorField === null && (
           <Alert color="red" variant="light" role="alert">
             {error}
           </Alert>

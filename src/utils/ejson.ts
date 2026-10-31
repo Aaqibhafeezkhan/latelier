@@ -226,7 +226,9 @@ export function isValidEjson(s: string): boolean {
  * the mirror of `parseEjsonDocument` in `electron/mongo/ejson.ts`.
  */
 export function isEjsonDocument(s: string): boolean {
-  // Stryker disable next-line MethodExpression: `.trim()` here is only an early-exit optimization, not a correctness requirement — `JSON.parse` (inside `ejsonParse`) already ignores surrounding whitespace on a value it can otherwise parse, and throws on a whitespace-only string exactly like it throws on an empty one, so `t` untrimmed reaches the same `true`/`false` outcome either way. Verified with node across '', '   ', '  {} ' and '\t\n'.
+  // Trimmed, not left to `JSON.parse`: it ignores ASCII whitespace but refuses
+  // the Unicode spaces `String.prototype.trim` strips (NBSP, BOM, em space),
+  // and the filter's Run gate accepts a document padded with those.
   const t = s.trim();
   if (!t) return false;
   try {

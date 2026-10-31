@@ -15,6 +15,9 @@ export type AppErrorCode =
   | 'DB_ERROR'
   | 'SECRETS_UNAVAILABLE'
   | 'SECRET_DECRYPT_FAILED'
+  // Encrypted local columns: a cell that fails to open, a column key the keychain will not unwrap.
+  | 'COLUMN_DECRYPT_FAILED'
+  | 'COLUMN_KEY_UNREADABLE'
   // Connection Export (C13): the Export Passphrase did not decrypt the file.
   | 'BAD_PASSPHRASE'
   | 'READ_ONLY'

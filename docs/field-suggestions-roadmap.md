@@ -350,12 +350,15 @@ or `DEFAULT_VALUE_SOURCES`. No consumer changes required.
 | Source | Kind | Trigger | Cost | Notes |
 |---|---|---|---|---|
 | `indexesSource` | field | When user touches a collection for the first time in a session | One IPC, cached per (conn, db, coll). | Pulls `db.coll.indexes()`, emits indexed-field paths with a "has index" hint we can surface later in the popover badge. |
-| `schemaEnumSource` | value | When `ctx.target.field` is known-enumerated | One IPC to fetch the collection's validator (`listCollections` options.validator). Cache per (conn, db, coll). | If the validator has `$jsonSchema` with `enum`, those are exact values. Highest-quality source when available. |
 | `previewFieldsSource` | field | Any time | Free; uses existing `api.prefs.getPreviewFields`. | Low-yield overlap with `lastRunSource`; defer until someone wants persistence of "fields I care about." |
 
 > `recentValuesSource` (committed) moved to the "Value suggestions" section above.
-> The low-cardinality Mongo-probe source (formerly `distinctQuerySource`) is
-> deferred — see the tracker for the follow-up issues.
+> **Shipped:** `schemaEnumSource` reads the validator's `$jsonSchema` `enum`
+> through the existing `meta:collectionDetails`, cached per collection, and
+> ranks first. The low-cardinality source shipped as `sampleValuesSource`:
+> no separate probe, it reuses the docs `sampleSchemaSource` already fetched
+> and lists a field with 20 or fewer distinct values. X02 §2 is the contract
+> for both.
 
 ## Quality improvements (prioritize as symptoms emerge)
 

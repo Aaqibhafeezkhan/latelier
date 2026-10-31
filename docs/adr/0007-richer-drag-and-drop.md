@@ -59,10 +59,10 @@ Two other facts shaped scope:
 **Deferred, with the design decisions already made so a future ticket doesn't re-litigate them:**
 
 - **Item 4 — drop targets on Sort and `ColumnChooser`.** Sort drop *replaces* the
-  single sort field (open question left for that ticket: default ascending, or mirror the
-  existing column-header-click sort-cycle direction?). `ColumnChooser` needs genuinely new
-  `onDragOver`/`onDrop` handlers accepting `DRAGGED_FIELD_MIME`, additive to its existing
-  ref-based reorder handlers, not a retrofit of them.
+  single sort field. **Answered (Sort shipped):** a drop always sets **ascending**. That is
+  also the first step of the column header's sort cycle, but a drop never continues the
+  cycle: it never flips or clears, so re-dropping the field already sorted cannot silently
+  remove the sort. The `ColumnChooser` half is obsolete and was not built.
 - **Item 5 — multi-field drag makes an OR group.** Larger effort. **Decision:
   true multi-select drag**, not a modifier-key single-field shortcut — the user explicitly chose
   this over the leaner alternative during grilling. A user selects multiple fields in

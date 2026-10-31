@@ -18,8 +18,8 @@ import {
   type CompletionSource,
 } from '@codemirror/autocomplete';
 import { searchKeymap } from '@codemirror/search';
-import { oneDark } from '@codemirror/theme-one-dark';
 import { useIsDark } from '../ThemeContext';
+import { atelierDark } from './scriptEditor/editorTheme';
 import { mongoCompletions } from './scriptEditor/mongoCompletions';
 
 export interface ScriptEditorProps {
@@ -208,7 +208,7 @@ export function ScriptEditor({
           ...completionKeymap,
           indentWithTab,
         ]),
-        themeCompartment.current.of(isDark ? oneDark : []),
+        themeCompartment.current.of(isDark ? atelierDark : []),
         readOnlyCompartment.current.of(EditorState.readOnly.of(readOnly)),
         ariaLabelCompartment.current.of(
           EditorView.contentAttributes.of(ariaLabel ? { 'aria-label': ariaLabel } : {}),
@@ -216,7 +216,7 @@ export function ScriptEditor({
         updateListener,
         completionMarker,
         EditorView.theme({
-          '&': { height: '100%', fontSize: '13px' },
+          '&': { height: '100%', fontSize: 'var(--atelier-editor-font-size, 13px)' },
           '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
         }),
       ],
@@ -236,7 +236,7 @@ export function ScriptEditor({
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({
-      effects: themeCompartment.current.reconfigure(isDark ? oneDark : []),
+      effects: themeCompartment.current.reconfigure(isDark ? atelierDark : []),
     });
   }, [isDark]);
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button, Group, Stack, Text, Title } from '@mantine/core';
 import { api, getErrorMessage } from '../api/atelier';
+import { describeError, logToMain } from '../utils/rendererLog';
 
 interface ErrorBoundaryState {
   error: Error | null;
@@ -26,10 +27,14 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Renderer convention is bare console.error (see CommandPalette.tsx,
-    // rank.ts) — electron/log.ts is main-process only and must not be
-    // imported here. This is the load-bearing "never silently swallow" log.
+    // Two records of the same error: the log file through main, which is what
+    // a diagnostic bundle carries, and devtools, where a developer looks first.
+    // The component stack goes with the error's own stack, since it is the
+    // only part that names the component that threw.
     console.error('[ErrorBoundary] uncaught render error', error, info.componentStack);
+    const { message, stack } = describeError(error);
+    const stacks = [stack, info.componentStack].filter((s) => s).join('\n');
+    logToMain('error', message, 'errorBoundary', stacks || undefined);
   }
 
   handleReload = () => {
@@ -48,6 +53,13 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 function ErrorBoundaryFallback({ onReload }: { onReload: () => void }) {
   const [reporting, setReporting] = React.useState(false);
   const [reportMessage, setReportMessage] = React.useState<string | null>(null);
+  const headingRef = React.useRef<HTMLHeadingElement>(null);
+
+  // The fallback replaces the whole screen, so keyboard and screen-reader
+  // focus would otherwise be left on an unmounted node.
+  React.useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   const handleReport = async () => {
     setReporting(true);
@@ -62,8 +74,17 @@ function ErrorBoundaryFallback({ onReload }: { onReload: () => void }) {
   };
 
   return (
-    <Stack align="center" justify="center" gap="md" p="xl" style={{ minHeight: '100vh' }}>
-      <Title order={3}>Something went wrong</Title>
+    <Stack
+      align="center"
+      justify="center"
+      gap="md"
+      p="xl"
+      role="alert"
+      style={{ minHeight: '100vh' }}
+    >
+      <Title order={3} ref={headingRef} tabIndex={-1} style={{ outline: 'none' }}>
+        Something went wrong
+      </Title>
       <Text size="sm" c="dimmed" ta="center" maw={480}>
         Atelier hit an unexpected error and couldn't continue rendering this screen. You can
         reload the app, or export a diagnostic bundle to share with support. Details were logged

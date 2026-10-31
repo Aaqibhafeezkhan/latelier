@@ -227,6 +227,14 @@ That row is the Focused Tab, and its `connectionId` is the answer to "where am I
   opening one would mean guessing a Database and Collection. The row's "active" marker becomes a
   "connected" marker.
 - Command palette wording: "Switch connection → X" becomes "Open connection → X".
+- **Row content in the Switcher and the Connections table.** A connected Connection with a known
+  server version shows a small `v{version}` badge. The version is runtime-only and cleared on
+  disconnect, so it never shows beside a disconnected row, and topology is not shown for the same
+  reason. Connections can be pinned: pinned rows sort first (the rest keep their order), carry a
+  pin glyph, and the pins persist in the `ui.connections.pinned` pref, an array of Connection ids
+  that drops ids of deleted Connections when read. The pin toggle lives on the Connections
+  table's open row (a toggle button named `Pin {name}` whose pressed state is `aria-pressed`; only the hover text flips to Unpin); the Switcher only shows the
+  glyph. Grouping connections is not built.
 
 ### 4.7 Launch restore
 

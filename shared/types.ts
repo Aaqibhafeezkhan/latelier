@@ -391,11 +391,40 @@ export interface BuilderState {
   projectionRaw?: string;
   sort: string;
   limit: string;
+  /**
+   * W14 §9 find options, each the text the query bar's options row holds
+   * (blank = unset), gated by `optionsProblem`. Optional and additive like
+   * `projectionRaw`: a tab or saved row from before them restores unchanged.
+   */
+  collation?: string;
+  hint?: string;
+  maxTimeMS?: string;
+  readPreference?: string;
 }
 
 // ─── Query runner types (W03) ────────────────────────────────────────────────
 
-export interface FindInput {
+export type ReadPreferenceMode =
+  | 'primary'
+  | 'primaryPreferred'
+  | 'secondary'
+  | 'secondaryPreferred'
+  | 'nearest';
+
+/**
+ * The find options that decide which documents match (collation) or how the
+ * server reads them (hint, readPreference), so every op that must see the
+ * on-screen set — count, explain, export — carries them too (W14 §9).
+ */
+export interface FindMatchOptions {
+  /** Canonical EJSON document, e.g. `{"locale":"en","strength":2}`. */
+  collation?: string;
+  /** An EJSON document is a key pattern; any other text is an index name. */
+  hint?: string;
+  readPreference?: ReadPreferenceMode;
+}
+
+export interface FindInput extends FindMatchOptions {
   connectionId: string;
   dbName: string;
   collection: string;
@@ -406,6 +435,8 @@ export interface FindInput {
   skip: number;
   ejsonRelaxed?: boolean;
   cancelToken?: string;
+  /** Lowers the find's 30 s server-side cap; a larger value is clamped to it. */
+  maxTimeMS?: number;
 }
 
 export interface FindResult {
@@ -426,7 +457,11 @@ export interface FindResultWire {
   hasMore: boolean;
 }
 
-export interface ExplainInput extends Omit<FindInput, 'limit' | 'skip' | 'cancelToken'> {
+/** `query:count` input. No `maxTimeMS`: the count runs on its own probe
+ *  timeout, and the channel's zod schema drops the field. */
+export type CountInput = Omit<FindInput, 'limit' | 'skip' | 'projection' | 'sort' | 'cancelToken' | 'maxTimeMS'>;
+
+export interface ExplainInput extends Omit<FindInput, 'limit' | 'skip' | 'cancelToken' | 'maxTimeMS'> {
   verbosity: 'queryPlanner' | 'executionStats' | 'allPlansExecution';
 }
 
@@ -440,7 +475,7 @@ export interface QueryExportColumn {
   path: string;
 }
 
-export interface QueryExportInput {
+export interface QueryExportInput extends FindMatchOptions {
   connectionId: string;
   dbName: string;
   collection: string;
@@ -710,7 +745,7 @@ export interface RecentQuery {
 
 // ─── Audit log (X13) ─────────────────────────────────────────────────────────
 
-/** Mirrors the `audit_log.op` CHECK constraint (migration 012). */
+/** Mirrors the `audit_log.op` CHECK constraint (migrations 012 and 016). */
 export type AuditOp =
   | 'insertMany'
   | 'updateOne'
@@ -719,6 +754,7 @@ export type AuditOp =
   | 'deleteMany'
   | 'collectionDrop'
   | 'collectionRename'
+  | 'collectionModify'
   | 'databaseDrop'
   | 'import';
 
@@ -735,6 +771,8 @@ export type AuditSummary =
   | { op: 'deleteOne' | 'deleteMany'; filter: string; deletedCount?: number }
   | { op: 'collectionRename'; fromName: string; toName: string }
   | { op: 'collectionDrop' | 'databaseDrop' }
+  /** Which groups of options were changed, never their values: a validator can embed sample literals. */
+  | { op: 'collectionModify'; changed: Array<'validator' | 'validationLevel' | 'validationAction' | 'view'> }
   /** `format` is absent when the import failed before its file was read. `cancelled` is absent unless true. */
   | { op: 'import'; fileName: string; format?: ImportFormat; insertedCount?: number; failedCount?: number; cancelled?: boolean };
 
@@ -1104,7 +1142,13 @@ export type FeatureHintId =
   | 'refs.configure'
   | 'tabs.pin'
   | 'saved.create'
-  | 'palette.discover';
+  | 'palette.discover'
+  | 'suggestions.keyboard'
+  | 'startup.restore'
+  | 'monitor.live'
+  | 'monitor.profiler'
+  | 'indexes.usage'
+  | 'find.options';
 
 export interface FeatureHintDismissalState {
   dismissedIds: FeatureHintId[];
@@ -1204,6 +1248,10 @@ export interface CollectionCreateOptions {
   viewOn?: string;
   /** EJSON canonical array of stages; write stages are refused. */
   pipeline?: string;
+  /** Clustered collection keyed on `_id` (MongoDB 5.3+); excludes capped, timeseries and views. */
+  clustered?: boolean;
+  /** Optional name of the clustered index. */
+  clusteredIndexName?: string;
 }
 
 export interface CollectionCreateInput {
@@ -1287,7 +1335,40 @@ export interface RoleInfo {
   role: string;
   db: string;
   isBuiltin: boolean;
+  /** Direct parents only — what `createRole`/`updateRole` take as `roles`. */
+  roles: UserRoleRef[];
+  /** Transitive closure of `roles`; display only, never sent back on save. */
   inheritedRoles: UserRoleRef[];
+  /** EJSON canonical array of the role's own (non-inherited) privileges. */
+  privileges?: string;
+}
+
+export interface RoleCreateInput {
+  connectionId: string;
+  dbName: string;
+  role: string;
+  /** EJSON canonical array of privilege documents; may be `[]`. */
+  privileges: string;
+  /** Inherited roles; may be empty. */
+  roles: UserRoleRef[];
+}
+
+export interface RoleUpdateInput {
+  connectionId: string;
+  dbName: string;
+  role: string;
+  patch: {
+    /** EJSON canonical array. Replaces the privilege list if present. */
+    privileges?: string;
+    /** Replaces the inherited-role list if present. */
+    roles?: UserRoleRef[];
+  };
+}
+
+export interface RoleDropInput {
+  connectionId: string;
+  dbName: string;
+  role: string;
 }
 
 export interface UserCreateInput {
@@ -1327,6 +1408,41 @@ export interface UserDropInput {
   connectionId: string;
   dbName: string;
   username: string;
+}
+
+// ─── Monitor tab (C06 §9) ────────────────────────────────────────────────────
+
+/** One row of `$currentOp`, trimmed to what the Monitor table shows. */
+export interface CurrentOpSummary {
+  /**
+   * `String()` of the server's opid: a number on mongod, `"shard:id"` on mongos.
+   * Absent on a row the server gives no opid; such a row cannot be killed.
+   */
+  opid?: string;
+  op: string;
+  ns?: string;
+  secsRunning?: number;
+  client?: string;
+  desc?: string;
+  planSummary?: string;
+  /**
+   * Canonical EJSON of the op's command, secret-named fields masked. Past 2000
+   * code points it is cut and ends in "… (truncated)", so it is not always valid JSON.
+   */
+  command: string;
+}
+
+export interface CurrentOpInput {
+  connectionId: string;
+  activeOnly?: boolean;
+  minSecsRunning?: number;
+}
+
+export type ProfileLevel = 0 | 1 | 2;
+
+export interface ProfileStatus {
+  level: ProfileLevel;
+  slowms: number;
 }
 
 // ─── Mongo shell pane (W11) ──────────────────────────────────────────────────

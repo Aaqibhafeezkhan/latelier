@@ -616,6 +616,121 @@ describe('DbCollectionNavigator — views and the connection string', () => {
     expect(modify).not.toHaveBeenCalled();
   });
 
+  it('view menu "Duplicate view…" opens a prefilled dialog; Create makes <name>_copy verbatim and refreshes the DB', async () => {
+    const listCollections = vi.fn(async () => VIEW_ROWS);
+    const pipeline = '[{"$match":{"a":{"$numberInt":"1"}}}]';
+    const collectionDetails = vi.fn(async () => ({
+      name: 'recent',
+      type: 'view' as const,
+      capped: false,
+      options: { viewOn: 'orders', pipeline, collation: '{"locale":"fr"}' },
+    }));
+    const create = vi.fn(async (input: { collection: string }) => ({ name: input.collection }));
+    baseMocks({
+      meta: { listDatabases: async () => [{ name: 'shop', sizeOnDisk: 1, empty: false }], listCollections, collectionDetails },
+      collection: { create },
+    });
+
+    mountNavigator();
+    await screen.findByText('recent');
+    const initialCalls = listCollections.mock.calls.length;
+
+    fireEvent.contextMenu(screen.getByTestId('nav-coll-shop-recent'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate view…' }));
+
+    const name = (await screen.findByLabelText('View name')) as HTMLInputElement;
+    expect(name.value).toBe('recent_copy');
+    expect(collectionDetails).toHaveBeenCalledWith({ connectionId: 'c1', dbName: 'shop', collection: 'recent' });
+    fireEvent.click(screen.getByRole('button', { name: 'Create view' }));
+
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith({
+        connectionId: 'c1',
+        dbName: 'shop',
+        collection: 'recent_copy',
+        options: { viewOn: 'orders', pipeline, collation: '{"locale":"fr"}' },
+      }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText('View name')).toBeNull());
+    await waitFor(() => expect(listCollections.mock.calls.length).toBeGreaterThan(initialCalls));
+  });
+
+  it('"Duplicate view…" reports an unreadable view instead of opening the dialog', async () => {
+    baseMocks({
+      meta: {
+        listDatabases: async () => [{ name: 'shop', sizeOnDisk: 1, empty: false }],
+        listCollections: async () => VIEW_ROWS,
+        collectionDetails: async () => {
+          throw { code: 'NOT_FOUND', message: 'view recent is gone' };
+        },
+      },
+    });
+
+    mountNavigator();
+    await screen.findByText('recent');
+    fireEvent.contextMenu(screen.getByTestId('nav-coll-shop-recent'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate view…' }));
+
+    await screen.findByText(/view recent is gone/);
+    expect(screen.queryByLabelText('View name')).toBeNull();
+  });
+
+  it('"Duplicate view…" on two views in quick succession opens only the latest, whatever order the reads finish in', async () => {
+    const resolvers: Record<string, () => void> = {};
+    const details = (name: string) => ({
+      name,
+      type: 'view' as const,
+      capped: false,
+      options: { viewOn: `${name}_src`, pipeline: '[]' },
+    });
+    const collectionDetails = vi.fn(
+      ({ collection }: { collection: string }) =>
+        new Promise<ReturnType<typeof details>>((r) => (resolvers[collection] = () => r(details(collection)))),
+    );
+    baseMocks({
+      meta: {
+        listDatabases: async () => [{ name: 'shop', sizeOnDisk: 1, empty: false }],
+        listCollections: async () => [
+          { name: 'first', type: 'view' as const, capped: false },
+          { name: 'second', type: 'view' as const, capped: false },
+        ],
+        collectionDetails: collectionDetails as never,
+      },
+    });
+
+    mountNavigator();
+    await screen.findByText('first');
+    for (const name of ['first', 'second']) {
+      fireEvent.contextMenu(screen.getByTestId(`nav-coll-shop-${name}`));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate view…' }));
+    }
+    await waitFor(() => expect(collectionDetails).toHaveBeenCalledTimes(2));
+
+    resolvers.second!();
+    expect(((await screen.findByLabelText('View name')) as HTMLInputElement).value).toBe('second_copy');
+    resolvers.first!();
+    await new Promise((r) => setTimeout(r, 20));
+    expect((screen.getByLabelText('View name') as HTMLInputElement).value).toBe('second_copy');
+    expect(screen.getByText(/A copy of second on shop\.second_src/)).toBeTruthy();
+    expect(screen.getByText(/same pipeline and collation/)).toBeTruthy();
+    expect(screen.queryByText(/runs the enabled stages/)).toBeNull();
+  });
+
+  it('"Duplicate view…" is offered on views only', async () => {
+    baseMocks({
+      meta: {
+        listDatabases: async () => [{ name: 'shop', sizeOnDisk: 1, empty: false }],
+        listCollections: async () => VIEW_ROWS,
+      },
+    });
+
+    mountNavigator();
+    await screen.findByText('recent');
+    fireEvent.contextMenu(screen.getByTestId('nav-coll-shop-orders'));
+    expect(screen.queryByRole('menuitem', { name: 'Duplicate view…' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Rename collection' })).toBeTruthy();
+  });
+
   it('no menu item is left as a "Coming soon" stub', async () => {
     baseMocks({
       meta: {

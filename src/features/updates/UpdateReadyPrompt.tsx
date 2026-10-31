@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { api, getErrorMessage } from '../../api/atelier';
+import { logFailure } from '../../utils/rendererLog';
 import { notify } from '../../theme/notifications';
 import type { UpdateState } from '@shared/types';
 
@@ -32,10 +33,9 @@ export function UpdateReadyPrompt() {
     api.updates
       .getState()
       .then(onState)
-      .catch(() => {
-        // Deliberate: the prompt is optional. A failed read leaves it unshown,
-        // and an update that is ready still installs on quit.
-      });
+      // The prompt is optional: a failed read leaves it unshown, and an update
+      // that is ready still installs on quit.
+      .catch((err) => logFailure('reading the update state', err));
     return api.updates.onState(onState);
   }, []);
   return null;

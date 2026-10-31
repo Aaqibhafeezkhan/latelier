@@ -28,6 +28,7 @@ const { registerCollectionAdminChannels } = await import(
   '../../electron/ipc/handlers/collectionAdmin'
 );
 const { registerUserChannels } = await import('../../electron/ipc/handlers/users');
+const { registerAdminChannels } = await import('../../electron/ipc/handlers/admin');
 const { registerPrefsChannels } = await import('../../electron/ipc/handlers/prefs');
 const { registerSecretsChannels } = await import('../../electron/ipc/handlers/secrets');
 const { registerTabsChannels } = await import('../../electron/ipc/handlers/tabs');
@@ -100,6 +101,7 @@ const PUSH_EVENT_CHANNELS = new Set<string>([
   IPC_CHANNELS.mshellOutputEvent,
   IPC_CHANNELS.dataImportProgressEvent,
   IPC_CHANNELS.appMenuCommandEvent,
+  IPC_CHANNELS.appFlushRequestEvent,
   IPC_CHANNELS.updatesStateEvent,
 ]);
 
@@ -130,6 +132,7 @@ describe('IPC channel registration — full router coverage', () => {
       stubSvc<Parameters<typeof registerCollectionAdminChannels>[1]>(),
     );
     registerUserChannels(router, stubSvc<Parameters<typeof registerUserChannels>[1]>());
+    registerAdminChannels(router, stubSvc<Parameters<typeof registerAdminChannels>[1]>());
     registerPrefsChannels(
       router,
       stubSvc<Parameters<typeof registerPrefsChannels>[1]>(),
@@ -139,6 +142,7 @@ describe('IPC channel registration — full router coverage', () => {
       router,
       stubSvc<Parameters<typeof registerSecretsChannels>[1]>(),
       async () => false,
+      () => ({ columnKeyProtected: true }),
     );
     registerTabsChannels(router, stubSvc<Parameters<typeof registerTabsChannels>[1]>());
     registerQueryChannels(

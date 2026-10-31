@@ -1,4 +1,5 @@
 import React from 'react';
+import { ActionIcon, Tooltip, UnstyledButton } from '@mantine/core';
 import {
   List,
   useDynamicRowHeight,
@@ -8,7 +9,6 @@ import {
 import { useRovingFocus } from '../../../hooks/useRovingFocus';
 import { useMenuFocus } from '../../../hooks/useMenuFocus';
 import { isContextMenuKey, isEditKey, anchorForRow, anchorFromRect } from '../../../utils/contextMenuKey';
-import { Popover } from '@mantine/core';
 import { I } from '../../../icons';
 import { isRecord, toDisplayValue, valueToClipboardText } from '../../../utils/displayValue';
 import { ownGet, ownSet } from '../../../utils/ownProperty';
@@ -28,6 +28,7 @@ import { DocFieldTree, type FieldMenuOpenPayload } from './DocFieldTree';
 import { getDocId, getFullDocId, isInlineEditableKind, reviveTableValue } from './docId';
 import { kindOf, parseAs, textOf, type FieldKind } from '../documentFieldTypes';
 import { SelectToggle } from './SelectToggle';
+import { FullValuePopover } from './FullValuePopover';
 import { RowActionsMenu } from './RowActionsMenu';
 import { FieldActionsMenu } from './FieldActionsMenu';
 import { useAddToFilter } from './useAddToFilter';
@@ -38,6 +39,7 @@ import {
   deriveColumns,
   resolveColumns,
   getValueAtPath,
+  nestedReferenceFor,
   ariaSortFor,
   type ResolvedColumn,
 } from './tableColumns';
@@ -140,6 +142,9 @@ interface TableCellProps {
   cellKey: string;
   isCopied: boolean;
   rule?: ReferenceRule;
+  /** Set when the chip belongs to a nested path of an object cell: the chip acts on this path and value instead of the cell's. */
+  refPath?: string;
+  refValue?: unknown;
   onCopyCell: (text: string, cellKey: string) => void;
   onContextMenu: (
     e: React.MouseEvent,
@@ -167,6 +172,8 @@ function TableCell({
   cellKey,
   isCopied,
   rule,
+  refPath,
+  refValue,
   onCopyCell,
   onContextMenu,
   onRefHover,
@@ -400,6 +407,9 @@ function TableCell({
         fontWeight: isCopied ? 600 : 400,
         boxSizing: 'border-box',
       }}
+      // The native title carries both mouse-only gestures. A Mantine Tooltip
+      // per cell would mount a floating-ui instance per cell of a
+      // virtualized grid, and cells never take focus to trigger one anyway.
       title={
         draggable
           ? `Drag to add "${fieldPath} $eq …" to builder · double-click to copy`
@@ -524,9 +534,9 @@ function TableCell({
           </span>
           <ReferenceChip
             rule={rule}
-            onHover={(rect) => onRefHover?.(rule, value, rect)}
+            onHover={(rect) => onRefHover?.(rule, refPath ? refValue : value, rect)}
             onLeave={() => onRefHoverLeave?.()}
-            onClick={() => onRefOpen?.(rule, fieldPath, value)}
+            onClick={() => onRefOpen?.(rule, refPath ?? fieldPath, refPath ? refValue : value)}
           />
         </span>
       ) : (
@@ -543,7 +553,11 @@ function TableCell({
           a sentinel-typed or computed cell can't be silently corrupted via
           `$set`. */}
       {canInlineEdit && kind !== 'boolean' && !editing && (
-        <button
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size={16}
+          c="var(--atelier-text-ghost)"
           aria-label="Edit cell value"
           onClick={(e) => {
             e.stopPropagation();
@@ -556,21 +570,12 @@ function TableCell({
             transform: 'translateY(-50%)',
             opacity: affordanceVisible ? 1 : 0,
             pointerEvents: affordanceVisible ? 'auto' : 'none',
-            width: 16,
-            height: 16,
-            padding: 0,
-            border: 'none',
             borderRadius: 3,
             background: 'var(--atelier-surface-raised)',
-            color: 'var(--atelier-text-ghost)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
           }}
         >
           {I.edit}
-        </button>
+        </ActionIcon>
       )}
 
       {/* W18 §8 — a field this cell can't edit inline (Date, ObjectId,
@@ -578,7 +583,11 @@ function TableCell({
           Document Editor on the field rather than turning the cell itself
           into an input. */}
       {canOpenEditorHere && (
-        <button
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size={16}
+          c="var(--atelier-text-ghost)"
           aria-label="Edit cell value"
           onClick={(e) => {
             e.stopPropagation();
@@ -591,21 +600,12 @@ function TableCell({
             transform: 'translateY(-50%)',
             opacity: affordanceVisible ? 1 : 0,
             pointerEvents: affordanceVisible ? 'auto' : 'none',
-            width: 16,
-            height: 16,
-            padding: 0,
-            border: 'none',
             borderRadius: 3,
             background: 'var(--atelier-surface-raised)',
-            color: 'var(--atelier-text-ghost)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
           }}
         >
           {I.edit}
-        </button>
+        </ActionIcon>
       )}
 
       {/* AC5 — click-to-expand: hover-revealed affordance opens a
@@ -613,64 +613,13 @@ function TableCell({
           row-select / drag / dblclick-copy / contextmenu (own
           stopPropagation, and pointer-events are off until hovered). */}
       {draggable && !editing && (
-        <Popover
+        <FullValuePopover
+          display={String(display)}
+          isString={dv.type === 'string'}
           opened={expandOpen}
           onChange={setExpandOpen}
-          position="bottom-start"
-          withinPortal
-          shadow="md"
-          // #79 — without this, closing on a click outside a focusable
-          // element drops focus to <body>. Safe here because this dropdown
-          // has no focusable content to autofocus (see `FieldsControl`'s
-          // comment for why an autofocus would break this).
-          returnFocus
-        >
-          <Popover.Target>
-            <button
-              aria-label="Expand cell value"
-              onClick={(e) => {
-                e.stopPropagation();
-                setExpandOpen(true);
-              }}
-              style={{
-                position: 'absolute',
-                right: 2,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                opacity: affordanceVisible ? 1 : 0,
-                pointerEvents: affordanceVisible ? 'auto' : 'none',
-                width: 16,
-                height: 16,
-                padding: 0,
-                border: 'none',
-                borderRadius: 3,
-                background: 'var(--atelier-surface-raised)',
-                color: 'var(--atelier-text-ghost)',
-                cursor: 'pointer',
-                fontSize: 10,
-                lineHeight: '16px',
-              }}
-            >
-              ⤢
-            </button>
-          </Popover.Target>
-          <Popover.Dropdown>
-            <div
-              style={{
-                maxWidth: 320,
-                maxHeight: 240,
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                fontFamily: '"JetBrains Mono", monospace',
-                fontSize: 11,
-                color: 'var(--atelier-text)',
-              }}
-            >
-              {dv.type === 'string' ? `"${display}"` : display}
-            </div>
-          </Popover.Dropdown>
-        </Popover>
+          visible={affordanceVisible}
+        />
       )}
     </div>
   );
@@ -880,30 +829,24 @@ function TableRowImpl({
             docLabel={getDocId(doc)}
             onToggle={() => onToggleSelect(index)}
           />
-          <button
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size={20}
+            c="var(--atelier-text-ghost)"
             onClick={(e) => {
               e.stopPropagation();
               onRowExpand(docId, !isExpanded);
             }}
             aria-label={isExpanded ? 'Collapse document' : 'Expand document'}
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 20,
-              height: 20,
-              padding: 0,
-              background: 'none',
-              border: 'none',
-              color: 'var(--atelier-text-ghost)',
-              cursor: 'pointer',
               flexShrink: 0,
               transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
               transition: 'transform 120ms',
             }}
           >
             {I.chevD}
-          </button>
+          </ActionIcon>
         </div>
 
         {columns.map((col) => {
@@ -919,13 +862,26 @@ function TableRowImpl({
           const cellKey = `${index}:${col.field}`;
           const isCopied = copiedCell === cellKey;
           const width = ownGet(widths, col.field) ?? 160;
-          const rule = val !== undefined ? refsByField?.get(fieldPath) : undefined;
+          const directRule = val !== undefined ? refsByField?.get(fieldPath) : undefined;
+          // A rule on a dotted path inside an object cell never matches the
+          // column key, so the parent cell carries the chip for the nested
+          // value instead.
+          // ponytail: first nested rule only; a cell with several nested references shows one chip — list them in the hover card if that bites.
+          const nested =
+            !directRule &&
+            col.kind === 'field' &&
+            toDisplayValue(val).type === 'object'
+              ? nestedReferenceFor(col.field, doc, refsByField)
+              : null;
+          const rule = directRule ?? nested?.rule;
 
           return (
             <TableCell
               key={col.field}
               value={val}
               fieldPath={fieldPath}
+              refPath={nested?.path}
+              refValue={nested?.value}
               isFieldColumn={col.kind === 'field'}
               doc={doc}
               width={width}
@@ -976,75 +932,57 @@ function TableRowImpl({
           onFocus={() => setActionsFocused(true)}
           onBlur={() => setActionsFocused(false)}
         >
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onEditDoc(doc);
-            }}
-            title="Edit document"
-            aria-label={`Edit document ${getDocId(doc)}`}
-            style={{
-              background: 'none',
-              border: '1px solid var(--atelier-border)',
-              borderRadius: 'var(--atelier-radius-xs)',
-              padding: '3px 5px',
-              cursor: 'pointer',
-              color: 'var(--atelier-text-muted)',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            {I.edit}
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDeleteDoc(doc);
-            }}
-            title="Delete document"
-            aria-label={`Delete document ${getDocId(doc)}`}
-            style={{
-              background: 'none',
-              border: '1px solid var(--atelier-border)',
-              borderRadius: 'var(--atelier-radius-xs)',
-              padding: '3px 5px',
-              cursor: 'pointer',
-              color: 'var(--atelier-red)',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            {I.trash}
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              // A keyboard-activated click (Enter/Space) reports `detail:
-              // 0` in Chromium (the app's only runtime — a mouse click is
-              // always >= 1); only that path grabs focus into the menu and
-              // returns it to this button on dismiss, matching the
-              // keyboard-open convention the field/cell menus above use.
-              const viaKeyboard = e.detail === 0;
-              onOpenRowMenu(doc, anchorFromRect(e.currentTarget.getBoundingClientRect()), {
-                returnFocusTo: viaKeyboard ? e.currentTarget : undefined,
-                focusMenuOnOpen: viaKeyboard,
-              });
-            }}
-            title="More actions"
-            aria-label={`More actions for document ${getDocId(doc)}`}
-            style={{
-              background: 'none',
-              border: '1px solid var(--atelier-border)',
-              borderRadius: 'var(--atelier-radius-xs)',
-              padding: '3px 5px',
-              cursor: 'pointer',
-              color: 'var(--atelier-text-muted)',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            {I.more}
-          </button>
+          <Tooltip label="Edit document" withArrow openDelay={400}>
+            <ActionIcon
+              variant="default"
+              size="sm"
+              c="var(--atelier-text-muted)"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditDoc(doc);
+              }}
+              aria-label={`Edit document ${getDocId(doc)}`}
+            >
+              {I.edit}
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Delete document" withArrow openDelay={400}>
+            <ActionIcon
+              variant="default"
+              size="sm"
+              c="var(--atelier-red)"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteDoc(doc);
+              }}
+              aria-label={`Delete document ${getDocId(doc)}`}
+            >
+              {I.trash}
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="More actions" withArrow openDelay={400}>
+            <ActionIcon
+              variant="default"
+              size="sm"
+              c="var(--atelier-text-muted)"
+              onClick={(e) => {
+                e.stopPropagation();
+                // A keyboard-activated click (Enter/Space) reports `detail:
+                // 0` in Chromium (the app's only runtime — a mouse click is
+                // always >= 1); only that path grabs focus into the menu and
+                // returns it to this button on dismiss, matching the
+                // keyboard-open convention the field/cell menus above use.
+                const viaKeyboard = e.detail === 0;
+                onOpenRowMenu(doc, anchorFromRect(e.currentTarget.getBoundingClientRect()), {
+                  returnFocusTo: viaKeyboard ? e.currentTarget : undefined,
+                  focusMenuOnOpen: viaKeyboard,
+                });
+              }}
+              aria-label={`More actions for document ${getDocId(doc)}`}
+            >
+              {I.more}
+            </ActionIcon>
+          </Tooltip>
         </div>
       </div>
 
@@ -1724,7 +1662,7 @@ export function TableView({
                   the button, since a <div> inside a <button> is an invalid
                   content model. This gets native Enter/Space for free. */}
               {sortable ? (
-                <button
+                <UnstyledButton
                   type="button"
                   onClick={() => onSortField?.(col.field)}
                   style={{
@@ -1734,17 +1672,11 @@ export function TableView({
                     alignItems: 'center',
                     gap: 4,
                     padding: '5px 8px',
-                    margin: 0,
-                    border: 'none',
-                    background: 'none',
                     font: 'inherit',
-                    color: 'inherit',
-                    textAlign: 'left',
-                    cursor: 'pointer',
                   }}
                 >
                   {labelContent}
-                </button>
+                </UnstyledButton>
               ) : (
                 labelContent
               )}

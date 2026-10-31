@@ -5,10 +5,18 @@ import { render, screen, waitFor, fireEvent, act } from '../helpers/render';
 import { DarkCtx } from '../../src/ThemeContext';
 import { AggregationTab } from '../../src/pages/Workspace/Aggregation/AggregationTab';
 import { notifications } from '@mantine/notifications';
+import { commandRegistry } from '../../src/commands/registry';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { invalidateSampleSchemaCache } from '../../src/features/fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
 import { DEFAULT_AGGREGATION_TAB_STATE } from '@shared/defaults';
 import type { AggregationTabState, AggStagePreview } from '@shared/types';
+
+// Spied so each write path can be checked for dropping the cached enum suggestions.
+vi.mock('../../src/features/fieldSuggestions/sources/schemaEnumSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/features/fieldSuggestions/sources/schemaEnumSource')>()),
+  invalidateSchemaEnumCache: vi.fn(),
+}));
 
 // Mocked at the exact module AggregationTab imports; the rest stays real
 // because the tab reaches the suggestion sources through their barrel.
@@ -574,7 +582,10 @@ describe('AggregationTab — field-suggestion sample after a write run', () => {
   };
   const ranOk = { rows: [], durationMs: 1, stageCounts: {}, stageSamples: {}, hasMore: false };
 
-  beforeEach(() => invalidate.mockClear());
+  beforeEach(() => {
+    invalidate.mockClear();
+    vi.mocked(invalidateSchemaEnumCache).mockClear();
+  });
 
   it('is dropped for the connection once the confirmed write run settles', async () => {
     const run = vi.fn(async (input: { allowWrite?: boolean }) => {
@@ -590,6 +601,7 @@ describe('AggregationTab — field-suggestion sample after a write run', () => {
     await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
     expect(run.mock.calls[1]![0]).toMatchObject({ allowWrite: true });
     await waitFor(() => expect(invalidate).toHaveBeenCalledExactlyOnceWith('c1'));
+    await waitFor(() => expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('c1'));
   });
 
   it('is dropped even when the confirmed write run fails part-way', async () => {
@@ -603,6 +615,7 @@ describe('AggregationTab — field-suggestion sample after a write run', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Proceed' }));
 
     await waitFor(() => expect(invalidate).toHaveBeenCalledExactlyOnceWith('c1'));
+    await waitFor(() => expect(invalidateSchemaEnumCache).toHaveBeenCalledExactlyOnceWith('c1'));
   });
 
   it('is kept while the write is still unconfirmed, and after a cancelled confirmation', async () => {
@@ -617,11 +630,13 @@ describe('AggregationTab — field-suggestion sample after a write run', () => {
     // own run button also reads "Cancel".
     await screen.findByRole('button', { name: 'Proceed' });
     expect(invalidate).not.toHaveBeenCalled(); // blocked, nothing written yet
+    expect(invalidateSchemaEnumCache).not.toHaveBeenCalled(); // blocked, nothing written yet
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await act(async () => {});
 
     expect(run).toHaveBeenCalledTimes(1);
     expect(invalidate).not.toHaveBeenCalled();
+    expect(invalidateSchemaEnumCache).not.toHaveBeenCalled();
   });
 
   it('is kept by a run with no write stage', async () => {
@@ -636,6 +651,7 @@ describe('AggregationTab — field-suggestion sample after a write run', () => {
 
     await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
     expect(invalidate).not.toHaveBeenCalled();
+    expect(invalidateSchemaEnumCache).not.toHaveBeenCalled();
   });
 });
 
@@ -687,6 +703,30 @@ describe('AggregationTab — cancelling a run', () => {
     return { run, cancel };
   }
 
+  it('a refused cancel is logged and shown to the user', async () => {
+    const log = vi.fn<IpcApi['app']['log']>(async () => undefined);
+    installAtelierMock({
+      app: { log },
+      agg: {
+        run: (() => new Promise(() => {})) as never,
+        cancel: async () => {
+          throw { code: 'INTERNAL', message: 'no such run' };
+        },
+      },
+    });
+    renderStatefulTab({
+      ...DEFAULT_AGGREGATION_TAB_STATE,
+      stages: [{ id: 1, op: '$match', body: '{}', enabled: true }],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText('Cancel failed')).toBeTruthy();
+    expect(screen.getByText('no such run')).toBeTruthy();
+    expect(log).toHaveBeenCalledWith({ level: 'warn', message: 'aggregation cancel failed: no such run', source: 'component' });
+  });
+
   it('a cancelled write run that completes shows its result and says the write ran to completion', async () => {
     const pending = deferred<typeof ranOk>();
     const { run, cancel } = await startWriteRun(pending.promise);
@@ -697,13 +737,13 @@ describe('AggregationTab — cancelling a run', () => {
     expect(cancel).toHaveBeenCalledExactlyOnceWith({ token });
     expect((await screen.findByRole('button', { name: /Stopping/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(
-      await screen.findByText("A write stage can't be interrupted once it has started."),
+      await screen.findByText('Asking the server to stop the write stage.'),
     ).toBeTruthy();
 
     await act(async () => pending.resolve(ranOk));
 
     expect(
-      await screen.findByText('The write had already started, so it ran to completion.'),
+      await screen.findByText("The write couldn't be stopped, so it ran to completion."),
     ).toBeTruthy();
     expect(screen.queryByText('· 7ms')).not.toBeNull();
     expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(false);
@@ -719,8 +759,54 @@ describe('AggregationTab — cancelling a run', () => {
 
     expect((await screen.findByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText(/ran to completion/)).toBeNull();
+    expect(screen.queryByText(/Write stopped/)).toBeNull();
     expect(screen.queryByText(/cancelled/)).toBeNull();
     expect(screen.queryByText('· 7ms')).toBeNull();
+  });
+
+  it('a $out write killed on the server says its target was left unchanged', async () => {
+    const pending = deferred<typeof ranOk>();
+    await startWriteRun(pending.promise);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await screen.findByRole('button', { name: /Stopping/ });
+    await act(async () =>
+      pending.reject({
+        code: 'INTERNAL',
+        message: 'cancelled',
+        details: { writeStageOp: '$out', partialWrite: false },
+      }),
+    );
+
+    expect(
+      await screen.findByText('Write stopped. The $out target was left unchanged.'),
+    ).toBeTruthy();
+    expect(screen.queryByText(/ran to completion/)).toBeNull();
+    expect(screen.queryByText('· 7ms')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('a $merge write killed on the server warns that some documents may already be written', async () => {
+    const pending = deferred<typeof ranOk>();
+    await startWriteRun(pending.promise);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await screen.findByRole('button', { name: /Stopping/ });
+    await act(async () =>
+      pending.reject({
+        code: 'INTERNAL',
+        message: 'cancelled',
+        details: { writeStageOp: '$merge', partialWrite: true },
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        'Write stopped. $merge may already have written some documents, and they stay in the target.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/left unchanged/)).toBeNull();
+    expect((screen.getByRole('button', { name: 'Run' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('a cancelled write run that then fails shows the error, not a completion notice', async () => {
@@ -765,5 +851,232 @@ describe('AggregationTab — cancelling a run', () => {
     await act(async () => pending.resolve(ranOk));
     expect(screen.queryByText('· 7ms')).toBeNull();
     expect(screen.queryByText(/ran to completion/)).toBeNull();
+  });
+});
+
+// A successful run records the values its leading `$match` stages carried,
+// so the builder's value popover can offer them later.
+describe('AggregationTab — value recording', () => {
+  const ranOk = { rows: [], durationMs: 1, stageCounts: {}, stageSamples: {}, hasMore: false };
+
+  it('records the leading $match values after a successful run', async () => {
+    const run = vi.fn(async () => ranOk);
+    const recordFieldValues = vi.fn(async () => ({ recorded: 1 }));
+    installAtelierMock({
+      agg: { run: run as never, cancel: async () => undefined },
+      recent: { recordFieldValues: recordFieldValues as never } as never,
+    });
+    renderStatefulTab({
+      ...DEFAULT_AGGREGATION_TAB_STATE,
+      stages: [
+        { id: 1, op: '$match', body: '{ status: "x" }', enabled: true },
+        { id: 2, op: '$group', body: '{ _id: "$kind" }', enabled: true },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+    await waitFor(() =>
+      expect(recordFieldValues).toHaveBeenCalledExactlyOnceWith({
+        connectionId: 'c1',
+        dbName: 'app',
+        collection: 'orders',
+        entries: [{ field: 'status', value: 'x', valType: 'string', op: '$eq' }],
+      }),
+    );
+  });
+
+  it('records nothing for a pipeline without a leading $match', async () => {
+    const run = vi.fn(async () => ranOk);
+    const recordFieldValues = vi.fn(async () => ({ recorded: 0 }));
+    installAtelierMock({
+      agg: { run: run as never, cancel: async () => undefined },
+      recent: { recordFieldValues: recordFieldValues as never } as never,
+    });
+    renderStatefulTab({
+      ...DEFAULT_AGGREGATION_TAB_STATE,
+      stages: [{ id: 1, op: '$limit', body: '10', enabled: true }],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    // Let the resolved run settle before asserting the absence.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(recordFieldValues).not.toHaveBeenCalled();
+  });
+});
+
+describe('AggregationTab — Copy menu (#23)', () => {
+  let writeText: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  });
+  afterEach(() => {
+    delete (navigator as { clipboard?: Clipboard }).clipboard;
+    notifications.clean();
+  });
+
+  const pipelineState = (body: string): AggregationTabState => ({
+    ...DEFAULT_AGGREGATION_TAB_STATE,
+    stages: [
+      { id: 1, op: '$match', body, enabled: true },
+      { id: 2, op: '$limit', body: '5', enabled: false },
+    ],
+  });
+
+  const copyAs = async (label: string) => {
+    fireEvent.click(screen.getByRole('button', { name: 'Copy pipeline' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: label }));
+  };
+
+  it('copies the enabled stages as a Canonical EJSON array, repairing Shell Syntax', async () => {
+    const { onPatch } = renderTab(pipelineState('{ status: "open" }'));
+    await copyAs('Pipeline (EJSON array)');
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('[{"$match":{"status":"open"}}]'));
+    // Copying repairs a copy of the bodies, never the tab's own.
+    expect(onPatch).not.toHaveBeenCalled();
+  });
+
+  it('copies a driver snippet that keeps an ObjectId through EJSON.parse', async () => {
+    renderTab(pipelineState('{ _id: ObjectId("64b7f0c2a1b2c3d4e5f60718") }'));
+    await copyAs('mongosh');
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0]![0]).toBe(
+      'db.getCollection("orders").aggregate([{"$match":{"_id":EJSON.parse(' +
+        JSON.stringify('{"$oid":"64b7f0c2a1b2c3d4e5f60718"}') +
+        ', { relaxed: false })}}])',
+    );
+  });
+
+  it('is disabled while the pipeline does not validate', () => {
+    renderTab(pipelineState('{ a: '));
+    expect((screen.getByRole('button', { name: 'Copy pipeline' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// jsdom never blurs an element that goes `disabled`, and the e2e suite cannot
+// inject IPC latency, so the focus drop itself is unobservable here; what the
+// fix guarantees (and what is asserted) is that Save never takes the real
+// `disabled` attribute, which is what makes Chromium blur it.
+describe('AggregationTab — Save stays focusable when it goes inert', () => {
+  const savedState = {
+    ...DEFAULT_AGGREGATION_TAB_STATE,
+    stages: [{ id: 1, op: '$match', body: '{}', enabled: true }],
+    savedId: 's1',
+    name: 'p',
+  } satisfies AggregationTabState;
+
+  const updateOk = async () => ({
+    id: 's1',
+    connectionId: 'c1',
+    name: 'p',
+    dbName: 'app',
+    collection: 'orders',
+    kind: 'aggregation' as const,
+    payload: { kind: 'aggregation' as const, stages: [] },
+    createdAt: '',
+    updatedAt: '',
+  });
+
+  it('a clean pipeline: Save is aria-disabled, not disabled, and a click saves nothing', () => {
+    const update = vi.fn<IpcApi['saved']['update']>(updateOk);
+    installAtelierMock({ saved: { update } });
+    renderStatefulTab(savedState);
+
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save.hasAttribute('disabled')).toBe(false);
+    expect(save.getAttribute('aria-disabled')).toBe('true');
+
+    fireEvent.click(save);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('a successful save clears dirty without taking focus off the button', async () => {
+    const update = vi.fn<IpcApi['saved']['update']>(updateOk);
+    installAtelierMock({ saved: { update } });
+    renderStatefulTab({ ...savedState, dirty: true });
+
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save.hasAttribute('aria-disabled')).toBe(false);
+    save.focus();
+    fireEvent.click(save);
+
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save' }).getAttribute('aria-disabled')).toBe('true'),
+    );
+    const after = screen.getByRole('button', { name: 'Save' });
+    expect(after.hasAttribute('disabled')).toBe(false);
+    expect(document.activeElement).toBe(after);
+  });
+});
+
+// The palette command reaches the same save as the button, so the button's
+// inert states (nothing changed, a run in flight) have to hold for it too.
+describe('AggregationTab — the "Save pipeline" palette command', () => {
+  const savedState = {
+    ...DEFAULT_AGGREGATION_TAB_STATE,
+    stages: [{ id: 1, op: '$match', body: '{}', enabled: true }],
+    savedId: 's1',
+    name: 'p',
+  } satisfies AggregationTabState;
+
+  const updateOk = async () => ({
+    id: 's1',
+    connectionId: 'c1',
+    name: 'p',
+    dbName: 'app',
+    collection: 'orders',
+    kind: 'aggregation' as const,
+    payload: { kind: 'aggregation' as const, stages: [] },
+    createdAt: '',
+    updatedAt: '',
+  });
+
+  function runSaveCommand() {
+    const cmd = commandRegistry.list().find((c) => c.id === 'agg.save');
+    if (!cmd) throw new Error('agg.save is not registered');
+    act(() => {
+      void cmd.perform({ pathname: '/workspace', connectionId: 'c1' });
+    });
+  }
+
+  it('saves nothing on a clean pipeline', async () => {
+    const update = vi.fn<IpcApi['saved']['update']>(updateOk);
+    installAtelierMock({ saved: { update } });
+    renderStatefulTab(savedState);
+
+    runSaveCommand();
+    await act(async () => {});
+
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('saves nothing while a run is in flight', async () => {
+    const update = vi.fn<IpcApi['saved']['update']>(updateOk);
+    const run = vi.fn<IpcApi['agg']['run']>(() => new Promise(() => {}));
+    installAtelierMock({ saved: { update }, agg: { run } });
+    renderStatefulTab({ ...savedState, dirty: true });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    runSaveCommand();
+    await act(async () => {});
+
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('still saves a dirty, idle pipeline', async () => {
+    const update = vi.fn<IpcApi['saved']['update']>(updateOk);
+    installAtelierMock({ saved: { update } });
+    renderStatefulTab({ ...savedState, dirty: true });
+
+    runSaveCommand();
+
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
   });
 });

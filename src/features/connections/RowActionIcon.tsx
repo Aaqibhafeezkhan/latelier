@@ -17,21 +17,28 @@ import { ActionIcon, Tooltip } from '@mantine/core';
 export function RowActionIcon({
   label,
   color = 'gray',
+  pressed,
+  tooltip,
   onClick,
   children,
 }: {
   label: string;
   color?: 'gray' | 'red';
+  /** Makes this a toggle button; omitted for a plain action. */
+  pressed?: boolean;
+  /** Hover text when it should differ from the accessible name (a toggle keeps one name). */
+  tooltip?: string;
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   children: React.ReactNode;
 }) {
   return (
-    <Tooltip label={label} withArrow openDelay={400}>
+    <Tooltip label={tooltip ?? label} withArrow openDelay={400}>
       <ActionIcon
         variant="subtle"
         color={color}
         size="sm"
         aria-label={label}
+        aria-pressed={pressed}
         onClick={(e) => {
           e.stopPropagation();
           onClick(e);

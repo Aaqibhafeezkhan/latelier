@@ -40,8 +40,12 @@ export const operatorSource: FieldSource = (ctx) => {
 
 // Every FIELD_POSITION_OPS name is tagged validIn: matchKey (see operators.ts),
 // so this filter alone is sufficient — nothing here needs offContext ranking.
+// The catalog also carries an aggregation-expression twin of ten of these names
+// (`$eq`, `$gt`, `$size`, ...): a different operator that is only valid inside
+// `$expr`. Matching on the name alone would list each of those twice, so the
+// expression class is left out; every name still has its query-position entry.
 const FIELD_POSITION_SUGGESTIONS: readonly OperatorSuggestion[] = BASE_SUGGESTIONS.filter(
-  (s) => FIELD_POSITION_OPS.has(s.name),
+  (s) => FIELD_POSITION_OPS.has(s.name) && s.class !== 'expression',
 );
 
 /**

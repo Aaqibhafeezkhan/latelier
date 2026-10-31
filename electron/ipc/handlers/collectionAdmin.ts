@@ -22,9 +22,14 @@ const CreateOptions = z.object({
   validationAction: z.enum(['error', 'warn', 'errorAndLog']).optional(),
   viewOn: NonEmpty.optional(),
   pipeline: z.string().optional(),
+  clustered: z.boolean().optional(),
+  clusteredIndexName: z.string().optional(),
 }).refine((o) => o.pipeline === undefined || o.viewOn !== undefined, {
   message: 'pipeline requires viewOn',
   path: ['pipeline'],
+}).refine((o) => !o.clustered || (!o.capped && o.timeseries === undefined && o.viewOn === undefined), {
+  message: 'clustered cannot be combined with capped, timeseries or a view',
+  path: ['clustered'],
 });
 
 const CreateInput = CollectionTargetSchema.extend({

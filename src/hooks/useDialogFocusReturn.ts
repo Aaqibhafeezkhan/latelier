@@ -1,4 +1,5 @@
 import React from 'react';
+import { isInPalette, paletteOpener } from '../commands/paletteOpener';
 
 /**
  * Returns keyboard focus to the control that opened a dialog.
@@ -67,7 +68,13 @@ export function useDialogFocusReturn(
   // `ConnectionExpandedTable` solves the same problem for itself with a prop of
   // the same name, for the same reason — its own opener (the switcher popover)
   // is gone before it mounts.
-  const [captured] = React.useState(() => document.activeElement as HTMLElement | null);
+  // A dialog the command palette launches renders while focus is still on the
+  // palette's search input, which unmounts with the palette; the control that
+  // opened the palette is the real trigger.
+  const [captured] = React.useState(() => {
+    const active = document.activeElement as HTMLElement | null;
+    return isInPalette(active) ? (paletteOpener() ?? active) : active;
+  });
   const trigger = returnFocusTo ?? captured;
 
   // Memoized because `TroubleshootingDrawer` puts the result in a `useCallback`

@@ -1,18 +1,22 @@
 import React from 'react';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '../helpers/render';
 import { SuggestionPopover } from '../../src/features/fieldSuggestions/SuggestionPopover';
 import type { Suggestion } from '../../src/features/fieldSuggestions/types';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
+import { fieldOperatorSource } from '../../src/features/fieldSuggestions/sources/operatorSource';
+import { HintsContext, type HintsContextValue } from '../../src/hints/HintsContext';
 
 function Harness({
   items,
   onSelect = () => {},
   open = true,
+  groupOperators,
 }: {
   items: Suggestion[];
   onSelect?: (s: Suggestion) => void;
   open?: boolean;
+  groupOperators?: boolean;
 }) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   return (
@@ -24,6 +28,7 @@ function Harness({
         open={open}
         onSelect={onSelect}
         onClose={() => {}}
+        groupOperators={groupOperators}
       />
     </div>
   );
@@ -261,5 +266,177 @@ describe('SuggestionPopover — Escape layering', () => {
     expect(anchor.getAttribute('data-mantine-stop-propagation')).toBe('true');
     rerender(<Harness items={ITEMS} open={false} />);
     expect(anchor.hasAttribute('data-mantine-stop-propagation')).toBe(false);
+  });
+});
+
+describe('SuggestionPopover — keyboard hint footer', () => {
+  const ITEMS: Suggestion[] = [
+    { kind: 'field', path: 'name', source: 'schema' },
+    { kind: 'field', path: 'age', source: 'schema' },
+  ];
+
+  function hintsStub(overrides: Partial<HintsContextValue> = {}): HintsContextValue {
+    return {
+      loaded: true,
+      settled: true,
+      isDismissed: () => false,
+      dismiss: vi.fn(),
+      reset: () => {},
+      registerCandidate: () => {},
+      unregisterCandidate: () => {},
+      visibleId: null,
+      recordSessionEvent: () => {},
+      getSessionEventCount: () => 0,
+      ...overrides,
+    };
+  }
+
+  function renderWithHints(hints: HintsContextValue, onSelect = vi.fn()) {
+    render(
+      <HintsContext.Provider value={hints}>
+        <Harness items={ITEMS} onSelect={onSelect} />
+      </HintsContext.Provider>,
+    );
+    return onSelect;
+  }
+
+  const footer = () => screen.queryByRole('note', { name: 'Navigate suggestions' });
+
+  it('shows the keys under the list, outside the listbox', () => {
+    renderWithHints(hintsStub());
+    const note = footer();
+    expect(note?.textContent).toBe('Tab inserts the highlighted item. ↑↓ to pick another, then Enter or Tab. Esc to close.');
+    expect(screen.getByRole('listbox').contains(note)).toBe(false);
+  });
+
+  it('dismisses the hint on the first pick by click, and still selects', () => {
+    const hints = hintsStub();
+    const onSelect = renderWithHints(hints);
+    fireEvent.click(screen.getByRole('option', { name: /age/ }));
+    expect(hints.dismiss).toHaveBeenCalledExactlyOnceWith('suggestions.keyboard');
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(ITEMS[1]);
+  });
+
+  it('dismisses the hint on a pick by Tab', () => {
+    const hints = hintsStub();
+    const onSelect = renderWithHints(hints);
+    fireEvent.keyDown(screen.getByTestId('anchor'), { key: 'Tab' });
+    expect(hints.dismiss).toHaveBeenCalledExactlyOnceWith('suggestions.keyboard');
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(ITEMS[0]);
+  });
+
+  it('shows no footer, and dismisses nothing, once the hint is dismissed', () => {
+    const hints = hintsStub({ isDismissed: (id) => id === 'suggestions.keyboard' });
+    renderWithHints(hints);
+    expect(footer()).toBeNull();
+    fireEvent.click(screen.getByRole('option', { name: /age/ }));
+    expect(hints.dismiss).not.toHaveBeenCalled();
+  });
+
+  it('shows no footer before the hint state has loaded', () => {
+    renderWithHints(hintsStub({ loaded: false }));
+    expect(footer()).toBeNull();
+  });
+
+  it('shows no footer without a hints provider', () => {
+    render(<Harness items={ITEMS} />);
+    expect(screen.getByRole('listbox')).toBeTruthy();
+    expect(footer()).toBeNull();
+  });
+
+  it('keeps a mousedown on the footer from blurring the input', () => {
+    renderWithHints(hintsStub());
+    const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    footer()!.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+});
+
+/**
+ * The builder's operator picker groups its rows by class while the box is
+ * blank. The grouping is presentation only: the highlight, Enter and the ARIA
+ * selection keep walking one flat list.
+ */
+describe('SuggestionPopover — grouped operators', () => {
+  beforeEach(() => {
+    installAtelierMock();
+  });
+
+  afterEach(() => {
+    uninstallAtelierMock();
+  });
+
+  // The builder's real list.
+  const fieldOps = async () => (await fieldOperatorSource({} as never)) as Suggestion[];
+
+  // `getByText('$nin')` also matches the `$nin` that a description spells out.
+  const optionNamed = (name: string) =>
+    screen.getAllByRole('option').find((o) => o.querySelector('span')?.textContent === name)!;
+
+  it('renders a header per class, in order, with each option inside its group', async () => {
+    render(<Harness items={await fieldOps()} groupOperators />);
+
+    const groups = screen.getAllByRole('group');
+    expect(groups.map((g) => g.getAttribute('aria-labelledby')).every(Boolean)).toBe(true);
+    const headers = groups.map((g) => document.getElementById(g.getAttribute('aria-labelledby')!)!);
+    expect(headers.map((h) => h.textContent)).toEqual([
+      'Comparison',
+      'Logical',
+      'Element',
+      'Evaluation',
+      'Array',
+      'Geospatial',
+    ]);
+    const optionsIn = (g: HTMLElement) =>
+      Array.from(g.querySelectorAll('[role="option"]')).map(
+        (o) => o.querySelector('span')!.textContent,
+      );
+    expect(optionsIn(groups[0]!)).toEqual(['$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin']);
+    expect(optionsIn(groups[1]!)).toEqual(['$not']);
+    expect(optionsIn(groups[5]!)).toEqual(['$geoWithin', '$geoIntersects', '$near', '$nearSphere']);
+    // Headers are labels, not options, and sit in the listbox itself.
+    expect(headers.every((h) => h.getAttribute('role') === null)).toBe(true);
+    expect(screen.getByRole('listbox').contains(groups[0]!)).toBe(true);
+  });
+
+  it('walks the highlight across a group boundary as one flat list', async () => {
+    const picked: Suggestion[] = [];
+    render(<Harness items={await fieldOps()} groupOperators onSelect={(s) => picked.push(s)} />);
+    const anchor = screen.getByTestId('anchor');
+
+    // $eq is row 0; seven ArrowDowns reach $nin, the last Comparison row.
+    for (let i = 0; i < 7; i++) fireEvent.keyDown(anchor, { key: 'ArrowDown' });
+    expect(optionNamed('$nin').getAttribute('aria-selected')).toBe('true');
+    // One more crosses into the next group's first row, skipping the header.
+    fireEvent.keyDown(anchor, { key: 'ArrowDown' });
+    expect(optionNamed('$not').getAttribute('aria-selected')).toBe('true');
+    expect(screen.getAllByRole('option').filter((o) => o.getAttribute('aria-selected') === 'true')).toHaveLength(1);
+
+    fireEvent.keyDown(anchor, { key: 'Enter' });
+    expect(picked.map((s) => (s.kind === 'operator' ? s.name : ''))).toEqual(['$not']);
+  });
+
+  it('shows the flat list, with no headers, when the caller does not ask for groups', async () => {
+    // The typed-token case: the builder passes `groupOperators={false}` and
+    // the list is a relevance ranking, which headers would misrepresent.
+    render(<Harness items={await fieldOps()} groupOperators={false} />);
+    expect(screen.queryAllByRole('group')).toHaveLength(0);
+    expect(screen.getAllByRole('option').length).toBeGreaterThan(20);
+  });
+
+  it('never groups by default, as aggregation callers expect', async () => {
+    render(<Harness items={await fieldOps()} />);
+    expect(screen.queryAllByRole('group')).toHaveLength(0);
+  });
+
+  it('leaves non-operator rows outside any group', () => {
+    const items: Suggestion[] = [
+      { kind: 'field', path: 'name', source: 'schema' },
+      { kind: 'operator', name: '$eq', class: 'query', source: 'operators' },
+    ];
+    render(<Harness items={items} groupOperators />);
+    const group = screen.getByRole('group');
+    expect(group.querySelectorAll('[role="option"]')).toHaveLength(1);
+    expect(group.contains(screen.getByText('name'))).toBe(false);
   });
 });

@@ -30,6 +30,8 @@ describe('sqlite bootstrap', () => {
     tmp = createTempDb();
     expect(tmp.db.pragma('journal_mode', { simple: true })).toBe('wal');
     expect(tmp.db.pragma('foreign_keys', { simple: true })).toBe(1);
+    // 2 = MEMORY: VACUUM's temp copy never reaches disk.
+    expect(tmp.db.pragma('temp_store', { simple: true })).toBe(2);
   });
 
   it('creates all expected tables', () => {
@@ -48,12 +50,13 @@ describe('sqlite bootstrap', () => {
       'app_state',
       'audit_log',
       'recent_field_values',
+      'column_keys',
     ]) {
       expect(names, `expected table ${expected}`).toContain(expected);
     }
   });
 
-  it('drops preview_fields (migration 011) and lands on schema_version 15', () => {
+  it('drops preview_fields (migration 011) and lands on schema_version 17', () => {
     tmp = createTempDb();
     const names = tmp.db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -61,7 +64,7 @@ describe('sqlite bootstrap', () => {
       .map((r) => (r as { name: string }).name);
     expect(names).not.toContain('preview_fields');
     const version = tmp.db.prepare('SELECT version FROM schema_version').get() as { version: number };
-    expect(version.version).toBe(15);
+    expect(version.version).toBe(17);
   });
 
   it('reopening an existing DB does not re-run migrations', () => {

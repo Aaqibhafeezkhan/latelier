@@ -1,15 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import BetterSqlite3 from 'better-sqlite3';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo';
 import { RecentFieldValueRepo } from '../../electron/db/repositories/RecentFieldValueRepo';
 import { AuditRepo } from '../../electron/db/repositories/AuditRepo';
 import { MaintenanceService } from '../../electron/services/MaintenanceService';
 import os from 'node:os';
-import { openDatabase, closeDatabase, truncateWal } from '../../electron/db/sqlite';
+import { openDatabase, closeDatabase, truncateWal, isVacuumPending } from '../../electron/db/sqlite';
 import { runMigrations } from '../../electron/db/migrationRunner';
-import { createTempDb, loadMigrationsFromDisk, type TempDb } from '../helpers/db';
+import { createTempDb, loadMigrationsFromDisk, type TempDb, createTempCipher } from '../helpers/db';
 
 const MARKER = 'SECRET-MARKER-7f3a9c1e-do-not-keep';
 
@@ -42,9 +42,9 @@ describe('secure_delete and WAL truncation', () => {
 
     const store = new Map<string, unknown>();
     new MaintenanceService({
-      recentRepo: new RecentQueryRepo(tmp.db),
-      recentFieldValueRepo: new RecentFieldValueRepo(tmp.db),
-      auditRepo: new AuditRepo(tmp.db),
+      recentRepo: new RecentQueryRepo(tmp.db, createTempCipher()),
+      recentFieldValueRepo: new RecentFieldValueRepo(tmp.db, createTempCipher()),
+      auditRepo: new AuditRepo(tmp.db, createTempCipher()),
       checkpoint: () => void truncateWal(tmp.db),
     }).runIfNeeded({
       get: <T>(key: string) => (store.get(key) ?? null) as T | null,
@@ -113,37 +113,69 @@ describe('secure_delete and WAL truncation', () => {
   });
 
   describe('when the post-upgrade VACUUM fails', () => {
-    // query_only left on by the last migration makes VACUUM fail with
-    // SQLITE_READONLY after every migration has committed.
-    const withReadOnlyTail = () => {
-      const all = loadMigrationsFromDisk();
-      const last = all[all.length - 1]!;
-      return [...all.slice(0, -1), { ...last, sql: `${last.sql}\nPRAGMA query_only = ON;` }];
+    // Every migration has committed by then; only the VACUUM fails, as on a
+    // full disk.
+    const failVacuum = () => {
+      const real = BetterSqlite3.prototype.exec;
+      return vi.spyOn(BetterSqlite3.prototype, 'exec').mockImplementation(function (this: BetterSqlite3.Database, sql: string) {
+        if (sql === 'VACUUM') throw new Error('database or disk is full');
+        return real.call(this, sql);
+      });
     };
 
-    it('reports it through the logger and still opens the migrated database', () => {
+    it('reports it through the logger, still opens the migrated database, and leaves the VACUUM owed', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-vacuum-fail-'));
       const warnings: string[] = [];
+      const spy = failVacuum();
       try {
         const db = openDatabase({
           userDataDir: dir,
-          migrations: withReadOnlyTail(),
+          migrations: loadMigrationsFromDisk(),
           log: { warn: (_scope: string, msg: string) => void warnings.push(msg) },
         });
         const { version } = db.prepare('SELECT version FROM schema_version').get() as { version: number };
+        const pending = isVacuumPending(db);
         closeDatabase(db);
         expect(version).toBe(loadMigrationsFromDisk().at(-1)!.version);
         expect(warnings).toEqual(['vacuum after migrations failed']);
+        expect(pending).toBe(true);
       } finally {
+        spy.mockRestore();
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('still opens, warning twice, when recording the owed VACUUM fails too', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-vacuum-fail-'));
+      const warnings: string[] = [];
+      const vacuum = failVacuum();
+      const realPrepare = BetterSqlite3.prototype.prepare;
+      const marker = vi.spyOn(BetterSqlite3.prototype, 'prepare').mockImplementation(function (this: BetterSqlite3.Database, sql: string) {
+        if (sql.includes('INSERT INTO app_state')) throw new Error('disk I/O error');
+        return realPrepare.call(this, sql);
+      });
+      try {
+        const db = openDatabase({
+          userDataDir: dir,
+          migrations: loadMigrationsFromDisk(),
+          log: { warn: (_scope: string, msg: string) => void warnings.push(msg) },
+        });
+        closeDatabase(db);
+        expect(warnings).toEqual(['vacuum after migrations failed', 'could not record the owed vacuum']);
+      } finally {
+        marker.mockRestore();
+        vacuum.mockRestore();
         fs.rmSync(dir, { recursive: true, force: true });
       }
     });
 
     it('throws when there is no logger to report it to', () => {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-vacuum-fail-'));
+      const spy = failVacuum();
       try {
-        expect(() => openDatabase({ userDataDir: dir, migrations: withReadOnlyTail() })).toThrow(/readonly/);
+        expect(() => openDatabase({ userDataDir: dir, migrations: loadMigrationsFromDisk() })).toThrow(/disk is full/);
       } finally {
+        spy.mockRestore();
         fs.rmSync(dir, { recursive: true, force: true });
       }
     });

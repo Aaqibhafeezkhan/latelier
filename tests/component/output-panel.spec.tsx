@@ -157,6 +157,46 @@ describe('OutputPanel — rendering and view switching', () => {
     const { container } = renderPanel({ running: true, lastRun: { ...runMeta, rows: [], durationMs: 0 } });
     expect(container.textContent).toContain('Running');
   });
+
+  it('keeps one polite status region mounted and announces both start and finish of a run', () => {
+    const finished: AggregationLastRun = { ...runMeta, rows: [{ _id: 1 }, { _id: 2 }], durationMs: 5 };
+    const panel = (running: boolean, lastRun?: AggregationLastRun) => (
+      <OutputPanel
+        height={260}
+        view="Tree"
+        lastRun={lastRun}
+        running={running}
+        pipelineName={null}
+        onHeightChange={vi.fn()}
+        onHeightCommit={vi.fn()}
+        onViewChange={vi.fn()}
+        onSaveAsCollection={vi.fn()}
+        onSaveAsView={vi.fn()}
+      />
+    );
+    const { rerender } = render(panel(false));
+    const region = screen.getByRole('status');
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    expect(region.textContent).toBe('');
+
+    rerender(panel(true));
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region.textContent).toBe('Running…');
+
+    rerender(panel(false, finished));
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region.textContent).toBe('Finished: 2 documents');
+
+    rerender(
+      panel(false, { ...runMeta, rows: [], durationMs: 1, error: { code: 'X', message: 'boom' } }),
+    );
+    expect(region.textContent).toBe('Run failed');
+  });
+
+  it('renders the document count with tabular numerals', () => {
+    renderPanel({ lastRun: { ...runMeta, rows: [{ _id: 1 }], durationMs: 1 } });
+    expect(screen.getByText('1 docs').style.fontVariantNumeric).toBe('tabular-nums');
+  });
 });
 
 /**

@@ -1,9 +1,11 @@
 import React from 'react';
 import { themeVars } from '../../../theme/themeVars';
+import { SubmitButton } from '../../../components/SubmitButton';
 import { I } from '../../../icons';
-import { Button, Group, Modal, Tooltip } from '@mantine/core';
+import { Button, Group, Menu, Modal, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { api, getErrorMessage, isIpcError } from '../../../api/atelier';
+import { logFailure } from '../../../utils/rendererLog';
 import { notify } from '../../../theme/notifications';
 import type {
   AggregationLastRun,
@@ -35,12 +37,18 @@ import { useLatest } from '../../../commands/useLatest';
 import { useDialogFocusReturn } from '../../../hooks/useDialogFocusReturn';
 import type { SuggestionContext } from '../../../features/fieldSuggestions/types';
 import { invalidateSampleSchemaCache } from '../../../features/fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../../../features/fieldSuggestions/sources/schemaEnumSource';
+import { invalidateRecentValuesCache } from '../../../features/fieldSuggestions/sources/recentValuesSource';
+import { fieldValueEntriesFromStages } from '../../../features/fieldSuggestions/fieldValueEntries';
 import { ExplainDrawer } from './ExplainDrawer';
 import { SaveAsCollectionModal } from './SaveAsCollectionModal';
 import { notifyCollectionChanged } from '../../../state/collectionChanges';
 import { SaveAsViewModal } from './SaveAsViewModal';
 import { saveResultMessage } from './saveResultMessage';
 import { SavePipelineModal } from './SavePipelineModal';
+import { pipelineJsonForCopy } from '../builderToPipeline';
+import { aggregateCode, CODE_LANGS, type CodeLang } from '../../../utils/driverCode';
+import { copyToClipboard } from '../../../utils/clipboard';
 
 interface Props {
   connectionId: string;
@@ -75,10 +83,12 @@ export function AggregationTab({
     target?: string;
   } | null>(null);
   const runTokenRef = React.useRef<string | null>(null);
-  // A confirmed write run can't be dropped on Cancel: main lets a write that
-  // was already sent run to completion. `runIsWriteRef` marks the run in
-  // flight as one; `stopping` (state for the button, ref for the settling
-  // run's closure) is the Cancel-was-pressed state while it settles.
+  // A confirmed write run can't be dropped on Cancel: main asks the server to
+  // kill a write that was already sent, and the run settles as stopped, as
+  // completed (the kill was refused or came too late) or as the write's own
+  // error. `runIsWriteRef` marks the run in flight as one; `stopping` (state
+  // for the button, ref for the settling run's closure) is the
+  // Cancel-was-pressed state while it settles.
   const runIsWriteRef = React.useRef(false);
   const stoppingRef = React.useRef(false);
   const [stopping, setStopping] = React.useState(false);
@@ -268,14 +278,35 @@ export function AggregationTab({
         };
         onPatch({ lastRun });
         setLastRunSig(new Map(runStages.map((s) => [s.id, stageSig(s)])));
+        // Fire-and-forget, as after a find: the values the leading `$match`
+        // stages carried feed the value-suggestion popover. Never blocks or
+        // fails the run; main re-filters by op and secret field path.
+        const entries = fieldValueEntriesFromStages(runStages);
+        if (entries.length > 0) {
+          api.recent
+            .recordFieldValues({ connectionId, dbName, collection, entries })
+            .then(() => invalidateRecentValuesCache(connectionId, dbName, collection))
+            .catch((err: unknown) => logFailure('recording field values', err));
+        }
         if (stoppingRef.current) {
-          notify.info('The write had already started, so it ran to completion.');
+          notify.info("The write couldn't be stopped, so it ran to completion.");
         }
       } catch (e) {
         if (runTokenRef.current !== token) return;
-        // The cancel reached main before the write was sent: nothing ran, and
-        // the tab stops quietly, as it does for a cancelled read-only run.
-        if (stoppingRef.current && isIpcError(e) && e.message === 'cancelled') return;
+        if (stoppingRef.current && isIpcError(e) && e.message === 'cancelled') {
+          // Killed on the server. Without these details the cancel reached main
+          // before the write was sent: nothing ran, and the tab stops quietly,
+          // as it does for a cancelled read-only run.
+          const stopped = (e.details ?? {}) as { writeStageOp?: string; partialWrite?: boolean };
+          if (stopped.partialWrite) {
+            notify.warning(
+              `Write stopped. ${stopped.writeStageOp} may already have written some documents, and they stay in the target.`,
+            );
+          } else if (stopped.writeStageOp) {
+            notify.info(`Write stopped. The ${stopped.writeStageOp} target was left unchanged.`);
+          }
+          return;
+        }
         if (isIpcError(e)) {
           const details = (e.details ?? {}) as {
             kind?: string;
@@ -316,7 +347,11 @@ export function AggregationTab({
         // main parses out of the stage body, so the renderer can't name the
         // collection it wrote: drop the connection's samples, even when the
         // run threw part-way through a `$merge`.
-        if (allowWrite) invalidateSampleSchemaCache(connectionId);
+        if (allowWrite) {
+          invalidateSampleSchemaCache(connectionId);
+          // A `$out` / `$merge` can create or replace its target collection.
+          invalidateSchemaEnumCache(connectionId);
+        }
         if (runTokenRef.current === token) {
           runTokenRef.current = null;
           stoppingRef.current = false;
@@ -336,13 +371,16 @@ export function AggregationTab({
   const onCancelRun = () => {
     const token = runTokenRef.current;
     if (!token || stoppingRef.current) return;
-    void api.agg.cancel({ token }).catch(() => {});
+    void api.agg.cancel({ token }).catch((err) => {
+      logFailure('aggregation cancel', err);
+      notify.error(getErrorMessage(err, 'The run could not be cancelled.'), { title: 'Cancel failed' });
+    });
     if (runIsWriteRef.current) {
-      // Keep the token: the run settles as completed (the write was already
-      // sent) or as cancelled (it was not), and executeRun reports which.
+      // Keep the token: the run settles as stopped, completed or failed, and
+      // executeRun reports which.
       stoppingRef.current = true;
       setStopping(true);
-      notify.info("A write stage can't be interrupted once it has started.", {
+      notify.info('Asking the server to stop the write stage.', {
         title: 'Stopping…',
       });
       return;
@@ -421,6 +459,10 @@ export function AggregationTab({
   // main process would refuse on the next run. The two modals read `stages`
   // from state, and the patch has landed by the time the user acts in them.
   const onSave = async () => {
+    // The Save button is inert while a run is in flight or nothing changed; the
+    // palette command reaches this same function, so the rule lives here
+    // rather than on the button alone.
+    if (running || !state.dirty) return;
     const saveStages = repairStageBodies();
     if (!state.savedId) {
       setSaveOpen(true);
@@ -465,8 +507,22 @@ export function AggregationTab({
     [connectionId, dbName, collection, repairStageBodies],
   );
   const onCancelExplainToken = React.useCallback((cancelToken: string) => {
-    void api.agg.cancel({ token: cancelToken }).catch(() => {});
+    void api.agg.cancel({ token: cancelToken }).catch((err) => logFailure('explain cancel', err));
   }, []);
+
+  // ── Copy ─────────────────────────────────────────────────────────
+
+  // Repairs a copy of the bodies, not the tab's: copying changes nothing.
+  // `lang` null copies the bare EJSON array.
+  const onCopy = (lang: CodeLang | null) => {
+    const result = pipelineJsonForCopy(stages);
+    if (!result.ok) {
+      notify.error(`Nothing copied — ${result.problem}`);
+      return;
+    }
+    const text = lang ? aggregateCode(lang, { collection, pipelineJson: result.json }) : result.json;
+    void copyToClipboard(text, lang ? 'Command copied to the clipboard' : 'Pipeline copied to the clipboard');
+  };
 
   // ── Save as collection ───────────────────────────────────────────
 
@@ -614,9 +670,9 @@ export function AggregationTab({
           )}
         </Group>
 
-        <Button size="compact-xs" variant="default" leftSection={I.save} disabled={running || !state.dirty} onClick={onSave}>
+        <SubmitButton size="compact-xs" variant="default" leftSection={I.save} submitting={running || !state.dirty} onClick={onSave}>
           Save
-        </Button>
+        </SubmitButton>
         <Button size="compact-xs" variant="default" disabled={running} onClick={onSaveAs}>
           Save as
         </Button>
@@ -632,6 +688,28 @@ export function AggregationTab({
         <Button size="compact-xs" variant="default" leftSection={I.eye} disabled={running || !validation.ok} onClick={onExplain}>
           Explain
         </Button>
+        <Menu position="bottom-end" shadow="md">
+          <Menu.Target>
+            {/* The output panel has its own "Copy"; the name says which. */}
+            <Button
+              size="compact-xs"
+              variant="default"
+              leftSection={I.copy}
+              disabled={!validation.ok}
+              aria-label="Copy pipeline"
+            >
+              Copy
+            </Button>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item onClick={() => onCopy(null)}>Pipeline (EJSON array)</Menu.Item>
+            {CODE_LANGS.map(({ lang, label }) => (
+              <Menu.Item key={lang} onClick={() => onCopy(lang)}>
+                {label}
+              </Menu.Item>
+            ))}
+          </Menu.Dropdown>
+        </Menu>
       </Group>
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -793,35 +871,12 @@ export function WriteStageConfirm({
           <code style={{ color: T.text }}>{op}</code>. Proceed?
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button
-            onClick={cancel}
-            style={{
-              padding: '6px 14px',
-              fontSize: 12,
-              border: `1px solid ${T.border}`,
-              borderRadius: T.rs,
-              background: 'none',
-              color: T.textMuted,
-              cursor: 'pointer',
-            }}
-          >
+          <Button variant="default" size="xs" c={T.textMuted} onClick={cancel}>
             Cancel
-          </button>
-          <button
-            onClick={onProceed}
-            style={{
-              padding: '6px 14px',
-              fontSize: 12,
-              fontWeight: 600,
-              border: 'none',
-              borderRadius: T.rs,
-              background: T.red,
-              color: '#fff',
-              cursor: 'pointer',
-            }}
-          >
+          </Button>
+          <Button color="red" size="xs" onClick={onProceed}>
             Proceed
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>

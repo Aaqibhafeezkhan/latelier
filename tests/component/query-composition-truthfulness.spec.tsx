@@ -8,6 +8,20 @@ import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock
 import type { CollectionTabState, WorkspaceTab } from '@shared/types';
 import type { IpcApi } from '@shared/ipc';
 
+// Every gate in front of `findCode` exists so it never throws; making it throw
+// on demand is the only way to reach the copy handler's last-resort catch.
+const findCodeFault = vi.hoisted(() => ({ error: undefined as Error | undefined }));
+vi.mock('../../src/utils/driverCode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/utils/driverCode')>();
+  return {
+    ...actual,
+    findCode: (...args: Parameters<typeof actual.findCode>) => {
+      if (findCodeFault.error) throw findCodeFault.error;
+      return actual.findCode(...args);
+    },
+  };
+});
+
 /**
  * W15 Tier 1 — every statement the composition surface makes about the
  * query it runs is either true or absent.
@@ -60,7 +74,7 @@ const CONNECTION = {
   status: 'connected' as const,
 };
 
-function mountWith(state: CollectionTabState) {
+function mountWith(state: CollectionTabState, tabsOverrides: Partial<IpcApi['tabs']> = {}) {
   const findSpy = vi.fn<IpcApi['query']['find']>(async () => ({
     documents: [],
     durationMs: 3,
@@ -73,6 +87,7 @@ function mountWith(state: CollectionTabState) {
       list: async () => [makeCollectionTab(state)],
       setActive: async (id) => ({ id }),
       update: (async () => makeCollectionTab(state)) as unknown as IpcApi['tabs']['update'],
+      ...tabsOverrides,
     },
     conn: { list: async () => [CONNECTION] },
     prefs: {
@@ -117,6 +132,12 @@ afterEach(() => {
   notifications.clean();
   vi.restoreAllMocks();
 });
+
+// Copy code is a menu of languages (#23): open it, pick one.
+const copyAs = async (label: string) => {
+  fireEvent.click(await screen.findByRole('button', { name: 'Copy code' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: label }));
+};
 
 const copiedText = (): string => {
   const mock = navigator.clipboard.writeText as unknown as { mock: { calls: string[][] } };
@@ -292,6 +313,19 @@ describe('W15 §4.2 — the limit says what it caps and what else stops a query'
 });
 
 describe('W15 §1.1 — Copy code reproduces the query as run', () => {
+  // NBSP padding passes the Run gate, which trims; `findCode` parses the text
+  // it is given, so it must be given the trimmed filter `find` sends.
+  it('copies and runs a filter padded with Unicode spaces as its trimmed text', async () => {
+    const { findSpy } = mountWith(makeState({ queryRaw: '\u00a0{"status":"active"}\u00a0' }));
+
+    await copyAs('mongosh');
+    expect(copiedText()).toBe('db.getCollection("users").find({"status":"active"}).limit(50)');
+
+    fireEvent.click(screen.getByTestId('query-run-btn'));
+    await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(1));
+    expect(findSpy.mock.calls[0]?.[0]?.filter).toBe('{"status":"active"}');
+  });
+
   it('emits the projection, sort, skip and limit useQueryRunner would send', async () => {
     // userLimit 120, pageSize 50, page 2 → skip 100, limit 20.
     const { findSpy } = mountWith(
@@ -302,10 +336,10 @@ describe('W15 §1.1 — Copy code reproduces the query as run', () => {
       }),
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy code' }));
+    await copyAs('mongosh');
 
     expect(copiedText()).toBe(
-      'db.users.find({"status":"active"}, {"_id":1,"name":1})' +
+      'db.getCollection("users").find({"status":"active"}, {"_id":1,"name":1})' +
         '.sort({"createdAt":-1}).skip(100).limit(20)',
     );
 
@@ -338,13 +372,54 @@ describe('W15 §1.1 — Copy code reproduces the query as run', () => {
       makeState({ builder: { projection: [], sort: '', limit: '10' }, page: 1 }),
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy code' }));
+    await copyAs('mongosh');
 
     const writeText = navigator.clipboard.writeText as unknown as {
       mock: { calls: string[][] };
     };
     expect(writeText.mock.calls).toHaveLength(0);
     expect(await screen.findByText(/Nothing copied — this page is past the limit/)).toBeTruthy();
+  });
+
+  it('an ObjectId filter copies as code that keeps the ObjectId (#23)', async () => {
+    // Canonical EJSON pasted raw into mongosh reads `$oid` as an unknown
+    // query operator, so the sentinel goes through EJSON.parse instead.
+    const oid = '{"$oid":"64b7f0c2a1b2c3d4e5f60718"}';
+    mountWith(makeState({ queryRaw: `{"_id":${oid}}` }));
+
+    await copyAs('mongosh');
+    expect(copiedText()).toBe(
+      `db.getCollection("users").find({"_id":EJSON.parse(${JSON.stringify(oid)}, { relaxed: false })}).limit(50)`,
+    );
+
+    await copyAs('Python');
+    expect(copiedText()).toBe(
+      ['from bson import json_util', '', `query = {"_id":json_util.loads(${JSON.stringify(oid)})}`, 'cursor = db["users"].find(query, limit=50)'].join('\n'),
+    );
+  });
+
+  // W14 §9 — a collation changes which documents match, so the copied find
+  // carries it (and the hint); maxTimeMS and the read preference do not
+  // change the result and are left out.
+  it('carries the collation and hint, not maxTimeMS or the read preference', async () => {
+    mountWith(
+      makeState({
+        builder: {
+          projection: [],
+          sort: '',
+          limit: '',
+          collation: '{"locale":"en","strength":2}',
+          hint: '_id_',
+          maxTimeMS: '500',
+          readPreference: 'nearest',
+        },
+      }),
+    );
+
+    await copyAs('mongosh');
+    expect(copiedText()).toBe(
+      'db.getCollection("users").find({}).collation({"locale":"en","strength":2}).hint("_id_").limit(50)',
+    );
   });
 
   it('the page before the cap still copies, with its real limit', async () => {
@@ -354,7 +429,7 @@ describe('W15 §1.1 — Copy code reproduces the query as run', () => {
       makeState({ builder: { projection: [], sort: '', limit: '60' }, page: 1 }),
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy code' }));
+    await copyAs('mongosh');
 
     expect(copiedText()).toContain('.skip(50)');
     expect(copiedText()).toContain('.limit(10)');
@@ -378,8 +453,7 @@ describe('W15 §1.1 — Copy code refuses a query that will not run', () => {
   const writeTextMock = () =>
     navigator.clipboard.writeText as unknown as { mock: { calls: string[][] } };
 
-  const clickCopy = async () =>
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy code' }));
+  const clickCopy = () => copyAs('mongosh');
 
   it('an unparseable sort is refused, and nothing reaches the clipboard', async () => {
     mountWith(makeState({ builder: { projection: [], sort: '{"a":1', limit: '' } }));
@@ -438,6 +512,31 @@ describe('W15 §1.1 — Copy code refuses a query that will not run', () => {
     expect(screen.queryByText(/Could not copy to the clipboard/)).toBeNull();
   });
 
+  it('a quoted hint opening with a brace copies as the index name it quotes', async () => {
+    // `"{x"` names the index `{x`, as main runs it; read as a key pattern it
+    // used to throw out of the menu click and copy nothing.
+    mountWith(makeState({ builder: { projection: [], sort: '', limit: '', hint: '"{x"' } }));
+
+    await clickCopy();
+
+    await waitFor(() => expect(writeTextMock().mock.calls).toHaveLength(1));
+    expect(copiedText()).toContain('.hint("{x")');
+  });
+
+  it('a snippet the generator cannot write says why, and copies nothing', async () => {
+    findCodeFault.error = new Error('findCode: cannot write this clause');
+    try {
+      mountWith(makeState({ queryRaw: '{"status":"active"}' }));
+
+      await clickCopy();
+
+      expect(await screen.findByText('Nothing copied — findCode: cannot write this clause')).toBeTruthy();
+      expect(writeTextMock().mock.calls).toHaveLength(0);
+    } finally {
+      findCodeFault.error = undefined;
+    }
+  });
+
   it('still copies a runnable query — the guard is not a blanket refusal', async () => {
     mountWith(
       makeState({
@@ -466,5 +565,49 @@ describe('W15 §7.1 — "Set default" is gone', () => {
     expect(
       prefsSetSpy.mock.calls.filter((c) => String(c[0]).startsWith('query.default.')),
     ).toEqual([]);
+  });
+});
+
+/**
+ * #156 — "Open as pipeline" hands the builder's query to the Aggregation view
+ * as stages, through the same gate as Run and Copy code.
+ */
+describe('Open as pipeline', () => {
+  it('opens the collection with the query as stages, dirty and unselected', async () => {
+    const state = makeState({
+      queryRaw: '{"_id":{"$oid":"64b7f0c2a1b2c3d4e5f60718"}}',
+      builder: { projection: [], sort: '{"age":-1}', limit: '120' },
+      page: 2,
+    });
+    const openSpy = vi.fn<IpcApi['tabs']['openAggregation']>(async () => makeCollectionTab(state) as never);
+    mountWith(state, { openAggregation: openSpy });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open as pipeline' }));
+
+    await waitFor(() => expect(openSpy).toHaveBeenCalledTimes(1));
+    expect(openSpy).toHaveBeenCalledWith({
+      connectionId: 'c1',
+      dbName: 'mydb',
+      collection: 'users',
+      initialState: {
+        stages: [
+          { id: 1, op: '$match', body: '{"_id":{"$oid":"64b7f0c2a1b2c3d4e5f60718"}}', enabled: true },
+          { id: 2, op: '$sort', body: '{"age":-1}', enabled: true },
+          { id: 3, op: '$limit', body: '120', enabled: true },
+        ],
+        activeStageId: null,
+        dirty: true,
+      },
+    });
+  });
+
+  it('opens nothing for a query that will not run, and says why', async () => {
+    const openSpy = vi.fn<IpcApi['tabs']['openAggregation']>();
+    mountWith(makeState({ queryRaw: '{"status":' }), { openAggregation: openSpy });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open as pipeline' }));
+
+    expect(await screen.findByText(/Nothing opened — Can't parse this filter/)).toBeTruthy();
+    expect(openSpy).not.toHaveBeenCalled();
   });
 });

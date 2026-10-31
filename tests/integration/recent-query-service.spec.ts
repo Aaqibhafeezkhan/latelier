@@ -3,7 +3,7 @@ import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo'
 import { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { NotFoundError } from '../../electron/errors';
 import type { Logger } from '../../electron/log';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher, cellType } from '../helpers/db';
 import type { FindInput } from '@shared/types';
 
 const CONNECTION_ID = 'conn-1';
@@ -46,7 +46,7 @@ describe('RecentQueryService', () => {
       )
     `).run(CONNECTION_ID, new Date().toISOString(), new Date().toISOString());
 
-    repo = new RecentQueryRepo(tmp.db);
+    repo = new RecentQueryRepo(tmp.db, createTempCipher());
     svc = new RecentQueryService(repo);
   });
 
@@ -91,6 +91,7 @@ describe('RecentQueryService', () => {
 
     const fetched = svc.get(item.id);
     expect(fetched.id).toBe(item.id);
+    expect(cellType(tmp.db, 'recent_queries', 'payload_json', item.id)).toBe('blob');
   });
 
   // Codex review on the W15 base → `main` PR. `recordFind` wrote a hardcoded
@@ -121,6 +122,50 @@ describe('RecentQueryService', () => {
     const item = svc.list({ connectionId: CONNECTION_ID })[0]!;
     const payload = item.payload as { builder: { projectionRaw?: string } };
     expect(payload.builder.projectionRaw).toBeUndefined();
+  });
+
+  // W14 §9 — a collation changes which documents match, so a Recent rerun
+  // that dropped it would silently not be the run in the list.
+  it('recordFind records the find options as the builder text, and omits unset ones', async () => {
+    await svc.recordFind(
+      makeFindInput({
+        collation: '{"locale":"en","strength":2}',
+        hint: '_id_',
+        maxTimeMS: 40000,
+        readPreference: 'secondaryPreferred',
+      }),
+      5,
+      1,
+    );
+    await svc.recordFind(makeFindInput(), 5, 1);
+
+    const [withOptions, without] = svc.list({ connectionId: CONNECTION_ID }).reverse();
+    expect((withOptions!.payload as { builder: object }).builder).toMatchObject({
+      collation: '{"locale":"en","strength":2}',
+      hint: '_id_',
+      maxTimeMS: '40000',
+      readPreference: 'secondaryPreferred',
+    });
+    const bare = (without!.payload as { builder: object }).builder;
+    for (const key of ['collation', 'hint', 'maxTimeMS', 'readPreference']) {
+      expect(bare).not.toHaveProperty(key);
+    }
+  });
+
+  // QueryService trims the collation and hint before sending them, so a
+  // blank one was never part of the run and a padded one reruns trimmed.
+  it('recordFind trims the collation and hint, and omits blank ones', async () => {
+    await svc.recordFind(makeFindInput({ collation: '  {"locale":"en"} ', hint: ' _id_ ' }), 5, 1);
+    await svc.recordFind(makeFindInput({ collation: '   ', hint: '\t' }), 5, 1);
+
+    const [padded, blank] = svc.list({ connectionId: CONNECTION_ID }).reverse();
+    expect((padded!.payload as { builder: object }).builder).toMatchObject({
+      collation: '{"locale":"en"}',
+      hint: '_id_',
+    });
+    const bare = (blank!.payload as { builder: object }).builder;
+    expect(bare).not.toHaveProperty('collation');
+    expect(bare).not.toHaveProperty('hint');
   });
 
   it('recordFind stores errorCode when provided', async () => {
@@ -243,5 +288,44 @@ describe('RecentQueryService', () => {
     const list = svc.list({ connectionId: CONNECTION_ID });
     // After 205 inserts the count must not exceed 200
     expect(list.length).toBeLessThanOrEqual(200);
+  });
+
+  // Runs recorded in the same millisecond share `ran_at`. Without a
+  // tiebreaker their order is whatever the query plan yields, which can swap
+  // identical runs apart and break the Recent tab's adjacency merge. The
+  // later insert counts as newer.
+  describe('same-millisecond runs order deterministically, newest insert first', () => {
+    const SAME = '2026-10-22T10:00:00.000Z';
+    function row(id: string, collection = 'orders') {
+      return {
+        id,
+        connection_id: CONNECTION_ID,
+        db_name: 'shop',
+        collection,
+        kind: 'find' as const,
+        payload_json: '{}',
+        ran_at: SAME,
+        duration_ms: 1,
+        result_count: null,
+        error_code: null,
+      };
+    }
+
+    it('list returns ties in reverse insertion order, with and without filters and limits', () => {
+      // Ids chosen so neither id nor insertion order alone sorts them DESC.
+      for (const id of ['m', 'z', 'a']) repo.insert(row(id));
+      expect(repo.list().map((r) => r.id)).toEqual(['a', 'z', 'm']);
+      expect(repo.list({ connectionId: CONNECTION_ID }).map((r) => r.id)).toEqual(['a', 'z', 'm']);
+      expect(
+        repo.list({ connectionId: CONNECTION_ID, dbName: 'shop', collection: 'orders', kind: 'find', limit: 2 })
+          .map((r) => r.id),
+      ).toEqual(['a', 'z']);
+    });
+
+    it('eviction among ties drops the earliest inserts', () => {
+      for (const id of ['m', 'z', 'a']) repo.insert(row(id));
+      repo.deleteOldestByConnection(CONNECTION_ID, 2);
+      expect(repo.list().map((r) => r.id)).toEqual(['a', 'z']);
+    });
   });
 });

@@ -6,7 +6,7 @@ import { api, getErrorMessage } from '../../api/atelier';
 import { notify } from '../../theme/notifications';
 import { useCollectionWorkspace } from './context';
 import { EMPTY_DOCUMENTS } from './resultSelection';
-import { compileFindOptions, findProblem } from './builder';
+import { compileFindOptions, findProblem, requireFilterJson } from './builder';
 import { deriveColumns, resolveColumns } from './views/tableColumns';
 import {
   exportColumnsFrom,
@@ -56,8 +56,8 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
   const [saving, setSaving] = React.useState(false);
 
   // Same gate as the Run button (W03) — an "All matching" export sends the
-  // committed `queryRaw` straight to the driver, so it must be at least as
-  // runnable as a Run click.
+  // committed filter (trimmed, as `find` sends it) to the driver, so it must
+  // be at least as runnable as a Run click.
   const canRunAll = findProblem(state) === null;
   const canExport = scope === 'page' ? documents.length > 0 : canRunAll;
 
@@ -79,15 +79,19 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
   };
 
   const exportAll = async () => {
-    const { sort, projection, limit } = compileFindOptions(state.builder);
+    const { sort, projection, limit, collation, hint, readPreference } = compileFindOptions(state.builder);
     const defaultName = `${meta.collection}.${exportFileExtension(format)}`;
     const { path, written, truncated } = await api.query.export({
       connectionId: meta.connectionId,
       dbName: meta.dbName,
       collection: meta.collection,
-      filter: state.queryRaw,
+      // Only reachable through `canRunAll`, so the filter is runnable.
+      filter: requireFilterJson(state),
       sort,
       projection,
+      collation,
+      hint,
+      readPreference,
       limit: limit ?? undefined,
       format,
       relaxed,

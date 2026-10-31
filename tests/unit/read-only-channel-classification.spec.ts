@@ -36,6 +36,12 @@ const WRITE_CHANNELS = new Set<string>([
   IPC_CHANNELS.userCreate,
   IPC_CHANNELS.userUpdate,
   IPC_CHANNELS.userDrop,
+  IPC_CHANNELS.roleCreate,
+  IPC_CHANNELS.roleUpdate,
+  IPC_CHANNELS.roleDrop,
+  // Neither changes a document, but both change server state and are refused on a read-only connection.
+  IPC_CHANNELS.adminKillOp,
+  IPC_CHANNELS.adminSetProfileLevel,
   IPC_CHANNELS.aggRun,
   IPC_CHANNELS.aggRunAndSave,
   IPC_CHANNELS.mshellStart,
@@ -52,6 +58,9 @@ const READ_CHANNELS = new Set<string>([
   IPC_CHANNELS.mongoStatus,
   IPC_CHANNELS.mongoPing,
   IPC_CHANNELS.mongoServerInfo,
+  IPC_CHANNELS.adminCurrentOp,
+  IPC_CHANNELS.adminProfileStatus,
+  IPC_CHANNELS.adminProfileTail,
   IPC_CHANNELS.mongoStatusEvent,
   IPC_CHANNELS.metaListDatabases,
   IPC_CHANNELS.metaListCollections,
@@ -96,6 +105,9 @@ const NON_MONGO_CHANNELS = new Set<string>([
   IPC_CHANNELS.appOpenExternal,
   IPC_CHANNELS.appSaveFile,
   IPC_CHANNELS.appDiagnosticBundle,
+  IPC_CHANNELS.appSetUnsavedWork,
+  IPC_CHANNELS.appFlushDone,
+  IPC_CHANNELS.appLog,
   IPC_CHANNELS.shellOpenExternal,
   IPC_CHANNELS.prefsGet,
   IPC_CHANNELS.prefsSet,
@@ -103,10 +115,12 @@ const NON_MONGO_CHANNELS = new Set<string>([
   IPC_CHANNELS.prefsSetTheme,
   IPC_CHANNELS.prefsThemeEvent,
   IPC_CHANNELS.appMenuCommandEvent,
+  IPC_CHANNELS.appFlushRequestEvent,
   IPC_CHANNELS.updatesGetState,
   IPC_CHANNELS.updatesRestart,
   IPC_CHANNELS.updatesStateEvent,
   IPC_CHANNELS.secretsSetPlaintextFallback,
+  IPC_CHANNELS.secretsStatus,
   IPC_CHANNELS.savedList,
   IPC_CHANNELS.savedGet,
   IPC_CHANNELS.savedCreate,
@@ -174,11 +188,16 @@ describe('read-only guard — IPC channel classification is exhaustive', () => {
     // this test exists to catch — don't add to this list without a reason.
     // audit:undo writes whatever puts an Operation back (an insert or a
     // replace), and takes its grant from MongoPool.write like any write.
+    // admin:killOp and admin:setProfileLevel change server state rather than
+    // data (stop an op, switch the profiler) and take MongoPool.write for the
+    // read-only refusal.
     const namedExemptions = new Set<string>([
       IPC_CHANNELS.aggRun,
       IPC_CHANNELS.mshellStart,
       IPC_CHANNELS.scriptRun,
       IPC_CHANNELS.auditUndo,
+      IPC_CHANNELS.adminKillOp,
+      IPC_CHANNELS.adminSetProfileLevel,
     ]);
     const nonVerbLike = [...WRITE_CHANNELS].filter(
       (ch) => !writeVerb.test(ch) && !namedExemptions.has(ch),

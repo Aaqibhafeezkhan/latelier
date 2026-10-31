@@ -178,6 +178,35 @@ describe('collection:* / database:* handlers via router', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
+  describe('collection:create clustered', () => {
+    const target = { connectionId: 'c1', dbName: 'app', collection: 'orders' };
+
+    it.each([
+      ['capped', { capped: true, size: 1024 }],
+      ['timeseries', { timeseries: { timeField: 'ts' } }],
+      ['viewOn', { viewOn: 'src' }],
+    ])('rejects clustered combined with %s and never reaches the service', async (_label, other) => {
+      const spy = vi.fn(async () => ({ name: 'orders' }));
+      setupWith({ create: spy });
+      const env = await shim.invoke(IPC_CHANNELS.collectionCreate, {
+        ...target,
+        options: { clustered: true, ...other },
+      });
+      expect(env.ok).toBe(false);
+      if (!env.ok) expect(env.error.code).toBe('VALIDATION');
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('forwards a clustered payload with an index name', async () => {
+      const spy = vi.fn(async () => ({ name: 'orders' }));
+      setupWith({ create: spy });
+      const payload = { ...target, options: { clustered: true, clusteredIndexName: 'by_id' } };
+      const env = await shim.invoke(IPC_CHANNELS.collectionCreate, payload);
+      expect(env.ok).toBe(true);
+      expect(spy).toHaveBeenCalledWith(payload);
+    });
+  });
+
   describe('collection:modify', () => {
     const target = { connectionId: 'c1', dbName: 'app', collection: 'orders' };
 

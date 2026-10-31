@@ -12,7 +12,7 @@ import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo'
 import { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { RecentFieldValueRepo } from '../../electron/db/repositories/RecentFieldValueRepo';
 import { RecentFieldValueService } from '../../electron/services/RecentFieldValueService';
-import { createTempDb, insertConnectionRow, type TempDb } from '../helpers/db';
+import { createTempDb, insertConnectionRow, type TempDb, createTempCipher } from '../helpers/db';
 import { createIpcShim } from '../helpers/ipcShim';
 import { testSenderCheck } from '../helpers/ipcSender';
 
@@ -103,13 +103,13 @@ describe('writes naming an unknown connection answer NOT_FOUND, not INTERNAL', (
     tmp = createTempDb();
     insertConnectionRow(tmp.db, REAL);
     const router = createRouter(shim.ipcMain, testSenderCheck);
-    const savedSvc = new SavedQueryService(new SavedQueryRepo(tmp.db));
+    const savedSvc = new SavedQueryService(new SavedQueryRepo(tmp.db, createTempCipher()));
     registerSavedChannels(router, savedSvc);
-    registerTabsChannels(router, new WorkspaceStateService(new WorkspaceTabRepo(tmp.db), savedSvc));
+    registerTabsChannels(router, new WorkspaceStateService(new WorkspaceTabRepo(tmp.db, createTempCipher()), savedSvc));
     registerRecentChannels(
       router,
-      new RecentQueryService(new RecentQueryRepo(tmp.db)),
-      new RecentFieldValueService(new RecentFieldValueRepo(tmp.db)),
+      new RecentQueryService(new RecentQueryRepo(tmp.db, createTempCipher())),
+      new RecentFieldValueService(new RecentFieldValueRepo(tmp.db, createTempCipher())),
     );
   });
 

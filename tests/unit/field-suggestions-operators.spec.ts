@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { OPERATORS } from '../../src/features/fieldSuggestions/operators';
-import { operatorSource } from '../../src/features/fieldSuggestions/sources/operatorSource';
+import { FIELD_POSITION_OPS, OPERATORS } from '../../src/features/fieldSuggestions/operators';
+import { fieldOperatorSource, operatorSource } from '../../src/features/fieldSuggestions/sources/operatorSource';
 import type { SuggestionContext } from '../../src/features/fieldSuggestions/types';
 
 function ctx(overrides: Partial<SuggestionContext> = {}): SuggestionContext {
@@ -54,5 +54,19 @@ describe('operatorSource', () => {
     const sum = out.find((s) => s.name === '$sum');
     expect(eq?.offContext).toBe(false);
     expect(sum?.offContext).toBe(true);
+  });
+});
+
+describe('fieldOperatorSource', () => {
+  it('lists each field-position operator once, and exactly those operators', async () => {
+    const items = (await fieldOperatorSource({} as never)) as Array<{ name: string; class: string }>;
+    const names = items.map((s) => s.name);
+    // The catalog's `$expr` twins of $eq, $size, ... share these names; the
+    // builder's op box must offer the query-position operator alone.
+    expect(names.filter((n, i) => names.indexOf(n) !== i)).toEqual([]);
+    expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(
+      [...FIELD_POSITION_OPS].sort((a, b) => a.localeCompare(b)),
+    );
+    expect(items.some((s) => s.class === 'expression')).toBe(false);
   });
 });

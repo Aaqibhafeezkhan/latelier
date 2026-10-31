@@ -3,12 +3,14 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { DarkCtx, useTheme } from '../ThemeContext';
 import { themeVars } from '../theme/themeVars';
 import { I } from '../icons';
-import { AppShell } from '@mantine/core';
+import { ActionIcon, AppShell, Button, Tooltip } from '@mantine/core';
 import { useConnections } from '../state/connections';
 import { api, isIpcError } from '../api/atelier';
+import { logFailure } from '../utils/rendererLog';
 import { notify } from '../theme/notifications';
 import type { ConnectionSummary } from '@shared/types';
 import { invalidateSampleSchemaCache } from '../features/fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../features/fieldSuggestions/sources/schemaEnumSource';
 import { ConnectionDeleteDialog } from '../features/connections/ConnectionDeleteDialog';
 import { ConnectionDisconnectDialog } from '../features/connections/ConnectionDisconnectDialog';
 import { disconnectConnection } from '../features/connections/disconnectConnection';
@@ -49,23 +51,27 @@ function TitleBar({ dark, toggle, onCmdK, connectionName }: {
         <span style={{ fontSize: 13, color: T.textMuted }}>{connectionName ?? '(unresolved connection)'}</span>
       </div>
       <div style={{ flex: 1 }} />
-      <button onClick={onCmdK} data-hint-anchor="palette.discover" style={{
-        display: 'inline-flex', alignItems: 'center', gap: 5,
-        padding: '4px 9px', border: `1px solid ${T.border}`, borderRadius: T.rs,
-        background: T.surfaceRaised, color: T.textMuted, cursor: 'pointer',
-        fontSize: 11, fontWeight: 500, WebkitAppRegion: 'no-drag',
-      } as React.CSSProperties}>
-        <span style={{ display: 'flex', alignItems: 'center' }}>{I.cmd}</span>
+      <Button
+        variant="default"
+        size="compact-xs"
+        onClick={onCmdK}
+        data-hint-anchor="palette.discover"
+        leftSection={I.cmd}
+        style={{ color: T.textMuted, WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
         K
-      </button>
-      <button onClick={toggle} style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        width: 28, height: 28, border: `1px solid ${T.border}`, borderRadius: T.rs,
-        background: T.surfaceRaised, color: T.textMuted, cursor: 'pointer',
-        WebkitAppRegion: 'no-drag',
-      } as React.CSSProperties}>
-        {dark ? I.sun : I.moon}
-      </button>
+      </Button>
+      <Tooltip label={dark ? 'Switch to light theme' : 'Switch to dark theme'} withArrow openDelay={400}>
+        <ActionIcon
+          variant="default"
+          size={28}
+          aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+          onClick={toggle}
+          style={{ color: T.textMuted, WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          {dark ? I.sun : I.moon}
+        </ActionIcon>
+      </Tooltip>
     </div>
   );
 }
@@ -179,7 +185,7 @@ export default function ConnectionManager() {
     try {
       const allTabs = await api.tabs.list();
       const toClose = allTabs.filter((t) => t.connectionId === id);
-      await Promise.all(toClose.map((t) => api.tabs.close(t.id).catch(() => { /* best-effort */ })));
+      await Promise.all(toClose.map((t) => api.tabs.close(t.id).catch((err) => logFailure('closing a tab', err))));
     } catch (err) {
       notify.error(isIpcError(err) ? err.message : String(err), {
         title: 'Disconnected, but its tabs could not be closed',
@@ -197,6 +203,7 @@ export default function ConnectionManager() {
       // suggestions don't keep returning paths from a collection that no
       // longer exists in the renderer's worldview.
       invalidateSampleSchemaCache(id);
+      invalidateSchemaEnumCache(id);
       setDeleteTarget(null);
       // No sibling row to fall back to — this screen only ever shows one
       // Connection, so a delete always sends the user back to the Data View.

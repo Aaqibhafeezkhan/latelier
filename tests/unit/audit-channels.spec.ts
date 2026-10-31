@@ -41,6 +41,61 @@ describe('auditRecordFor', () => {
       .toEqual({ connectionId: 'c1', dbName: 'shop', collection: null, op: 'databaseDrop', summary: { op: 'databaseDrop' }, outcome: 'ok', errorCode: null });
   });
 
+  describe('collectionModify', () => {
+    const modify = (options: Record<string, unknown>, env: Envelope<unknown> = okEnv({})) =>
+      auditRecordFor(IPC_CHANNELS.collectionModify, { ...T, options }, env);
+    const view = { viewOn: 'src', pipeline: '[]' };
+
+    it('names the changed groups in a fixed order, whatever order the options arrive in', () => {
+      expect(modify({ validationAction: 'warn', validationLevel: 'moderate', validator: '{}' })).toEqual({
+        ...T,
+        op: 'collectionModify',
+        summary: { op: 'collectionModify', changed: ['validator', 'validationLevel', 'validationAction'] },
+        outcome: 'ok',
+        errorCode: null,
+      });
+    });
+
+    it.each([
+      [{ validator: '{"a":1}' }, ['validator']],
+      [{ validationLevel: 'off' }, ['validationLevel']],
+      [{ validationAction: 'error' }, ['validationAction']],
+      [{ validator: '{}', validationAction: 'error' }, ['validator', 'validationAction']],
+      [{ validationLevel: 'strict', validationAction: 'warn' }, ['validationLevel', 'validationAction']],
+      [view, ['view']],
+      [{ viewOn: 'src' }, ['view']],
+      [{ pipeline: '[]' }, ['view']],
+    ])('summarises %j as %j', (options, changed) => {
+      expect(modify(options)!.summary).toEqual({ op: 'collectionModify', changed });
+    });
+
+    it('treats an undefined option as absent', () => {
+      expect(modify({ validator: undefined, validationLevel: 'off' })!.summary)
+        .toEqual({ op: 'collectionModify', changed: ['validationLevel'] });
+    });
+
+    it('never carries an option value', () => {
+      const rec = modify({
+        validator: '{"$jsonSchema":{"enum":["VALUE-MARKER"]}}',
+        validationLevel: 'strict',
+        validationAction: 'warn',
+      });
+      expect(JSON.stringify(rec)).not.toMatch(/VALUE-MARKER|\$jsonSchema|strict|warn/);
+      const viewRec = modify({ viewOn: 'VALUE-MARKER', pipeline: '[{"$match":{"s":"VALUE-MARKER"}}]' });
+      expect(JSON.stringify(viewRec)).not.toContain('VALUE-MARKER');
+    });
+
+    it('records a failure with the envelope code and the same groups', () => {
+      expect(modify(view, errEnv({ code: 'MONGO_ERROR', message: 'no' }))).toStrictEqual({
+        ...T,
+        op: 'collectionModify',
+        summary: { op: 'collectionModify', changed: ['view'] },
+        outcome: 'error',
+        errorCode: 'MONGO_ERROR',
+      });
+    });
+  });
+
   it('keeps document bodies and the confirm token out of the record', () => {
     const recs = [
       auditRecordFor(IPC_CHANNELS.docInsertMany, { ...T, docsJson: '[{"secret":"BODY"}]' }, okEnv({ insertedCount: 1, insertedIds: ['BODY-ID'] })),

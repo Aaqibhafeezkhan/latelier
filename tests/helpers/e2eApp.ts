@@ -1,3 +1,4 @@
+import type { ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -124,6 +125,25 @@ export async function launchApp(
 }
 
 /**
+ * Teardown close. `app.close()` quits through `before-quit`, where the quit
+ * guard asks a native question over unsaved work (a dirty connection form,
+ * say) — on a window a test instance never shows, so it would wait forever.
+ * Teardown answers "Quit" to it; a test that is about the question stubs the
+ * dialog itself. Stubbed only here, never at launch, so a dialog raised
+ * during the body still surfaces. An app the test already quit is left alone:
+ * `proc` is captured at launch, because `app.process()` throws once Playwright
+ * has seen the app close.
+ */
+async function closeApp(app: ElectronApplication, proc: ChildProcess): Promise<void> {
+  if (proc.exitCode === null && proc.signalCode === null) {
+    await app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = (async () => ({ response: 1, checkboxChecked: false })) as typeof dialog.showMessageBox;
+    });
+  }
+  await app.close();
+}
+
+/**
  * Run a body with a launched Electron app + isolated userData dir.
  * Guarantees `app.close()` and `rmSync(userDataDir)` even if `launchApp`
  * throws or the body's first await rejects.
@@ -134,11 +154,13 @@ export async function withApp<T>(
 ): Promise<T> {
   const userDataDir = freshUserData();
   let app: ElectronApplication | null = null;
+  let proc: ChildProcess | null = null;
   try {
     app = await launchApp(userDataDir, opts);
+    proc = app.process();
     return await fn(app, userDataDir);
   } finally {
-    if (app) await app.close();
+    if (app && proc) await closeApp(app, proc);
     fs.rmSync(userDataDir, { recursive: true, force: true });
   }
 }
@@ -153,11 +175,13 @@ export async function withAppOnUserData<T>(
   fn: (app: ElectronApplication) => Promise<T>,
 ): Promise<T> {
   let app: ElectronApplication | null = null;
+  let proc: ChildProcess | null = null;
   try {
     app = await launchApp(userDataDir);
+    proc = app.process();
     return await fn(app);
   } finally {
-    if (app) await app.close();
+    if (app && proc) await closeApp(app, proc);
   }
 }
 

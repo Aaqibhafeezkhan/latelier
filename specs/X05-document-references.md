@@ -271,7 +271,8 @@ current `lastRun.documents`.
 - Rule editor creates/edits/deletes rules with projection +
   display-template support.
 - Connection deletion cascades to reference rules (FK).
-- *(Follow-up)* Chip rendering in TableView / JsonView.
+- Table chips resolve dotted rules: a rule on `address.userId` puts its chip on the `address` object cell (the first nested rule by `localeCompare` whose target is a leaf, ObjectId sentinels included), and hover/open act on the nested path and value.
+- *(Follow-up)* Chip rendering in JsonView.
 - *(Follow-up)* Auto-detect for aggregation tabs.
 - *(Follow-up)* Drawer state persisted in
   `workspace_tabs.state_json` for tab switching while unpinned.

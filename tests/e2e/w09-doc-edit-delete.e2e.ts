@@ -68,8 +68,8 @@ test('doc writes: insert adds a row; edit changes a field; delete removes the ro
       await expect(win.getByText('fresh-insert')).toBeVisible({ timeout: 8000 });
 
       // ── Edit ────────────────────────────────────────────────────────────
-      // Per-row Edit button: `<button title="Edit document">` in TreeView.
-      await win.locator('button[title="Edit document"]').first().click();
+      // Per-row Edit button: the pencil button named "Edit document" in TreeView.
+      await win.getByRole('button', { name: /^Edit document/ }).first().click();
 
       // The Document Editor opens, one labelled input per field.
       const editor = win.getByRole('dialog', { name: 'Edit document' });
@@ -82,12 +82,12 @@ test('doc writes: insert adds a row; edit changes a field; delete removes the ro
       await expect(win.getByText('shipped')).toBeVisible({ timeout: 8000 });
 
       // ── Delete ──────────────────────────────────────────────────────────
-      // Per-row Delete: the trash-icon button with title="Delete document".
+      // Per-row Delete: the trash-icon button named "Delete document".
       // Its accessible name is "Delete document", which won't collide with
       // the DeleteConfirm dialog's button (whose accessible name is "Delete").
       // Click on the row containing 'to-be-deleted' to target that doc's
       // delete button — `.first()` of the matched row's children.
-      await win.locator('button[title="Delete document"]').nth(1).click();
+      await win.getByRole('button', { name: /^Delete document/ }).nth(1).click();
 
       // DeleteConfirm dialog: button with exact text "Delete" — unique on the
       // page when the dialog is open (per-row buttons name is "Delete document").

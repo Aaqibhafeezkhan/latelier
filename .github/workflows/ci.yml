@@ -60,7 +60,7 @@ jobs:
           # Full history so SonarCloud can tell new code from old by blame.
           fetch-depth: 0
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -91,7 +91,7 @@ jobs:
         run: |
           ver=$(node -p "require('./node_modules/electron/package.json').version")
           zip="electron-v${ver}-linux-x64.zip"
-          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 -o "/tmp/${zip}" \
+          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 --max-time 300 -o "/tmp/${zip}" \
             "https://github.com/electron/electron/releases/download/v${ver}/${zip}"
           rm -rf node_modules/electron/dist
           unzip -q "/tmp/${zip}" -d node_modules/electron/dist
@@ -167,10 +167,14 @@ jobs:
     # not for comfort: shard 3 draws the heavy specs today and a new spec file
     # lands wherever the split puts it.
     timeout-minutes: 20
+    env:
+      # Read by both the keyring install and the apt cache key, so the cache
+      # rolls over when the list changes.
+      KEYRING_PKGS: gnome-keyring libsecret-1-0 dbus-daemon dbus-bin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -191,6 +195,41 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      # The two apt steps below download ~33 MB of .deb files from the Ubuntu
+      # mirror, which has taken up to 10 minutes when the mirror is slow. Cache
+      # the .deb files so a warm run fetches nothing but the package indexes.
+      # The key changes with the Playwright version (its dependency list), the
+      # keyring list and the runner image (its package versions); bump the `v1`
+      # to drop the cache by hand. The image version comes last so the prefix
+      # before it is a restore key: a new image, which rolls out every week or
+      # so and can land on some shards of a run and not others, starts from the
+      # previous image's files and downloads only the packages that changed.
+      # `ImageOS`/`ImageVersion` are runner environment variables, not workflow
+      # `env`, so the key is built in shell, where an unset one fails the step.
+      - name: Compute apt cache key
+        id: apt-key
+        run: |
+          : "${ImageOS:?}" "${ImageVersion:?}"
+          pw=$(node -p "require('./package-lock.json').packages['node_modules/playwright-core'].version")
+          prefix="apt-v1-${ImageOS}-pw${pw}-${KEYRING_PKGS// /+}-"
+          echo "prefix=${prefix}" >> "$GITHUB_OUTPUT"
+          echo "key=${prefix}${ImageVersion}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore apt package cache
+        id: apt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-debs
+          key: ${{ steps.apt-key.outputs.key }}
+          restore-keys: ${{ steps.apt-key.outputs.prefix }}
+
+      # apt-get takes a .deb already in its archive directory instead of
+      # downloading it, once its checksum matches the package index; a stale
+      # one from an older image is simply downloaded again.
+      - name: Seed apt archives from the cache
+        if: steps.apt-cache.outputs.cache-matched-key != ''
+        run: sudo cp ~/apt-debs/*.deb /var/cache/apt/archives/
+
       # electron's bundled installer downloads the release zip fine, but its
       # extract-zip step silently no-ops on this runner (Node 24 / ubuntu-latest):
       # it leaves node_modules/electron/dist with only locales/ and never writes
@@ -201,7 +240,7 @@ jobs:
         run: |
           ver=$(node -p "require('./node_modules/electron/package.json').version")
           zip="electron-v${ver}-linux-x64.zip"
-          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 -o "/tmp/${zip}" \
+          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 --max-time 300 -o "/tmp/${zip}" \
             "https://github.com/electron/electron/releases/download/v${ver}/${zip}"
           rm -rf node_modules/electron/dist
           unzip -q "/tmp/${zip}" -d node_modules/electron/dist
@@ -210,8 +249,28 @@ jobs:
             && echo "electron binary OK ($ver)" \
             || { echo "::error::electron binary missing after unzip"; exit 1; }
 
+      # A healthy run of this step takes under a minute. When the Ubuntu mirror
+      # stalls, apt hangs until the 20-minute job limit cancels the whole shard
+      # before any test runs, so cap each attempt and retry instead. Run as
+      # root: Playwright then calls apt-get directly instead of through its own
+      # `sudo`, so apt stays in `timeout`'s process group and `--kill-after`
+      # reaches it. Started as the runner user, a timed-out attempt killed only
+      # Playwright and left apt-get holding the dpkg lock, so every retry failed
+      # at once with "Could not get lock". `env PATH` keeps setup-node's `node`,
+      # which sudo's secure_path would drop.
+      #
+      # `chromium` only: every spec drives Electron, which runs on Chromium's
+      # system libraries. A bare `install-deps` also pulls Firefox and WebKit's
+      # (gstreamer, codecs, GTK 4): about 185 packages and 139 MB on this runner,
+      # which a slow mirror cannot deliver inside the 12-minute step budget.
       - name: Install Playwright system deps
-        run: ./node_modules/.bin/playwright install-deps
+        timeout-minutes: 12
+        run: |
+          for attempt in 1 2 3; do
+            sudo env "PATH=$PATH" timeout --kill-after=10 240 ./node_modules/.bin/playwright install-deps chromium && exit 0
+            echo "::warning::playwright install-deps attempt ${attempt} failed or timed out"
+          done
+          exit 1
 
       # The secrets-vault specs need a real OS keyring. A bare runner has no
       # session D-Bus and no secret service, so Chromium falls back to its
@@ -222,7 +281,42 @@ jobs:
         # `apt-get update` is explicit rather than inherited from the step
         # above. `dbus-daemon` ships `dbus-run-session` and `dbus-bin` ships
         # `dbus-send`, which the next step uses to check the keyring.
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnome-keyring libsecret-1-0 dbus-daemon dbus-bin
+        timeout-minutes: 12
+        run: |
+          for attempt in 1 2 3; do
+            timeout 240 sudo apt-get update \
+              && timeout 240 sudo apt-get install -y --no-install-recommends $KEYRING_PKGS \
+              && exit 0
+            echo "::warning::keyring install attempt ${attempt} failed or timed out"
+          done
+          exit 1
+
+      # The archive directory is root-owned, but the .deb files in it are
+      # world-readable, so they are copied out to a runner-owned directory the
+      # cache action can save. `apt-get` keeps what it downloads unless an
+      # apt.conf.d hook deletes it (Docker images ship `docker-clean` for
+      # that); the runner image has none, and an empty copy fails here rather
+      # than saving an empty cache. Saved before `Run E2E`, so a red shard
+      # still warms the next run. On a cold run all four shards try to save
+      # the same key; the losers log "Unable to reserve cache" as a warning.
+      # After a restore from an older image, `autoclean` drops the .deb files
+      # whose versions the package index no longer lists, so the cache holds
+      # what this image installs instead of growing with every image.
+      - name: Collect downloaded .deb files
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get autoclean
+          rm -rf ~/apt-debs
+          mkdir -p ~/apt-debs
+          cp /var/cache/apt/archives/*.deb ~/apt-debs/
+          echo "collected $(find ~/apt-debs -name '*.deb' | wc -l) .deb files, $(du -sh ~/apt-debs | cut -f1)"
+
+      - name: Save apt package cache
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-debs
+          key: ${{ steps.apt-key.outputs.key }}
 
       - name: Run E2E
         env:
@@ -269,7 +363,7 @@ jobs:
 
       - name: Upload Playwright traces on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # Unique per shard — upload-artifact v4 refuses a name that already
           # exists, so a shared one would fail every shard after the first.

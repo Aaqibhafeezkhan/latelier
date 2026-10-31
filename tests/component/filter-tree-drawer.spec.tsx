@@ -7,7 +7,7 @@
 // testing note, a test that only inspects rendered DOM structure can pass
 // against a tree the printer would refuse to run.
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent, within } from '../helpers/render';
+import { act, render, screen, waitFor, fireEvent, within } from '../helpers/render';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { DRAGGED_FIELD_MIME } from '../../src/pages/Workspace/builder';
@@ -889,7 +889,7 @@ describe('Filter drawer — a Saved or Recent load drops the draft', () => {
   it.each(['Saved', 'Recent'] as const)('Run here from %s writes filterDraft: undefined with the loaded queryRaw', async (tab) => {
     const updateSpy = mountLoading(tab);
 
-    fireEvent.click(await screen.findByTitle('Run here'));
+    fireEvent.click(await screen.findByRole('button', { name: /in this tab$/ }));
 
     await waitFor(() => expect(lastWrittenQueryRaw(updateSpy)).toBe('{"z":{"$eq":"loaded"}}'));
     expect(lastWrittenDraft(updateSpy)).toEqual({ found: true, draft: undefined });
@@ -1050,6 +1050,9 @@ describe('Filter drawer — type-aware value editors', () => {
       const { updateSpy } = mountWith(makeState({ queryRaw: '{"s":{"$in":["a","b"]}}' }));
 
       const chipBox = await screen.findByRole('combobox', { name: 'Values' });
+      // Mantine drops a change to an unfocused combobox input as autofill, so
+      // the box is focused the way a user's click would focus it.
+      act(() => chipBox.focus());
       expect(screen.getByRole('button', { name: 'Remove a' })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Remove b' })).toBeTruthy();
 
@@ -1069,6 +1072,7 @@ describe('Filter drawer — type-aware value editors', () => {
       const { updateSpy } = mountWith(makeState({ queryRaw: '{"s":{"$in":["a"]}}' }));
 
       const chipBox = await screen.findByRole('combobox', { name: 'Values' });
+      act(() => chipBox.focus());
       fireEvent.change(chipBox, { target: { value: '42' } });
       fireEvent.keyDown(chipBox, { key: 'Enter' });
       fireEvent.change(chipBox, { target: { value: '"42"' } });
@@ -1088,6 +1092,7 @@ describe('Filter drawer — type-aware value editors', () => {
       fireEvent.click(await screen.findByRole('option', { name: 'string' }));
 
       const chipBox = await screen.findByRole('combobox', { name: 'Values' });
+      act(() => chipBox.focus());
       fireEvent.change(chipBox, { target: { value: '007' } });
       fireEvent.keyDown(chipBox, { key: 'Enter' });
 
@@ -1246,6 +1251,40 @@ describe('Filter drawer — type-aware value editors', () => {
 
     await waitFor(() => expect(screen.queryByPlaceholderText('value')).toBeNull());
   });
+
+  it('the mongosh preview sits on its own line, and gives way to a value error rather than stacking with it', async () => {
+    mountWith(makeState());
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add condition' }));
+    fireEvent.change(await screen.findByPlaceholderText('field'), { target: { value: 'o' } });
+    await setValueType('objectid');
+    const value = screen.getByPlaceholderText('value');
+    fireEvent.change(value, { target: { value: 'abc' } });
+
+    await waitFor(() => expect(descriptionOf(value)).toBe('ObjectId must be 24 hex characters'));
+    expect(screen.queryByText('ObjectId("abc")')).toBeNull();
+
+    fireEvent.change(value, { target: { value: OID } });
+
+    const preview = await screen.findByText(`ObjectId("${OID}")`);
+    expect(preview.getAttribute('aria-hidden')).toBe('true');
+    // Beside the input it took the width the input needed; under it, it takes none.
+    const inputRow = preview.previousElementSibling;
+    expect(inputRow?.contains(value)).toBe(true);
+    expect(inputRow?.contains(preview)).toBe(false);
+  });
+});
+
+describe('Filter drawer — a canonical EJSON date', () => {
+  it('pasted as {$date:{$numberLong}} is an editable raw row, not a condition on "$date"', async () => {
+    const src = '{"d":{"$date":{"$numberLong":"1700000000000"}}}';
+    mountWith(makeState({ queryRaw: src }));
+
+    const rawBox = (await screen.findByRole('textbox', { name: 'Raw clause 1' })) as HTMLTextAreaElement;
+    expect(rawBox.value).toBe(src);
+    expect(screen.queryByText(/is not encodable/)).toBeNull();
+    expect(screen.queryByPlaceholderText('value')).toBeNull();
+  });
 });
 
 describe('Filter drawer — a value whose type disagrees with the sample', () => {
@@ -1385,6 +1424,7 @@ describe('Filter drawer — an empty $in list is never printed', () => {
     await waitFor(() => expect(descriptionOf(chipBox)).toBe(EMPTY));
     expect(lastWrittenQueryRaw(updateSpy)).toBeUndefined();
 
+    act(() => chipBox.focus());
     fireEvent.change(chipBox, { target: { value: 'a' } });
     fireEvent.keyDown(chipBox, { key: 'Enter' });
     await waitFor(() => expect(lastWrittenQueryRaw(updateSpy)).toBe('{"tags":{"$in":["a"]}}'));

@@ -6,8 +6,11 @@ import type {
   ResultViewMode,
   CollectionTabState,
 } from '@shared/types';
-import { api, isIpcError } from '../../api/atelier';
+import { api, getErrorMessage, isIpcError } from '../../api/atelier';
+import { notify } from '../../theme/notifications';
+import { logFailure } from '../../utils/rendererLog';
 import { invalidateSampleSchemaCache } from '../../features/fieldSuggestions/sources/sampleSchemaSource';
+import { invalidateSchemaEnumCache } from '../../features/fieldSuggestions/sources/schemaEnumSource';
 import { themeVars } from '../../theme/themeVars';
 import { Button, Group, Select, TextInput, Tooltip } from '@mantine/core';
 import { ScriptEditor } from '../../components/ScriptEditor';
@@ -109,6 +112,7 @@ function ScriptTabInner({ tab, defaultDb, onPatch }: ScriptTabProps) {
       // field-suggestion samples — also when the run threw, since it may have
       // written before that.
       invalidateSampleSchemaCache(tab.connectionId);
+      invalidateSchemaEnumCache(tab.connectionId);
       cancelTokenRef.current = null;
       runningRef.current = false;
       setRunning(false);
@@ -118,7 +122,12 @@ function ScriptTabInner({ tab, defaultDb, onPatch }: ScriptTabProps) {
   const cancelScript = React.useCallback(() => {
     const token = cancelTokenRef.current;
     if (!token) return;
-    void api.script.cancel({ token }).catch(() => {});
+    void api.script.cancel({ token }).catch((err) => {
+      logFailure('script cancel', err);
+      notify.error(getErrorMessage(err, 'The script could not be cancelled.'), {
+        title: 'Cancel failed',
+      });
+    });
   }, []);
 
   const onSourceChange = React.useCallback(
@@ -245,6 +254,7 @@ function ScriptTabInner({ tab, defaultDb, onPatch }: ScriptTabProps) {
           onRun={runScript}
           readOnly={running}
           testId="script-editor"
+          ariaLabel="Script editor"
           collections={collections}
           connectionId={tab.connectionId}
           dbName={effectiveDb}

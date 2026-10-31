@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActionIcon, Tooltip } from '@mantine/core';
+import { ActionIcon, Tooltip, UnstyledButton } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
 import { ContextMenu } from '../../components/ContextMenu';
@@ -185,6 +185,7 @@ export function TabStrip({
       ref={stripRef}
       role="tablist"
       aria-label="Open tabs"
+      data-hint-anchor="startup.restore"
       // -1: a keyboard-menu close (see the `returnFocusTo` comment below)
       // needs this container to be a valid `.focus()` target, but it is not
       // itself a roving-tabindex stop — the tabs are.
@@ -418,7 +419,7 @@ export function TabStrip({
         );
       })}
       <Tooltip label="New script tab" withArrow>
-        <button
+        <UnstyledButton
           onClick={onOpenNewScript}
           aria-label="New script tab"
           style={{
@@ -426,15 +427,12 @@ export function TabStrip({
             alignItems: 'center',
             gap: 3,
             padding: '0 10px',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
             color: T.textMuted,
             fontSize: 11,
           }}
         >
           + Script
-        </button>
+        </UnstyledButton>
       </Tooltip>
 
       {menu && menuTab && (

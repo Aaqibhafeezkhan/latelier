@@ -35,3 +35,25 @@ describe('queryRunKey projection ordering', () => {
     expect(raw).not.toBe(modelled);
   });
 });
+
+// W14 §9 — a collation alone changes which documents match, so a query that
+// only changed its options has not been run yet.
+describe('queryRunKey find options', () => {
+  it.each([
+    ['collation', { collation: '{"locale":"en","strength":2}' }],
+    ['hint', { hint: '_id_' }],
+    ['maxTimeMS', { maxTimeMS: 500 }],
+    ['readPreference', { readPreference: 'nearest' }],
+  ] as const)('%s changes the key', (_name, option) => {
+    expect(queryRunKey({ ...base, ...option })).not.toBe(queryRunKey(base));
+  });
+
+  it('keeps the options apart, so one value cannot pose as another', () => {
+    expect(queryRunKey({ ...base, collation: 'x' })).not.toBe(queryRunKey({ ...base, hint: 'x' }));
+    expect(queryRunKey({ ...base, hint: 'nearest' })).not.toBe(queryRunKey({ ...base, readPreference: 'nearest' }));
+  });
+
+  it('an unset option and a blank one share a key', () => {
+    expect(queryRunKey({ ...base, collation: '', hint: '' })).toBe(queryRunKey(base));
+  });
+});

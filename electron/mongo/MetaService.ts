@@ -186,6 +186,7 @@ export class MetaService {
         ...(opts.validator !== undefined ? { validator: ejsonStringify(opts.validator) } : {}),
         ...(opts.validationLevel !== undefined ? { validationLevel: opts.validationLevel } : {}),
         ...(opts.validationAction !== undefined ? { validationAction: opts.validationAction } : {}),
+        ...(opts.collation !== undefined ? { collation: ejsonStringify(opts.collation) } : {}),
       },
     };
     // A view has no storage of its own to measure.
@@ -240,6 +241,7 @@ interface CollectionSpec {
     validator?: Document;
     validationLevel?: ValidationLevel;
     validationAction?: ValidationAction;
+    collation?: Document;
   };
 }
 

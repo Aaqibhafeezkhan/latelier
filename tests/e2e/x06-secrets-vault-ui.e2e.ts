@@ -80,6 +80,14 @@ test('secrets vault ui: SCRAM password is masked + stored on edit reopen', async
       throw new Error(`secrets probe failed unexpectedly: ${JSON.stringify(probe)}`);
     }
 
+    // With a usable keychain the column key is wrapped, and Settings says so.
+    await win.getByRole('button', { name: 'Open settings' }).click();
+    await expect(win.getByTestId('local-data-protection')).toContainText(
+      'encrypted on disk with a key held by the OS keychain',
+    );
+    await win.keyboard.press('Escape');
+    await expect(win.getByTestId('local-data-protection')).toBeHidden();
+
     await expectConsoleClean(win, async () => {
       const switcher = new WorkspacePage(win).switcher;
       await switcher.waitVisible();

@@ -1,4 +1,5 @@
 import React from 'react';
+import { ActionIcon, Tooltip } from '@mantine/core';
 import {
   List,
   useDynamicRowHeight,
@@ -279,30 +280,24 @@ function DocRowImpl({
             setActiveIndex(index);
           }}
         />
-        <button
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size={28}
+          c="var(--atelier-text-ghost)"
           onClick={(e) => {
             e.stopPropagation();
             onRowExpand(docId, !isExpanded);
           }}
           aria-label={isExpanded ? 'Collapse document' : 'Expand document'}
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 28,
-            height: 28,
-            padding: 0,
-            background: 'none',
-            border: 'none',
-            color: 'var(--atelier-text-ghost)',
-            cursor: 'pointer',
             flexShrink: 0,
             transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
             transition: 'transform 120ms',
           }}
         >
           {I.chevD}
-        </button>
+        </ActionIcon>
 
         <span
           style={{
@@ -323,68 +318,49 @@ function DocRowImpl({
         />
 
         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onEditDoc(doc);
-            }}
-            title="Edit document"
-            style={{
-              background: 'none',
-              border: '1px solid var(--atelier-border)',
-              borderRadius: 'var(--atelier-radius-xs)',
-              padding: '4px 7px',
-              cursor: 'pointer',
-              color: 'var(--atelier-text-muted)',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            {I.edit}
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDeleteDoc(doc);
-            }}
-            title="Delete document"
-            style={{
-              background: 'none',
-              border: '1px solid var(--atelier-border)',
-              borderRadius: 'var(--atelier-radius-xs)',
-              padding: '4px 7px',
-              cursor: 'pointer',
-              color: 'var(--atelier-red)',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            {I.trash}
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              const viaKeyboard = e.detail === 0;
-              onOpenRowMenu(doc, anchorFromRect(e.currentTarget.getBoundingClientRect()), {
-                returnFocusTo: viaKeyboard ? e.currentTarget : undefined,
-                focusMenuOnOpen: viaKeyboard,
-              });
-            }}
-            title="More actions"
-            aria-label={`More actions for document ${shortId}`}
-            style={{
-              background: 'none',
-              border: '1px solid var(--atelier-border)',
-              borderRadius: 'var(--atelier-radius-xs)',
-              padding: '4px 7px',
-              cursor: 'pointer',
-              color: 'var(--atelier-text-muted)',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            {I.more}
-          </button>
+          <Tooltip label="Edit document" withArrow openDelay={400}>
+            <ActionIcon
+              variant="default"
+              c="var(--atelier-text-muted)"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditDoc(doc);
+              }}
+              aria-label={`Edit document ${shortId}`}
+            >
+              {I.edit}
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Delete document" withArrow openDelay={400}>
+            <ActionIcon
+              variant="default"
+              c="var(--atelier-red)"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteDoc(doc);
+              }}
+              aria-label={`Delete document ${shortId}`}
+            >
+              {I.trash}
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="More actions" withArrow openDelay={400}>
+            <ActionIcon
+              variant="default"
+              c="var(--atelier-text-muted)"
+              onClick={(e) => {
+                e.stopPropagation();
+                const viaKeyboard = e.detail === 0;
+                onOpenRowMenu(doc, anchorFromRect(e.currentTarget.getBoundingClientRect()), {
+                  returnFocusTo: viaKeyboard ? e.currentTarget : undefined,
+                  focusMenuOnOpen: viaKeyboard,
+                });
+              }}
+              aria-label={`More actions for document ${shortId}`}
+            >
+              {I.more}
+            </ActionIcon>
+          </Tooltip>
         </div>
       </div>
 

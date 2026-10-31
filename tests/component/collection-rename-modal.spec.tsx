@@ -3,8 +3,16 @@ import { render, screen, waitFor } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import { RenameCollectionModal } from '../../src/pages/Workspace/RenameCollectionModal';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
+import { invalidateSchemaEnumCache } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
+
+// Spied so the write can be checked for dropping the cached enum suggestions.
+vi.mock('../../src/features/fieldSuggestions/sources/schemaEnumSource', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/features/fieldSuggestions/sources/schemaEnumSource')>()),
+  invalidateSchemaEnumCache: vi.fn(),
+}));
 
 afterEach(() => {
+  vi.mocked(invalidateSchemaEnumCache).mockClear();
   uninstallAtelierMock();
   vi.restoreAllMocks();
 });
@@ -49,6 +57,10 @@ describe('RenameCollectionModal', () => {
       { connectionId: 'c1', dbName: 'shop', collection: 'orders', newName: 'purchase_orders' },
     ]));
     await waitFor(() => expect(onRenamed).toHaveBeenCalledWith('purchase_orders'));
+    expect(vi.mocked(invalidateSchemaEnumCache).mock.calls).toEqual([
+      ['c1', 'shop', 'orders'],
+      ['c1', 'shop', 'purchase_orders'],
+    ]);
   });
 
   // #91 — the button stays real-enabled while submitting (SubmitButton), so

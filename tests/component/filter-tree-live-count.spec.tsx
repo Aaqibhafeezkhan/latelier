@@ -7,6 +7,8 @@ import { render, renderHook, screen, fireEvent, act } from '../helpers/render';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { useLiveMatchCount } from '../../src/pages/Workspace/useLiveMatchCount';
+import { CollectionWorkspaceProvider } from '../../src/pages/Workspace/CollectionWorkspaceProvider';
+import { emptyWorkspaceActions, emptyWorkspaceMeta } from '../helpers/render';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import type { CollectionTabState, WorkspaceTab } from '@shared/types';
 import type { IpcApi } from '@shared/ipc';
@@ -394,5 +396,90 @@ describe('Filter drawer — pointer to the other query controls (W15 §1.2)', ()
 
     const note = await screen.findByText(/sort, limit and skip are set in the query bar/i);
     expect(note.textContent).toMatch(/projection is under fields/i);
+  });
+});
+
+// W14 §9 — a collation changes which documents match, so the live count
+// carries the tab's options to agree with Run, and asks again when they move.
+describe('Live match count — find options', () => {
+  it('counts with the tab collation, hint and read preference, and recounts when one changes', async () => {
+    const count = vi.fn<CountFn>(async () => ({ count: 2 }));
+    installAtelierMock({ query: { count } });
+    const state = (collation: string): CollectionTabState => ({
+      view: 'Tree',
+      builder: { projection: [], sort: '', limit: '', collation, hint: ' _id_ ', maxTimeMS: '500', readPreference: 'nearest' },
+      queryRaw: '{"name":"a"}',
+      page: 0,
+      pageSize: 50,
+      activeBuilderTab: 'Builder',
+    });
+    let collation = '{"locale":"en","strength":2}';
+    const hook = renderHook(
+      () => useLiveMatchCount({ connectionId: 'c1', dbName: 'mydb', collection: 'opts', queryRaw: '{"name":"a"}', paused: false }),
+      {
+        wrapper: ({ children }) => (
+          <CollectionWorkspaceProvider state={state(collation)} actions={emptyWorkspaceActions()} meta={emptyWorkspaceMeta()}>
+            {children}
+          </CollectionWorkspaceProvider>
+        ),
+      },
+    );
+    await advance(500);
+    expect(hook.result.current).toEqual({ state: 'ok', count: 2 });
+    expect(count).toHaveBeenCalledTimes(1);
+    expect(count.mock.calls[0]![0]).toEqual({
+      connectionId: 'c1',
+      dbName: 'mydb',
+      collection: 'opts',
+      filter: '{"name":"a"}',
+      collation: '{"locale":"en","strength":2}',
+      hint: '_id_',
+      readPreference: 'nearest',
+    });
+
+    collation = '{"locale":"fr"}';
+    hook.rerender();
+    expect(hook.result.current).toEqual({ state: 'counting' });
+    await advance(500);
+    expect(count).toHaveBeenCalledTimes(2);
+    expect(count.mock.calls[1]![0].collation).toBe('{"locale":"fr"}');
+  });
+
+  // A half-typed collation would come back as a server refusal, shown as
+  // "unavailable" for a filter that is fine: say nothing until it runs.
+  it('asks nothing while a find option cannot run, and counts once it can', async () => {
+    const count = vi.fn<CountFn>(async () => ({ count: 2 }));
+    installAtelierMock({ query: { count } });
+    let collation = '{"locale":';
+    const hook = renderHook(
+      () => useLiveMatchCount({ connectionId: 'c1', dbName: 'mydb', collection: 'half', queryRaw: '{"name":"a"}', paused: false }),
+      {
+        wrapper: ({ children }) => (
+          <CollectionWorkspaceProvider
+            state={{
+              view: 'Tree',
+              builder: { projection: [], sort: '', limit: '', collation },
+              queryRaw: '{"name":"a"}',
+              page: 0,
+              pageSize: 50,
+              activeBuilderTab: 'Builder',
+            }}
+            actions={emptyWorkspaceActions()}
+            meta={emptyWorkspaceMeta()}
+          >
+            {children}
+          </CollectionWorkspaceProvider>
+        ),
+      },
+    );
+    await advance(500);
+    expect(hook.result.current).toEqual({ state: 'idle' });
+    expect(count).not.toHaveBeenCalled();
+
+    collation = '{"locale":"en"}';
+    hook.rerender();
+    await advance(500);
+    expect(hook.result.current).toEqual({ state: 'ok', count: 2 });
+    expect(count.mock.calls[0]![0].collation).toBe('{"locale":"en"}');
   });
 });

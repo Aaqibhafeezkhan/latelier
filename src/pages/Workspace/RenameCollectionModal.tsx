@@ -1,6 +1,7 @@
 import React from 'react';
 import { Alert, Button, Group, Modal, Stack, Text, TextInput } from '@mantine/core';
 import { api, getErrorMessage } from '../../api/atelier';
+import { invalidateSchemaEnumCache } from '../../features/fieldSuggestions/sources/schemaEnumSource';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
 import { SubmitButton } from '../../components/SubmitButton';
 
@@ -44,6 +45,10 @@ export function RenameCollectionModal({
     setError(null);
     try {
       await api.collection.rename({ connectionId, dbName, collection, newName: trimmed });
+      // The validator moves with the collection: neither name's cached
+      // enum suggestions still hold.
+      invalidateSchemaEnumCache(connectionId, dbName, collection);
+      invalidateSchemaEnumCache(connectionId, dbName, trimmed);
       finish();
     } catch (err) {
       setError(getErrorMessage(err, 'Rename failed'));

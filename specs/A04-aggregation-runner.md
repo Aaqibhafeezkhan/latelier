@@ -123,8 +123,17 @@ Preview-up-to-stage is simpler: run the truncated pipeline plus `$limit: N`; ret
 
 - `registerCancel(token)` creates an `AbortController` keyed by token.
 - `agg:cancel` aborts it; active cursors close.
-- A write pipeline (`$out`/`$merge`) is the exception: the server does not stop the write when its client disconnects, so once the write is sent it runs to completion and the run reports completed (with empty per-stage counts when the cancel lands before instrumentation finishes), never "cancelled". A cancel that arrives before the write is sent still rejects with "cancelled". A sent write that fails on its own (a duplicate key under `whenMatched: 'fail'`, a timeout, a permission error) is reported as that error even after a cancel, since part of it may have landed.
-- In the tab, Cancel on a read-only run stops it at once and drops its late result. Cancel on a confirmed write run keeps waiting instead: the run button reads "Stopping…" and a toast explains that a started write stage can't be interrupted; the run then shows its normal result plus a "ran to completion" notice, shows main's error in the output panel if the write failed, or stops quietly if main reports "cancelled".
+- A write pipeline (`$out`/`$merge`) is the exception: the server does not stop the write when its client disconnects, so the write aggregate carries no abort signal. Instead `run()` tags it with a unique `comment` (`latelier-agg:<uuid>`), and a cancel that lands while the write is in flight finds the op through `currentOp` (`$ownOps: true`, filtered on `command.comment`) and `killOp`s every match (on a sharded cluster each shard runs its part under the same comment). These commands go over a short-lived control client of their own (`MongoPool.openControlClient`: same URI, credentials and TLS, `maxPoolSize: 1`, closed afterwards). On the pooled client they would queue behind the aggregate they are meant to stop whenever it holds the pool's last connection, which at `maxPoolSize: 1` it always does. The comment survives in `currentOp` when a long command shows as `command.$truncated`. Filtering on `ns` would not work, because a running `$out` reports its temp collection as its namespace. The aggregate is lazy, so the command may not have reached the server yet: the lookup repeats every 100ms until the op appears or the write settles. `killOp` answers ok for any opid, so the outcome is read from how the write itself settles:
+  - **Killed** (the write rejects with 11601 `Interrupted`): the run rejects with "cancelled" and details `{ writeStageOp, partialWrite }`. A killed `$out` leaves its target untouched, because `$out` writes to a temp collection and renames it only at the end, and the server drops that temp collection. A killed `$merge` keeps every batch it already flushed (up to 16MB each) and nothing rolls them back, so `partialWrite` is true. `run()` does not count the target, so this means "may have written some documents", not a number.
+  - **Not killed**: the op already finished, or `currentOp`/`killOp` was refused (no `killop` privilege, or a hosted tier that disallows the commands; the refusal is logged as a warning). The write runs to completion and the run reports completed, with empty per-stage counts when the cancel lands before instrumentation finishes, never "cancelled".
+  - A cancel that arrives before the write is sent still rejects with "cancelled", without details.
+  - A sent write that fails on its own (a duplicate key under `whenMatched: 'fail'`, a timeout, a permission error) is reported as that error even after a cancel, since part of it may have landed.
+- In the tab, Cancel on a read-only run stops it at once and drops its late result. Cancel on a confirmed write run waits for main instead. The run button reads "Stopping…" and a toast says the server is being asked to stop the write stage. Then one of these happens:
+  - a killed `$out` says its target was left unchanged
+  - a killed `$merge` warns that some documents may already have been written and stay in the target
+  - a write that couldn't be stopped shows its normal result plus a "ran to completion" notice
+  - a write that failed shows main's error in the output panel
+  - a cancel without details (the write was never sent) stops quietly
 - Auto-cancel on tab close.
 
 ## 6. Write-stage confirmation
@@ -152,6 +161,7 @@ Each stage body parsed as EJSON; unparseable → VALIDATION with `details.stageI
 - A valid pipeline produces `rows`, `stageCounts`, and `stageSamples` populated for each enabled stage (except the final write stage if any).
 - Disabled stages don't affect execution or instrumentation.
 - Cancellation aborts both the main cursor and the instrumentation facet.
+- Cancelling a sent `$out` kills it on the server and leaves its target unchanged. Cancelling a sent `$merge` kills it and reports `partialWrite: true`. When the kill is refused, the write runs to completion and reports completed.
 - `$out`/`$merge` without `allowWrite: true` returns VALIDATION with structured details.
 - Fallback "separate" instrumentation runs when `$facet` is impossible.
 - Recent query row is inserted for each run.
@@ -164,6 +174,7 @@ Each stage body parsed as EJSON; unparseable → VALIDATION with `details.stageI
 - **write-stage-gate.spec.ts**: `$out` without `allowWrite` → VALIDATION `details.writeStageOp == '$out'`.
 - **write-stage-allow.spec.ts**: `$out` with `allowWrite: true` → data written.
 - **cancel.spec.ts**: long `$lookup` → cancel token → agg:run rejects with internal "cancelled"; subsequent runs unaffected.
+- **cancel-write**: slow `$out` → cancel → rejects "cancelled" `{ writeStageOp: '$out', partialWrite: false }`, target unchanged, no `tmp.agg_out.*` left, gone from `currentOp`. Slow `$merge` over large documents, cancelled after its first batch is written → `partialWrite: true`, with a target count between 0 and the source count. The same `$out` on a connection with `maxPoolSize: 1` is still killed. `killOp` or `currentOp` refused (code 13) → the run resolves, the target is fully written and the refusal is logged.
 - **facet-fallback.spec.ts**: seed a pipeline whose `$facet` variant fails → service falls back to separate runs; stageCounts still populated.
 - **preview-up-to-stage.spec.ts**: request preview after stage 2 → sample length ≤ 5.
 - **recent-capture.spec.ts**: after run, `recent_queries` has an aggregation entry for this connection.

@@ -1,10 +1,11 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
 import { render, screen, waitFor, fireEvent, within, act } from '../helpers/render';
 import userEvent from '@testing-library/user-event';
 import { RouterProvider, createMemoryRouter, useLocation } from 'react-router-dom';
 import NewConnection from '../../src/pages/NewConnection';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import type { Connection } from '@shared/types';
+import type { IpcApi } from '@shared/ipc';
 
 // `NewConnection` blocks navigation while dirty, which needs a data router.
 function renderNew(initial = '/connections/new', id?: string) {
@@ -85,6 +86,14 @@ describe('NewConnection (create mode)', () => {
     installAtelierMock({});
     renderNew();
     expect(await screen.findByPlaceholderText(/My MongoDB Server/i)).toBeTruthy();
+  });
+
+  it('shows the theme toggle tooltip when keyboard focus lands on it', async () => {
+    installAtelierMock({});
+    renderNew();
+    fireEvent.focus(await screen.findByRole('button', { name: /Switch to (light|dark) theme/ }));
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toMatch(/^Switch to (light|dark) theme$/);
   });
 
   it('pasting a URI applies parsed fields', async () => {
@@ -623,5 +632,44 @@ describe('NewConnection (unsaved-changes guard)', () => {
     });
     expect(await screen.findByRole('dialog', { name: 'Discard changes?' })).toBeTruthy();
     expect(router.state.location.pathname).toBe('/connections/new');
+  });
+});
+
+// Closing the window and quitting are not router navigations: the form's dirty
+// state goes to main instead, which names it in the quit question (#531).
+describe('NewConnection (unsaved-work report to main)', () => {
+  type SetUnsavedWork = IpcApi['app']['setUnsavedWork'];
+  const reported = (spy: Mock<SetUnsavedWork>) => spy.mock.calls.map(([input]) => input.count);
+
+  function installReporting(overrides: Parameters<typeof installAtelierMock>[0] = {}) {
+    const setUnsavedWork = vi.fn<SetUnsavedWork>(async () => {});
+    installAtelierMock({ ...overrides, app: { setUnsavedWork } });
+    return setUnsavedWork;
+  }
+
+  it('reports 1 for the connection form once it is dirty, and 0 when it unmounts', async () => {
+    const setUnsavedWork = installReporting();
+    const { unmount } = renderNew();
+    await userEvent.type(await screen.findByPlaceholderText(/My MongoDB Server/i), 'Half typed');
+    await waitFor(() =>
+      expect(setUnsavedWork).toHaveBeenLastCalledWith({ source: 'connectionForm', count: 1 }),
+    );
+    unmount();
+    expect(setUnsavedWork).toHaveBeenLastCalledWith({ source: 'connectionForm', count: 0 });
+  });
+
+  it('reports 0 after a successful save, and never 1 again on the way out', async () => {
+    const setUnsavedWork = installReporting({ conn: { create: (async () => ({ id: 'c1' })) as never } });
+    const { router } = renderNew();
+    await userEvent.type(await screen.findByPlaceholderText(/My MongoDB Server/i), 'X');
+    await userEvent.type(screen.getByPlaceholderText(/cluster\.mongodb\.net/i), 'localhost');
+    await userEvent.click(screen.getByText('Auth'));
+    await userEvent.selectOptions(screen.getAllByRole('combobox')[0]!, 'none');
+    const beforeSave = setUnsavedWork.mock.calls.length;
+    fireEvent.click(screen.getByText(/^Save$/));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/workspace'));
+    const afterSave = reported(setUnsavedWork).slice(beforeSave);
+    expect(afterSave.length).toBeGreaterThan(0);
+    expect(afterSave.every((count) => count === 0)).toBe(true);
   });
 });

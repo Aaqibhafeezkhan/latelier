@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createLogger, isLogFile, redactSecrets } from '../../electron/log';
+import { compareLogFiles, createLogger, createRateGate, isLogFile, redactSecrets } from '../../electron/log';
 import { useUmask022 } from '../helpers/umask';
 
 describe('createLogger', () => {
@@ -278,8 +278,138 @@ describe('createLogger', () => {
       ['xlatelier.2026-01-01.log', false],
       ['xmongolab.2026-01-01.log', false],
       ['mongolab-2026-01-01.log', false],
+      ['latelier.2026-01-01.1.log', true],
+      ['latelier.2026-01-01.12.log', true],
     ])('%s -> %s', (name, expected) => {
       expect(isLogFile(name)).toBe(expected);
+    });
+  });
+
+  describe('size cap', () => {
+    const DAY = '2026-03-05';
+    const logsDir = () => path.join(dir, 'logs');
+    const file = (name: string) => path.join(logsDir(), name);
+    const msgs = (name: string) =>
+      fs.readFileSync(file(name), 'utf8').trim().split('\n').map((l) => JSON.parse(l).msg);
+    const NOW = `${DAY}T12:00:00.000Z`;
+    const line = (msg: string) => JSON.stringify({ t: NOW, level: 'info', tag: 't', msg }) + '\n';
+    // Every line is the same length: fixed clock, fixed tag, one-character msg.
+    const lineBytes = line('a').length;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(NOW));
+    });
+
+    it('keeps a line that lands exactly on the cap, and rolls the next one to part 1', () => {
+      const log = createLogger(dir, { toStderr: false, maxFileBytes: 2 * lineBytes });
+      log.info('t', 'a');
+      log.info('t', 'b');
+      log.info('t', 'c');
+      expect(msgs(`latelier.${DAY}.log`)).toEqual(['a', 'b']);
+      expect(msgs(`latelier.${DAY}.1.log`)).toEqual(['c']);
+      expect(fs.statSync(file(`latelier.${DAY}.log`)).size).toBe(2 * lineBytes);
+    });
+
+    it('keeps rolling to numbered parts, never writing a `.0` part', () => {
+      const log = createLogger(dir, { toStderr: false, maxFileBytes: lineBytes });
+      for (const m of ['a', 'b', 'c']) log.info('t', m);
+      expect(fs.readdirSync(logsDir()).sort((x, y) => x.localeCompare(y))).toEqual([
+        `latelier.${DAY}.1.log`, `latelier.${DAY}.2.log`, `latelier.${DAY}.log`,
+      ]);
+      expect(msgs(`latelier.${DAY}.2.log`)).toEqual(['c']);
+    });
+
+    it('counts bytes, not characters', () => {
+      // 'é' is one UTF-16 unit and two UTF-8 bytes: counted as characters the
+      // second line would still fit.
+      const log = createLogger(dir, { toStderr: false, maxFileBytes: 2 * lineBytes + 1 });
+      log.info('t', 'é');
+      log.info('t', 'é');
+      expect(msgs(`latelier.${DAY}.log`)).toEqual(['é']);
+      expect(msgs(`latelier.${DAY}.1.log`)).toEqual(['é']);
+    });
+
+    it('puts a line bigger than the cap into an empty part rather than opening empty parts', () => {
+      const log = createLogger(dir, { toStderr: false, maxFileBytes: 10 });
+      log.info('t', 'a');
+      log.info('t', 'b');
+      expect(msgs(`latelier.${DAY}.log`)).toEqual(['a']);
+      expect(msgs(`latelier.${DAY}.1.log`)).toEqual(['b']);
+      expect(fs.readdirSync(logsDir())).toHaveLength(2);
+    });
+
+    it('resumes the newest part on disk at startup, ordering parts by number', () => {
+      fs.mkdirSync(logsDir(), { recursive: true });
+      fs.writeFileSync(file(`latelier.${DAY}.log`), 'x'.repeat(100));
+      fs.writeFileSync(file(`latelier.${DAY}.2.log`), 'x'.repeat(100));
+      fs.writeFileSync(file(`latelier.${DAY}.10.log`), '');
+      // Another day's higher part and a stray name must not count.
+      fs.writeFileSync(file('latelier.2026-03-04.40.log'), '');
+      fs.writeFileSync(file(`latelier.${DAY}.junk.log`), '');
+      fs.writeFileSync(file(`latelier.${DAY}.40.log.bak`), '');
+      const log = createLogger(dir, { toStderr: false, maxFileBytes: 100 });
+      log.info('t', 'a');
+      expect(msgs(`latelier.${DAY}.10.log`)).toEqual(['a']);
+    });
+
+    it('counts the bytes already in the resumed part', () => {
+      fs.mkdirSync(logsDir(), { recursive: true });
+      fs.writeFileSync(file(`latelier.${DAY}.3.log`), 'x'.repeat(lineBytes));
+      const log = createLogger(dir, { toStderr: false, maxFileBytes: 2 * lineBytes });
+      log.info('t', 'a');
+      log.info('t', 'b');
+      expect(fs.readFileSync(file(`latelier.${DAY}.3.log`), 'utf8')).toBe('x'.repeat(lineBytes) + line('a'));
+      expect(msgs(`latelier.${DAY}.4.log`)).toEqual(['b']);
+    });
+
+    it('reads the logs dir and the part size once per day, not per line', () => {
+      const log = createLogger(dir, { toStderr: false });
+      const readdir = vi.spyOn(fs, 'readdirSync');
+      const stat = vi.spyOn(fs, 'statSync');
+      for (const m of ['a', 'b', 'c']) log.info('t', m);
+      expect(readdir).toHaveBeenCalledTimes(1);
+      expect(stat).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(new Date('2026-03-06T12:00:00.000Z'));
+      for (const m of ['d', 'e']) log.info('t', m);
+      expect(readdir).toHaveBeenCalledTimes(2);
+      expect(stat).toHaveBeenCalledTimes(2);
+    });
+
+    it('starts the next day at its own part 0, with an empty count', () => {
+      const log = createLogger(dir, { toStderr: false, maxFileBytes: 2 * lineBytes });
+      log.info('t', 'a');
+      log.info('t', 'b');
+      log.info('t', 'c');
+      vi.setSystemTime(new Date('2026-03-06T12:00:00.000Z'));
+      log.info('t', 'd');
+      log.info('t', 'e');
+      expect(msgs('latelier.2026-03-06.log')).toEqual(['d', 'e']);
+    });
+
+    it('does not count a line whose append failed', () => {
+      vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      const log = createLogger(dir, { toStderr: false, maxFileBytes: 2 * lineBytes });
+      log.info('t', 'a');
+      const append = vi.spyOn(fs, 'appendFileSync').mockImplementationOnce(() => {
+        throw new Error('ENOSPC');
+      });
+      log.info('t', 'x');
+      append.mockRestore();
+      log.info('t', 'b');
+      expect(msgs(`latelier.${DAY}.log`)).toEqual(['a', 'b']);
+    });
+
+    it.each([
+      ['rolls a part already at the 10 MiB default', 10 * 1024 * 1024, `latelier.${DAY}.1.log`],
+      ['keeps writing a part just under it', 10 * 1024 * 1024 - 200, `latelier.${DAY}.log`],
+    ])('%s', (_label, size, expected) => {
+      fs.mkdirSync(logsDir(), { recursive: true });
+      fs.writeFileSync(file(`latelier.${DAY}.log`), '');
+      fs.truncateSync(file(`latelier.${DAY}.log`), size);
+      const log = createLogger(dir, { toStderr: false });
+      log.info('t', 'a');
+      expect(fs.readFileSync(file(expected), 'utf8').endsWith(line('a'))).toBe(true);
     });
   });
 
@@ -431,5 +561,89 @@ describe('redactSecrets: connection-string query secrets', () => {
 
   it('leaves a secret-named parameter outside a connection string alone', () => {
     expect(redactSecrets('https://h/?password=x')).toBe('https://h/?password=x');
+  });
+});
+
+describe('compareLogFiles', () => {
+  it('orders by date, then part number counted as a number, then the legacy prefix first', () => {
+    const names = [
+      'latelier.2026-10-29.10.log',
+      'latelier.2026-10-29.2.log',
+      'latelier.2026-10-30.log',
+      'latelier.2026-10-29.1.log',
+      'latelier.2026-10-29.log',
+      'mongolab.2026-10-29.log',
+      'mongolab.2026-10-28.log',
+    ];
+    expect([...names].sort(compareLogFiles)).toEqual([
+      'mongolab.2026-10-28.log',
+      'mongolab.2026-10-29.log',
+      'latelier.2026-10-29.log',
+      'latelier.2026-10-29.1.log',
+      'latelier.2026-10-29.2.log',
+      'latelier.2026-10-29.10.log',
+      'latelier.2026-10-30.log',
+    ]);
+  });
+
+  it.each([
+    ['latelier.2026-10-29.log', 'latelier.2026-10-30.log', -1],
+    ['latelier.2026-10-30.log', 'latelier.2026-10-29.log', 1],
+    ['latelier.2026-10-29.log', 'latelier.2026-10-29.log', 0],
+    ['mongolab.2026-10-29.log', 'latelier.2026-10-29.log', -1],
+    ['latelier.2026-10-29.log', 'mongolab.2026-10-29.log', 1],
+  ])('%s vs %s -> %i', (a, b, sign) => {
+    expect(Math.sign(compareLogFiles(a, b))).toBe(sign);
+  });
+});
+
+describe('createRateGate', () => {
+  it('lets the cap through, then refuses, flagging only the first refusal of the window', () => {
+    const gate = createRateGate(3, 1000, () => 5000);
+    expect([gate.take(), gate.take(), gate.take()]).toEqual([{ allow: true }, { allow: true }, { allow: true }]);
+    expect(gate.take()).toEqual({ allow: false, firstDrop: true, until: 6000 });
+    expect(gate.take()).toEqual({ allow: false, firstDrop: false, until: 6000 });
+  });
+
+  it('opens a new window exactly windowMs after the first call of the last one', () => {
+    let t = 0;
+    const gate = createRateGate(1, 1000, () => t);
+    expect(gate.take().allow).toBe(true);
+    t = 999;
+    expect(gate.take()).toEqual({ allow: false, firstDrop: true, until: 1000 });
+    t = 1000;
+    expect(gate.take()).toEqual({ allow: true });
+    expect(gate.take()).toEqual({ allow: false, firstDrop: true, until: 2000 });
+  });
+
+  it('opens a new window when the clock moves back', () => {
+    let t = 10_000;
+    const gate = createRateGate(1, 1000, () => t);
+    gate.take();
+    t = 5_000;
+    expect(gate.take()).toEqual({ allow: true });
+    expect(gate.take()).toEqual({ allow: false, firstDrop: true, until: 6_000 });
+  });
+
+  it('allows again right after reset, inside the same window', () => {
+    let t = 0;
+    const gate = createRateGate(1, 1000, () => t);
+    gate.take();
+    gate.take();
+    t = 10;
+    gate.reset();
+    expect(gate.take()).toEqual({ allow: true });
+    expect(gate.take()).toEqual({ allow: false, firstDrop: true, until: 1010 });
+  });
+
+  it('reads the wall clock by default', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    try {
+      const gate = createRateGate(0, 500);
+      expect(gate.take()).toEqual({ allow: false, firstDrop: true, until: Date.parse('2026-01-01T00:00:00.500Z') });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher } from '../helpers/db';
 import { RecentFieldValueRepo } from '../../electron/db/repositories/RecentFieldValueRepo';
 import { RecentFieldValueService } from '../../electron/services/RecentFieldValueService';
 
@@ -22,7 +22,7 @@ describe('RecentFieldValueService', () => {
   function setup(): { svc: RecentFieldValueService; repo: RecentFieldValueRepo } {
     tmp = createTempDb();
     insertConnection(tmp, 'c1');
-    const repo = new RecentFieldValueRepo(tmp.db);
+    const repo = new RecentFieldValueRepo(tmp.db, createTempCipher());
     return { svc: new RecentFieldValueService(repo), repo };
   }
 
@@ -34,6 +34,9 @@ describe('RecentFieldValueService', () => {
     const values = svc.listForField('c1', 'shop', 'orders', 'status');
     expect(values).toHaveLength(1);
     expect(values[0]!.frequency).toBe(2);
+    expect(tmp!.db.prepare('SELECT typeof(value) AS v, typeof(value_mac) AS m FROM recent_field_values').all()).toEqual([
+      { v: 'blob', m: 'text' },
+    ]);
   });
 
   it('evicts down to the 50-row cap, keeping the most recently used', () => {

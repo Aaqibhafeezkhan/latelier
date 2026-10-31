@@ -10,6 +10,8 @@ import { writePrivateFile } from '../../utils/privateFs.ts';
 import type { DiagnosticService } from '../../services/DiagnosticService.ts';
 import { parseAllowedExternalUrl } from '../../security/externalUrl.ts';
 import type { PickedCredentialPaths } from '../../security/credentialPaths.ts';
+import type { UnsavedWorkStore } from '../../quitGuard.ts';
+import type { Logger, RateGate } from '../../log.ts';
 
 const PickFileInput = z.enum(['tls-ca', 'tls-client-cert', 'ssh-key', 'data-import']);
 const OpenExternalInput = z.string().url();
@@ -23,6 +25,16 @@ const SaveFileInput = z.object({
   content: z.string(),
 });
 const NoInput = z.undefined().or(z.null()).or(z.object({}));
+const SetUnsavedWorkInput = z.object({
+  source: z.enum(['connectionForm', 'pipelines']),
+  count: z.number().int().min(0).max(1000),
+});
+const LogInput = z.object({
+  level: z.enum(['warn', 'error']),
+  message: z.string().max(2000),
+  source: z.enum(['window.error', 'unhandledrejection', 'errorBoundary', 'component']),
+  stack: z.string().max(8000).optional(),
+});
 
 const PURPOSE_FILTERS: Record<PickFilePurpose, Electron.FileFilter[]> = {
   'tls-ca': [
@@ -58,6 +70,21 @@ export function saveFilters(defaultName: string): FileFilter[] {
 }
 
 /**
+ * A full page load (a reload, or the page after a crash) gets a fresh
+ * `app:log` allowance, so the errors of the page that replaced a looping one
+ * still land. The app's own route changes are hash navigations: same-document,
+ * and they keep the window they are in.
+ */
+export function resetGateOnFreshPage(
+  webContents: { on(event: 'did-start-navigation', listener: (details: { isMainFrame: boolean; isSameDocument: boolean }) => void): unknown },
+  gate: RateGate,
+): void {
+  webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) gate.reset();
+  });
+}
+
+/**
  * `pickedImports` collects every path the open dialog returned for
  * `data-import`: the data channels read a file only when it is in here, so
  * the renderer can hand back a file the user picked but never name another.
@@ -65,6 +92,13 @@ export function saveFilters(defaultName: string): FileFilter[] {
  * key dialogs; the connection channels accept such a path only if it is in
  * there. Both are required, not optional, for the same reason the router's
  * sender check is.
+ *
+ * `unsaved` is the store the quit gate reads; the renderer's reports land in
+ * it. Optional like `diagnostic`, and the channel fails the same way without it.
+ * `onFlushDone` receives the renderer's answer to a flush request (see
+ * `awaitRendererFlush`); optional and failing the same way.
+ * `rendererLog` is where `app:log` lines go, through a rate gate main resets
+ * on each fresh page; optional and failing the same way.
  */
 export function registerAppChannels(
   router: Router,
@@ -72,6 +106,9 @@ export function registerAppChannels(
   pickedImports: Set<string>,
   pickedCredentialPaths: PickedCredentialPaths,
   diagnostic?: DiagnosticService,
+  unsaved?: UnsavedWorkStore,
+  onFlushDone?: () => void,
+  rendererLog?: { log: Logger; gate: RateGate },
 ): void {
   router.register(
     IPC_CHANNELS.appPickFile,
@@ -162,5 +199,47 @@ export function registerAppChannels(
       }
       return { path: result.filePath };
     },
+  );
+
+  router.register(
+    IPC_CHANNELS.appSetUnsavedWork,
+    zodValidator(SetUnsavedWorkInput),
+    async ({ source, count }) => {
+      if (!unsaved) throw new SystemError('INTERNAL', 'unsaved-work store not available');
+      unsaved[source] = count;
+    },
+  );
+
+  router.register(
+    IPC_CHANNELS.appFlushDone,
+    zodValidator(NoInput),
+    async () => {
+      if (!onFlushDone) throw new SystemError('INTERNAL', 'flush acknowledgement sink not available');
+      onFlushDone();
+    },
+  );
+
+  // A render loop can throw on every frame, so the renderer gets a fixed
+  // number of lines per window and the disk does not fill. A dropped line
+  // still answers ok: the renderer has nothing useful to do with a refusal,
+  // and must not log the refusal itself. The notice of the first drop is
+  // written past the gate, or it would be dropped with the rest.
+  router.register(
+    IPC_CHANNELS.appLog,
+    zodValidator(LogInput),
+    async ({ level, message, source, stack }) => {
+      if (!rendererLog) throw new SystemError('INTERNAL', 'renderer log sink not available');
+      const verdict = rendererLog.gate.take();
+      if (verdict.allow) {
+        rendererLog.log[level]('renderer', message, { source, stack });
+      } else if (verdict.firstDrop) {
+        rendererLog.log.warn(
+          'renderer',
+          `renderer log rate limit reached; dropping until ${new Date(verdict.until).toISOString()}`,
+        );
+      }
+    },
+    // The gate above decides what is logged; the router's own per-call lines would bypass it.
+    { quiet: true },
   );
 }

@@ -16,10 +16,19 @@ import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import type { Database } from 'better-sqlite3';
-import { openDatabase, closeDatabase, truncateWal, adoptLegacyDatabase, DB_FILENAME } from './db/sqlite.ts';
+import { openDatabase, closeDatabase, truncateWal, adoptLegacyDatabase, resetDatabaseInPlace, DB_FILENAME } from './db/sqlite.ts';
 import { AppStateRepo } from './db/repositories/AppStateRepo.ts';
 import { AppStateService } from './services/AppStateService.ts';
-import { SecretsVault } from './secrets/SecretsVault.ts';
+import { SecretsVault, type SafeStorageLike } from './secrets/SecretsVault.ts';
+import { ColumnCipher } from './db/columnCipher.ts';
+import {
+  columnKeyDialogCopy,
+  encryptLegacyRows,
+  loadOrCreateColumnKeys,
+  resetProtectedData,
+  type LoadedColumnKeys,
+} from './db/columnKeyStore.ts';
+import { AppError } from './errors.ts';
 import { MongoPool } from './mongo/MongoPool.ts';
 import { ConnectionRepo } from './db/repositories/ConnectionRepo.ts';
 import {
@@ -32,12 +41,13 @@ import { registerConnImportChannels } from './ipc/handlers/connImport.ts';
 import { ConnectionExportService, type ConnectionExportDialogs } from './services/ConnectionExportService.ts';
 import { ImportWizardService } from './services/ImportWizardService.ts';
 import { createPickedCredentialPaths } from './security/credentialPaths.ts';
-import { registerAppChannels, saveFilters } from './ipc/handlers/app.ts';
+import { registerAppChannels, resetGateOnFreshPage, saveFilters } from './ipc/handlers/app.ts';
 import { registerMongoChannels } from './ipc/handlers/mongo.ts';
 import { registerMetaChannels } from './ipc/handlers/meta.ts';
 import { registerIndexChannels } from './ipc/handlers/indexes.ts';
 import { registerCollectionAdminChannels } from './ipc/handlers/collectionAdmin.ts';
 import { registerUserChannels } from './ipc/handlers/users.ts';
+import { registerAdminChannels } from './ipc/handlers/admin.ts';
 import { registerPrefsChannels } from './ipc/handlers/prefs.ts';
 import { registerUpdatesChannels } from './ipc/handlers/updates.ts';
 import { UpdateService, shouldCheckForUpdates } from './services/UpdateService.ts';
@@ -66,6 +76,7 @@ import { MetaService } from './mongo/MetaService.ts';
 import { IndexService } from './mongo/IndexService.ts';
 import { CollectionAdminService } from './mongo/CollectionAdminService.ts';
 import { UserService } from './mongo/UserService.ts';
+import { MonitorService } from './mongo/MonitorService.ts';
 import { WorkspaceTabRepo } from './db/repositories/WorkspaceTabRepo.ts';
 import { WorkspaceStateService, applyRestoreTabsPref } from './services/WorkspaceStateService.ts';
 import { SavedQueryRepo } from './db/repositories/SavedQueryRepo.ts';
@@ -83,8 +94,17 @@ import { registerDataChannels, makeDataEmitter } from './ipc/handlers/data.ts';
 import { ImportService } from './mongo/ImportService.ts';
 import { DEFAULT_EXPORT_CAP, QueryService } from './mongo/QueryService.ts';
 import { DocumentService } from './mongo/DocumentService.ts';
-import { createLogger, type Logger } from './log.ts';
-import { createQuitGate, runTeardown, type RunningWork } from './quitGuard.ts';
+import { createLogger, createRateGate, type Logger } from './log.ts';
+import {
+  awaitRendererFlush,
+  createBeforeQuitHandler,
+  createQuitGate,
+  describeQuitDetail,
+  resetUnsavedWork,
+  runTeardown,
+  type RunningWork,
+  type UnsavedWorkStore,
+} from './quitGuard.ts';
 import { PrivateModeError } from './utils/privateFs.ts';
 import { createRouter } from './ipc/router.ts';
 import { senderCheck } from './ipc/senderGuard.ts';
@@ -179,7 +199,24 @@ let importSvc: ImportService | null = null;
 let log: Logger | null = null;
 let connExportSvc: ConnectionExportService | null = null;
 let importWizardSvc: ImportWizardService | null = null;
+let tabsSvc: WorkspaceStateService | null = null;
 let renderCrashesInWindow = 0;
+// What the renderer last reported as unsaved (`app:setUnsavedWork`). Reset
+// whenever the page that reported it goes (reload, crash, window closed), so
+// a stale report cannot make every later quit ask: the form's report is
+// dropped, and dirty pipelines are recounted from the saved tabs, which
+// outlive the page. Not recounted once shutdown has begun, since the database
+// may already be closed.
+const unsaved: UnsavedWorkStore = { connectionForm: 0, pipelines: 0 };
+function clearUnsavedWork(): void {
+  resetUnsavedWork(unsaved, () => (beforeQuit.isShuttingDown() ? 0 : (tabsSvc?.dirtyPipelineCount() ?? 0)));
+}
+// The pending flush request's ack while a quit waits on the renderer, so
+// `app:flushDone` has somewhere to land; a stray answer outside a quit does nothing.
+let flushAck: (() => void) | null = null;
+// Caps `app:log` at 50 renderer lines a minute. A fresh page starts with a
+// fresh allowance, so the errors of a reload after a render loop still land.
+const rendererLogGate = createRateGate(50, 60_000);
 let firstCrashAt = 0;
 
 function resolveUserDataDir(): string {
@@ -383,6 +420,8 @@ function createWindow(): void {
   // became an uncaughtException, an error dialog, and `app.exit(1)`.
   win.on('closed', () => {
     win = null;
+    // On macOS the app outlives its window, and the page that reported is gone.
+    clearUnsavedWork();
     // An import token does not outlive the window that asked for it.
     importWizardSvc?.clearPending();
   });
@@ -411,7 +450,15 @@ function createWindow(): void {
   win.on('maximize', persistBoundsNow);
   win.on('unmaximize', persistBoundsNow);
 
+  // A reload (or any full page load) starts a fresh renderer state. The app's
+  // own route changes are hash navigations, which are same-document and keep
+  // their reports.
+  win.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) clearUnsavedWork();
+  });
+  resetGateOnFreshPage(win.webContents, rendererLogGate);
   win.webContents.on('render-process-gone', (_evt, details) => {
+    clearUnsavedWork();
     const now = Date.now();
     log?.error('window', 'render-process-gone', { reason: details.reason });
     if (firstCrashAt === 0 || now - firstCrashAt > 10_000) {
@@ -454,13 +501,16 @@ app.on('activate', () => {
 
 // Graceful shutdown ----------------------------------------------------------
 
-let shuttingDown = false;
 function runningWork(): RunningWork {
   return {
     scripts: scriptSvc?.runningCount() ?? 0,
     shellCommands: mshellSvc?.busyCount() ?? 0,
     imports: importSvc?.runningCount() ?? 0,
     aggregations: aggSvc?.runningCount() ?? 0,
+    unsavedForms: unsaved.connectionForm,
+    // With "Reopen tabs on launch" on, tabs persist and nothing is lost; only
+    // an explicit `false` clears them at the next launch (`applyRestoreTabsPref`).
+    unsavedPipelines: appState?.get<boolean>('ui.workspace.restoreTabs') === false ? unsaved.pipelines : 0,
   };
 }
 
@@ -472,7 +522,7 @@ async function askToQuit(message: string): Promise<boolean> {
     cancelId: 0,
     title: "Quit L'Atelier?",
     message,
-    detail: 'Work in progress is cancelled and its results are lost.',
+    detail: describeQuitDetail(runningWork()),
   };
   const result = await (win && !win.isDestroyed()
     ? dialog.showMessageBox(win, options)
@@ -484,25 +534,25 @@ async function askToQuit(message: string): Promise<boolean> {
 // `before-quit` alike; see `createQuitGate` for what each answer lets through.
 const quitGate = createQuitGate({ counts: runningWork, confirm: askToQuit });
 
-app.on('before-quit', (e) => {
-  if (shuttingDown) return;
-  if (quitGate.check() === 'hold') {
-    e.preventDefault();
-    quitGate.ask().then(
-      (yes) => {
-        if (yes) app.quit();
-      },
-      (err: unknown) => log?.error('shutdown', 'could not ask about quitting', { err: String(err) }),
-    );
-    return;
-  }
-  shuttingDown = true;
-  e.preventDefault();
+const beforeQuit = createBeforeQuitHandler({
+  gate: quitGate,
+  quit: () => app.quit(),
+  shutdown: beginShutdown,
+  onAskError: (err: unknown) => log?.error('shutdown', 'could not ask about quitting', { err: String(err) }),
+});
+app.on('before-quit', beforeQuit.handle);
+
+function beginShutdown(): void {
   log?.info('shutdown', 'begin');
 
   const timeoutMs = 8_000;
   const work = runTeardown(
     [
+      // `app.exit` below destroys the window without its unload events, so
+      // the tab edits the renderer still holds back are asked for here, while
+      // the database is open. Bounded: a renderer that does not answer is
+      // logged and the quit goes on.
+      ['flush renderer', flushRenderer],
       ['persist bounds', persistBoundsNow],
       ['dispose documents', () => docSvc?.dispose()],
       ['dispose shells', () => mshellSvc?.disposeAll()],
@@ -522,38 +572,60 @@ app.on('before-quit', (e) => {
     log?.info('shutdown', 'end');
     app.exit(0);
   });
-});
+}
 
 // Nothing-happened safety: if something kept the promise pending forever,
 // the exit timeout above still fires.
+
+const RENDERER_FLUSH_TIMEOUT_MS = 1_500;
+
+async function flushRenderer(): Promise<void> {
+  const flush = awaitRendererFlush({
+    send: () => {
+      if (!win || win.isDestroyed()) return false;
+      win.webContents.send(IPC_CHANNELS.appFlushRequestEvent);
+      return true;
+    },
+    timeoutMs: RENDERER_FLUSH_TIMEOUT_MS,
+  });
+  flushAck = flush.ack;
+  const outcome = await flush.promise;
+  flushAck = null;
+  if (outcome === 'timeout') {
+    log?.warn('shutdown', 'renderer did not answer the flush request in time', { timeoutMs: RENDERER_FLUSH_TIMEOUT_MS });
+  } else {
+    log?.info('shutdown', 'renderer flush', { outcome });
+  }
+}
 
 // Dev reset shortcut: Cmd/Ctrl+Shift+Alt+R (dev only) ------------------------
 
 function registerDevResetShortcut(): void {
   // Same reason as the logger level: a NODE_ENV check never fires in a shipped
-  // build, so this destructive shortcut — it deletes the database — was live
+  // build, so this destructive shortcut — it empties the database — was live
   // for every user. `app.isPackaged` is the signal that is actually set.
   if (app.isPackaged) return;
   const accelerator =
     process.platform === 'darwin' ? 'Command+Shift+Alt+R' : 'Control+Shift+Alt+R';
   globalShortcut.register(accelerator, () => {
-    if (!win || !db) return;
+    if (!win || !db || !appState || !log) return;
+    // In place on the live handle: every service, the vault and the cipher
+    // keep working, and the Vite dev server (which exits with Electron)
+    // stays up for the reload.
     try {
-      closeDatabase(db);
-    } catch {
-      // ignore
+      resetDatabaseInPlace(db, log);
+    } catch (err) {
+      log.error('dev', 'DB reset failed', { message: String(err) });
+      return;
     }
-    const userDataDir = resolveUserDataDir();
-    for (const suffix of ['', '-wal', '-shm']) {
-      fs.rmSync(path.join(userDataDir, dbFilename + suffix), { force: true });
-    }
-    db = openDatabase({ userDataDir, filename: dbFilename, log: log ?? undefined });
-    appState = new AppStateService(new AppStateRepo(db));
+    appState.reset();
+    // Shell sessions belong to the connections just deleted.
+    void mshellSvc?.disposeAll();
     if (pool) {
       void pool.disconnectAll();
     }
     win.reload();
-    log?.info('dev', 'DB reset');
+    log.info('dev', 'DB reset');
   });
 }
 
@@ -579,6 +651,40 @@ function reportFatalAndExit(kind: string, err: unknown): void {
 
 process.on('uncaughtException', (err) => reportFatalAndExit('Uncaught exception', err));
 process.on('unhandledRejection', (reason) => reportFatalAndExit('Unhandled rejection', reason));
+
+// Column key loss -------------------------------------------------------------
+
+/**
+ * Loads the column key, asking the user what to do when the keychain will not
+ * unwrap it. Never generates a replacement on its own: that would orphan every
+ * sealed cell without a word. Null means the user chose to quit.
+ */
+function loadColumnKey(database: Database, crypto: SafeStorageLike, logger: Logger): LoadedColumnKeys | null {
+  try {
+    return loadOrCreateColumnKeys(database, crypto, logger);
+  } catch (err) {
+    if (!(err instanceof AppError && err.code === 'COLUMN_KEY_UNREADABLE')) throw err;
+    logger.error('boot', 'column key unreadable', { message: err.message, details: err.details });
+  }
+  const copy = columnKeyDialogCopy(crypto.isEncryptionAvailable(), process.platform);
+  // Quit is the default and the cancel answer: Reset destroys data.
+  const choice = dialog.showMessageBoxSync({
+    type: 'error',
+    buttons: ['Quit', 'Reset protected data'],
+    defaultId: 0,
+    cancelId: 0,
+    title: "L'Atelier can't read its data key",
+    message: copy.message,
+    detail: copy.detail,
+  });
+  if (choice !== 1) {
+    logger.info('boot', 'quit at the column key dialog', { kind: copy.kind });
+    return null;
+  }
+  resetProtectedData(database, logger);
+  logger.warn('boot', 'protected data reset after an unreadable column key');
+  return loadOrCreateColumnKeys(database, crypto, logger);
+}
 
 // Boot sequence --------------------------------------------------------------
 
@@ -658,6 +764,16 @@ app.whenReady().then(() => {
     },
   );
 
+  // 3b. Column encryption: the key is unwrapped by the same keychain gate, and
+  // plaintext left by an older version is sealed before any repo reads it.
+  const columnKey = loadColumnKey(db, vaultCrypto, log);
+  if (!columnKey) {
+    app.exit(0);
+    return;
+  }
+  const cipher = new ColumnCipher(columnKey.keys);
+  encryptLegacyRows(db, cipher, log);
+
   // 4. Connection repo + Mongo pool
   const connRepo = new ConnectionRepo(db);
   pool = new MongoPool({
@@ -705,7 +821,7 @@ app.whenReady().then(() => {
   // this point, so the trusted frame is read through a closure rather than
   // captured — and it is re-read per message, which is what keeps it correct
   // across a reload.
-  const auditRepo = new AuditRepo(db);
+  const auditRepo = new AuditRepo(db, cipher, log);
   const auditSvc = new AuditService(auditRepo, pool, new UndoStore(), log);
   const router = createRouter(
     ipcMain,
@@ -713,16 +829,16 @@ app.whenReady().then(() => {
     log,
     auditSvc,
   );
-  const savedRepo = new SavedQueryRepo(db);
+  const savedRepo = new SavedQueryRepo(db, cipher, log);
   const savedSvc = new SavedQueryService(savedRepo);
   // Workspace tabs; opening a saved pipeline reads its stored stages.
-  const tabsRepo = new WorkspaceTabRepo(db);
-  const tabsSvc = new WorkspaceStateService(tabsRepo, savedSvc);
+  const tabsRepo = new WorkspaceTabRepo(db, cipher, log);
+  tabsSvc = new WorkspaceStateService(tabsRepo, savedSvc, log);
   applyRestoreTabsPref(appState, tabsSvc);
 
-  const recentRepo = new RecentQueryRepo(db);
+  const recentRepo = new RecentQueryRepo(db, cipher, log);
   const recentSvc = new RecentQueryService(recentRepo, log);
-  const recentFieldValueRepo = new RecentFieldValueRepo(db);
+  const recentFieldValueRepo = new RecentFieldValueRepo(db, cipher, log);
   const recentFieldValueSvc = new RecentFieldValueService(recentFieldValueRepo);
   const querySvc = new QueryService(pool, recentSvc, DEFAULT_EXPORT_CAP, log);
   docSvc = new DocumentService(pool, { log });
@@ -731,6 +847,7 @@ app.whenReady().then(() => {
   const indexSvc = new IndexService(pool);
   const collectionAdminSvc = new CollectionAdminService(pool);
   const userSvc = new UserService(pool);
+  const monitorSvc = new MonitorService(pool, log);
   const checkpointDb = db;
   const checkpointLog = log;
   const maintenance = new MaintenanceService({
@@ -749,6 +866,7 @@ app.whenReady().then(() => {
     secretsStatus: () => ({
       encryptionAvailable: vaultCrypto.isEncryptionAvailable(),
       backend: selectedBackend(safeStorage, process.platform),
+      columnKeyProtected: columnKey.protected,
     }),
   });
 
@@ -759,12 +877,16 @@ app.whenReady().then(() => {
   // Filled by the open dialog, read by the data channels: the only files an
   // import may read are ones the user picked in main's own dialog.
   const pickedImports = new Set<string>();
-  registerAppChannels(router, () => win, pickedImports, pickedCredentialPaths, diagnostic);
+  registerAppChannels(
+    router, () => win, pickedImports, pickedCredentialPaths, diagnostic, unsaved, () => flushAck?.(),
+    { log, gate: rendererLogGate },
+  );
   registerMongoChannels(router, pool, () => win?.webContents ?? null);
   registerMetaChannels(router, metaSvc);
   registerIndexChannels(router, indexSvc);
   registerCollectionAdminChannels(router, collectionAdminSvc);
   registerUserChannels(router, userSvc);
+  registerAdminChannels(router, monitorSvc);
   registerPrefsChannels(router, appState, () => win?.webContents ?? null);
   // The renderer cannot write this switch through prefs:set; this dialog is
   // the only way to turn it on, and a compromised renderer cannot answer it.
@@ -783,7 +905,7 @@ app.whenReady().then(() => {
       ? dialog.showMessageBox(win, options)
       : dialog.showMessageBox(options));
     return result.response === 1;
-  });
+  }, () => ({ columnKeyProtected: columnKey.protected }));
   registerTabsChannels(router, tabsSvc);
   // Same window-lookup + `saveFilters` pattern as `app.ts`'s `saveFile`,
   // kept as a closure here rather than an import into query.ts so that file

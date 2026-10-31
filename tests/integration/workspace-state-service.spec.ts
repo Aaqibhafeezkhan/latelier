@@ -4,7 +4,7 @@ import { SavedQueryRepo } from '../../electron/db/repositories/SavedQueryRepo';
 import { SavedQueryService } from '../../electron/services/SavedQueryService';
 import { WorkspaceStateService } from '../../electron/services/WorkspaceStateService';
 import { NotFoundError, ValidationError } from '../../electron/errors';
-import { createTempDb, type TempDb } from '../helpers/db';
+import { createTempDb, type TempDb, createTempCipher } from '../helpers/db';
 import type { CollectionTab, Stage, WorkspaceTab } from '../../shared/types';
 
 // The service returns the `WorkspaceTab` union; the fields these tests read
@@ -32,8 +32,8 @@ describe('WorkspaceStateService', () => {
 
   beforeEach(() => {
     tmp = createTempDb();
-    repo = new WorkspaceTabRepo(tmp.db);
-    saved = new SavedQueryService(new SavedQueryRepo(tmp.db));
+    repo = new WorkspaceTabRepo(tmp.db, createTempCipher());
+    saved = new SavedQueryService(new SavedQueryRepo(tmp.db, createTempCipher()));
     svc = new WorkspaceStateService(repo, saved);
     seedConnection(tmp, 'conn');
   });
@@ -544,10 +544,12 @@ describe('WorkspaceStateService', () => {
 
   function rawState(id: string): Record<string, unknown> {
     const row = tmp.db.prepare('SELECT state_json FROM workspace_tabs WHERE id = ?').get(id) as {
-      state_json: string;
+      state_json: Buffer;
     };
-    expect(row.state_json).not.toContain('pii-document');
-    return JSON.parse(row.state_json) as Record<string, unknown>;
+    // The check runs on the decrypted text: ciphertext would pass it vacuously.
+    const text = createTempCipher().open('workspace_tabs', 'state_json', id, row.state_json);
+    expect(text).not.toContain('pii-document');
+    return JSON.parse(text) as Record<string, unknown>;
   }
 
   const PII = { secret: 'pii-document' };
