@@ -108,7 +108,7 @@
     "react-router-dom": "^7.18.3",
     "react-window": "^2.3.3",
     "typescript": "~6.0.2",
-    "typescript-eslint": "^8.71.0",
+    "typescript-eslint": "^8.72.1",
     "vite": "^8.3.5",
     "vite-plugin-electron": "^1.1.1",
     "vite-plugin-electron-renderer": "^1.0.0",
