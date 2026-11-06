@@ -15,6 +15,7 @@ import {
   optionsProblem,
   projectionProblem,
   READ_PREFERENCE_MODES,
+  resultQueryKey,
   sortProblem,
   type DraggedField,
   type FindOptionKey,
@@ -150,6 +151,12 @@ function QueryBarInner({
   // `sortError` stays — it is the inline per-field
   // message, which is a different question from whether Run is enabled.
   const canRun = !isLoading && findProblem(state) === null;
+  // W07 §3: the runner's own rule for leaving this page, said ahead of the Run.
+  const willResetPage =
+    state.page > 0 &&
+    findProblem(state) === null &&
+    state.lastRunQueryKey !== undefined &&
+    resultQueryKey(state) !== state.lastRunQueryKey;
   // Explain calls `api.query.explain` directly — it does NOT go through
   // `useQueryRunner.run`, but W13 collapses its rule to the same one:
   // `queryRaw` is the only filter source now, so Explain needs nothing
@@ -484,6 +491,14 @@ function QueryBarInner({
         {/* Run sits at the right end, beside the drawer, so the
             pointer's trip from a builder row to Run is short. */}
         <span style={{ flex: 1 }} />
+        {willResetPage && (
+          <span
+            data-testid="page-reset-hint"
+            style={{ fontSize: 11, color: T.textMuted, whiteSpace: 'nowrap' }}
+          >
+            Will jump to page 1 on run
+          </span>
+        )}
         <span
           aria-hidden="true"
           style={{

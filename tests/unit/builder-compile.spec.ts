@@ -14,6 +14,7 @@ import {
   parseSortString,
   projectionProblem,
   requireFilterJson,
+  resultQueryKey,
   sortProblem,
   emptyBuilder,
   sortFieldPatch,
@@ -49,6 +50,36 @@ function makeState(overrides: Partial<BuilderState> = {}): BuilderState {
 // so `describeCondProblem` had zero production callers; its coverage was
 // pure duplicate of `condValueProblem`'s (already covered in
 // `filter-tree.spec.ts`'s "Problems" table).
+
+describe('resultQueryKey', () => {
+  const base = makeTabState({ queryRaw: '{"a":1}' });
+  const withBuilder = (patch: Partial<BuilderState>) =>
+    resultQueryKey({ ...base, builder: { ...base.builder, ...patch } });
+
+  it('ignores what only moves through the same results', () => {
+    expect(resultQueryKey({ ...base, page: 7, pageSize: 25 })).toBe(resultQueryKey(base));
+    expect(resultQueryKey({ ...base, queryRaw: ' {"a":1} ' })).toBe(resultQueryKey(base));
+  });
+
+  it.each<[string, Partial<BuilderState>]>([
+    ['sort', { sort: '{"a":1}' }],
+    ['projection', { projectionRaw: '{"a":1}' }],
+    ['limit', { limit: '10' }],
+    ['collation', { collation: '{"locale":"en"}' }],
+    ['hint', { hint: 'a_1' }],
+    ['read preference', { readPreference: 'secondary' }],
+  ])('changes with the %s', (_, patch) => {
+    expect(withBuilder(patch)).not.toBe(resultQueryKey(base));
+  });
+
+  it('changes with the filter', () => {
+    expect(resultQueryKey({ ...base, queryRaw: '{"a":2}' })).not.toBe(resultQueryKey(base));
+  });
+
+  it('is null for a filter that cannot run', () => {
+    expect(resultQueryKey({ ...base, queryRaw: '{"a":' })).toBeNull();
+  });
+});
 
 describe('compileFindOptions', () => {
   it('returns undefined sort/projection and a null limit for the default state', () => {

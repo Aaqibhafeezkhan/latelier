@@ -870,6 +870,12 @@ export interface CollectionTabState {
   pageSize: number;
   totalCount?: number;
   lastRunHasMore?: boolean;
+  /**
+   * `resultQueryKey` of the last query that reached the server. Differing from
+   * the current one means the query was edited since, which sends the next
+   * Run back to the first page (W07 §3). Absent until a tab's first run.
+   */
+  lastRunQueryKey?: string;
   /** Never persisted — see the interface doc. Absent on a restored tab. */
   lastRun?: LastRun;
   columns?: Record<string, { width: number }>;

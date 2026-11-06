@@ -414,6 +414,18 @@ export function currentFilterJson(state: CollectionTabState): string | null {
 }
 
 /**
+ * What decides which documents a tab's query returns, with the page left out:
+ * two states with the same key page through the same results. `null` when
+ * the filter cannot run, so an unrunnable edit reads as no key at all.
+ */
+export function resultQueryKey(state: CollectionTabState): string | null {
+  const filter = currentFilterJson(state);
+  if (filter === null) return null;
+  const { sort, projection, limit, collation, hint, readPreference } = compileFindOptions(state.builder);
+  return JSON.stringify([filter, sort, projection, limit, collation, hint, readPreference]);
+}
+
+/**
  * `currentFilterJson` for a caller that has already passed `findProblem`, so
  * a null is a bug in one of the two. Throws rather than widening to `{}`:
  * every such caller sends the filter on (a pipeline, an export, a copied

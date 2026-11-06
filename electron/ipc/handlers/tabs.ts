@@ -34,6 +34,7 @@ const TabStateShape = z
     pageSize: z.number().int().positive().optional(),
     totalCount: z.number().int().nonnegative().optional(),
     lastRunHasMore: z.boolean().optional(),
+    lastRunQueryKey: z.string().optional(),
     lastRun: z.record(z.string(), z.unknown()).optional(),
     columns: z.record(z.string(), z.object({ width: z.number() })).optional(),
     expandedRows: z.record(z.string(), z.boolean()).optional(),

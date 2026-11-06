@@ -1,9 +1,12 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '../helpers/render';
+import { render, screen, waitFor, fireEvent, emptyWorkspaceActions, emptyWorkspaceMeta } from '../helpers/render';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
+import { QueryBar } from '../../src/pages/Workspace/QueryBar';
+import { CollectionWorkspaceProvider } from '../../src/pages/Workspace/CollectionWorkspaceProvider';
+import { resultQueryKey } from '../../src/pages/Workspace/builder';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
-import type { CollectionTab } from '@shared/types';
+import type { CollectionTab, CollectionTabState } from '@shared/types';
 import type { IpcApi } from '@shared/ipc';
 
 const now = '2026-04-21T12:00:00.000Z';
@@ -52,6 +55,51 @@ function mountWorkspace() {
     </MemoryRouter>,
   );
 }
+
+describe('QueryBar - the hint that the next Run leaves this page (W07 §3)', () => {
+  const stateWith = (over: Partial<CollectionTabState>): CollectionTabState => ({
+    view: 'Tree',
+    builder: { projection: [], sort: '', limit: '' },
+    queryRaw: '{"a":1}',
+    page: 2,
+    pageSize: 50,
+    activeBuilderTab: 'Builder',
+    ...over,
+  });
+  const ranKey = resultQueryKey(stateWith({}))!;
+  const hintFor = (over: Partial<CollectionTabState>) => {
+    render(
+      <CollectionWorkspaceProvider
+        state={stateWith({ lastRunQueryKey: ranKey, ...over })}
+        actions={emptyWorkspaceActions()}
+        meta={emptyWorkspaceMeta()}
+      >
+        <QueryBar suggestionContext={null} loadGen={0} />
+      </CollectionWorkspaceProvider>,
+    );
+    return screen.queryByTestId('page-reset-hint');
+  };
+
+  it('appears on a later page once the query differs from the one that ran', () => {
+    expect(hintFor({ queryRaw: '{"a":2}' })?.textContent).toBe('Will jump to page 1 on run');
+  });
+
+  it('stays away while the query is the one that ran', () => {
+    expect(hintFor({})).toBeNull();
+  });
+
+  it('stays away on the first page, where there is nothing to jump from', () => {
+    expect(hintFor({ queryRaw: '{"a":2}', page: 0 })).toBeNull();
+  });
+
+  it('stays away while the edit cannot run', () => {
+    expect(hintFor({ queryRaw: '{"a":' })).toBeNull();
+  });
+
+  it('stays away on a tab with no recorded run', () => {
+    expect(hintFor({ queryRaw: '{"a":2}', lastRunQueryKey: undefined })).toBeNull();
+  });
+});
 
 describe('QueryBar - Run button', () => {
   it('clicking Run calls api.query.find with correct args', async () => {
@@ -283,7 +331,7 @@ describe('QueryBar - Run button', () => {
     expect(findSpy.mock.calls[0]?.[0]?.skip).toBe(100);
   });
 
-  it('builder.limit reached on a later page short-circuits without calling find', async () => {
+  it('builder.limit reached on a later page moves back inside the cap instead of finding with limit 0', async () => {
     // userLimit=10, pageSize=50, page=1 → skip=50, past the cap.
     // Sending limit=0 to Mongo would mean "no limit" and dump the whole
     // collection, so the renderer must not issue the find.
@@ -336,9 +384,10 @@ describe('QueryBar - Run button', () => {
     const runBtn = await screen.findByTestId('query-run-btn');
     fireEvent.click(runBtn);
 
-    // Give the click handler a tick to settle. Past-cap path is sync.
-    await new Promise((r) => setTimeout(r, 50));
-    expect(findSpy).not.toHaveBeenCalled();
+    // limit=0 never reaches the find: the page moves back inside the cap.
+    await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(1));
+    expect(findSpy.mock.calls[0]?.[0]?.skip).toBe(0);
+    expect(findSpy.mock.calls[0]?.[0]?.limit).toBe(10);
   });
 
   it('after a successful run, result count appears in result bar', async () => {

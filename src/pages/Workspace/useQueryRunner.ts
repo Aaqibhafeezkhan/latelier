@@ -13,6 +13,7 @@ import {
   filterProblem,
   optionsProblem,
   projectionProblem,
+  resultQueryKey,
   sortProblem,
 } from './builder';
 
@@ -76,6 +77,7 @@ export function useQueryRunner({
   useEffect(() => {
     recordRef.current = recordSessionEvent;
   }, [recordSessionEvent]);
+  const runRef = useRef<UseQueryRunnerResult['run'] | null>(null);
   // Keyed by target.id, not a single flag — a pinned drawer's refresh of
   // another tab must not block on or bleed a spinner onto the focused one.
   const runningIdsRef = useRef<Set<string>>(new Set());
@@ -255,7 +257,24 @@ export function useQueryRunner({
           readPreference: compiled.readPreference,
         };
         const userLimit = compiled.limit;
-        const { skip, limit } = effectivePageLimit(userLimit, state.page, state.pageSize);
+        // Every check above passed, so the filter can run and this has a key.
+        const queryKey = resultQueryKey(state)!;
+        // W07 §3: a query edited since the last run pages through other results,
+        // so a Run of it starts over. A page the caller chose (pager, page size)
+        // stands.
+        const edited = state.lastRunQueryKey !== undefined && state.lastRunQueryKey !== queryKey;
+        const page = edited && override?.page === undefined ? 0 : state.page;
+        if (page !== state.page) patchState(target.id, { page });
+        // The total is only known after the find, so a page the results no longer
+        // reach (deleted documents, a chosen page past the end) shows empty until
+        // this moves it to the last page that has any.
+        const clampPage = (total: number) => {
+          const lastPage = Math.max(0, Math.ceil(total / state.pageSize) - 1);
+          if (page <= lastPage) return;
+          patchState(target.id, { page: lastPage });
+          void runRef.current!({ ...override, ...patch, page: lastPage }, target);
+        };
+        const { skip, limit } = effectivePageLimit(userLimit, page, state.pageSize);
 
         // Sending limit=0 to Mongo means "no limit" — short-circuit past the user's cap.
         if (limit === 0) {
@@ -268,6 +287,7 @@ export function useQueryRunner({
             lastRunHasMore: false,
             totalCount: userLimit ?? 0,
           });
+          clampPage(userLimit ?? 0);
           return;
         }
 
@@ -298,11 +318,7 @@ export function useQueryRunner({
           target.connectionId,
           target.dbName,
           target.collection,
-          filter,
-          compiled.sort,
-          compiled.projection,
-          userLimit,
-          match,
+          queryKey,
         ]);
         const pageOnly =
           override !== undefined &&
@@ -316,7 +332,11 @@ export function useQueryRunner({
           ranAt: new Date().toISOString(),
           ...(keepPlan ? { plan: known.plan } : {}),
         };
-        const written = patchState(target.id, { lastRun, lastRunHasMore: effectiveHasMore });
+        const written = patchState(target.id, {
+          lastRun,
+          lastRunHasMore: effectiveHasMore,
+          lastRunQueryKey: queryKey,
+        });
         // Fire-and-forget, like the count below: the plan badge's data. The
         // result never waits on it, and a failed explain only means no badge.
         if (!keepPlan) {
@@ -388,6 +408,7 @@ export function useQueryRunner({
             const displayCount =
               userLimit !== null ? Math.min(count, userLimit) : count;
             patchState(target.id, { totalCount: displayCount });
+            clampPage(displayCount);
           })
           .catch((err) => {
             // A superseded run's count is cancelled with it, which is not a failure.
@@ -425,6 +446,9 @@ export function useQueryRunner({
     },
     [loadingDelayMs, clearRunning],
   );
+  useEffect(() => {
+    runRef.current = run;
+  }, [run]);
 
   const isLoading = active ? loadingIds.has(active.id) : false;
 

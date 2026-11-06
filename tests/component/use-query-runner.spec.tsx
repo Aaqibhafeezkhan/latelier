@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { queryObjects } from 'node:v8';
 import type { IpcApi } from '@shared/ipc';
 import { act, renderHook, waitFor } from '../helpers/render';
+import { resultQueryKey } from '../../src/pages/Workspace/builder';
 import { useQueryRunner } from '../../src/pages/Workspace/useQueryRunner';
 import type { RunnerTarget } from '../../src/pages/Workspace/useQueryRunner';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
@@ -116,6 +117,155 @@ describe('useQueryRunner', () => {
       expect(countCall?.[1].totalCount).toBe(42);
     });
     expect(countSpy).toHaveBeenCalledTimes(1);
+  });
+
+  describe('a Run after the query was edited (W07 §3)', () => {
+    const ranKey = resultQueryKey(makeState({ queryRaw: '{"a":1}' }))!;
+
+    async function runOnPage3(
+      queryRaw: string,
+      lastRunQueryKey: string | undefined,
+      override?: Partial<CollectionTabState>,
+    ) {
+      const findSpy = vi.fn<IpcApi['query']['find']>(async () => ({
+        documents: [],
+        durationMs: 1,
+        hasMore: false,
+      }));
+      installAtelierMock({
+        query: { find: findSpy, count: async () => ({ count: 1000 }) },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({
+          active: makeTarget({ page: 3, queryRaw, lastRunQueryKey }),
+          patchCollectionState: patch,
+          loadingDelayMs: 0,
+        }),
+      );
+      await act(async () => {
+        await result.current.run(override);
+      });
+      return { findSpy, patch };
+    }
+    const pagePatches = (patch: ReturnType<typeof vi.fn>) =>
+      patch.mock.calls.filter((c) => c[1].page !== undefined);
+
+    it('goes back to the first page', async () => {
+      const { findSpy, patch } = await runOnPage3('{"a":2}', ranKey);
+      expect(findSpy).toHaveBeenCalledTimes(1);
+      expect(findSpy.mock.calls[0]?.[0]?.skip).toBe(0);
+      expect(patch).toHaveBeenCalledWith('t1', { page: 0 });
+    });
+
+    it('goes back for an edit that arrives as the override', async () => {
+      const { findSpy } = await runOnPage3('{"a":1}', ranKey, { queryRaw: '{"a":2}' });
+      expect(findSpy.mock.calls[0]?.[0]?.skip).toBe(0);
+    });
+
+    it('stays on the page when the same query runs again', async () => {
+      const { findSpy, patch } = await runOnPage3('{"a":1}', ranKey);
+      expect(findSpy.mock.calls[0]?.[0]?.skip).toBe(150);
+      expect(pagePatches(patch)).toHaveLength(0);
+    });
+
+    it('respects a page the caller asked for', async () => {
+      const { findSpy, patch } = await runOnPage3('{"a":2}', ranKey, { page: 4 });
+      expect(findSpy.mock.calls[0]?.[0]?.skip).toBe(200);
+      expect(pagePatches(patch)).toHaveLength(0);
+    });
+
+    it('stays on the page of a tab with no recorded run', async () => {
+      const { findSpy, patch } = await runOnPage3('{"a":2}', undefined);
+      expect(findSpy.mock.calls[0]?.[0]?.skip).toBe(150);
+      expect(pagePatches(patch)).toHaveLength(0);
+    });
+
+    it('records the query that ran with its result', async () => {
+      const { patch } = await runOnPage3('{"a":1}', undefined);
+      const written = patch.mock.calls.find((c) => c[1].lastRun !== undefined);
+      expect(written?.[1].lastRunQueryKey).toBe(ranKey);
+    });
+
+    it('does not record a query the server refused', async () => {
+      const findSpy = vi.fn<IpcApi['query']['find']>(async () => {
+        throw { code: 'MONGO', message: 'bad query' };
+      });
+      installAtelierMock({ query: { find: findSpy } });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({
+          active: makeTarget({ page: 3, queryRaw: '{"a":2}', lastRunQueryKey: ranKey }),
+          patchCollectionState: patch,
+          loadingDelayMs: 0,
+        }),
+      );
+      await act(async () => {
+        await result.current.run();
+      });
+      expect(patch.mock.calls.some((c) => c[1].lastRun?.error !== undefined)).toBe(true);
+      expect(patch.mock.calls.some((c) => c[1].lastRunQueryKey !== undefined)).toBe(false);
+    });
+  });
+
+  describe('a page past the end of the results', () => {
+    async function runAt(stateOverrides: Partial<CollectionTabState>, count: number) {
+      const findSpy = vi.fn<IpcApi['query']['find']>(async () => ({
+        documents: [],
+        durationMs: 1,
+        hasMore: false,
+      }));
+      installAtelierMock({
+        query: { find: findSpy, count: async () => ({ count }) },
+      });
+      const patch = vi.fn();
+      const { result } = renderHook(() =>
+        useQueryRunner({
+          active: makeTarget(stateOverrides),
+          patchCollectionState: patch,
+          loadingDelayMs: 0,
+        }),
+      );
+      await act(async () => {
+        await result.current.run();
+      });
+      await waitFor(() => {
+        expect(patch.mock.calls.some((c) => c[1].totalCount !== undefined)).toBe(true);
+      });
+      return { findSpy, patch };
+    }
+
+    it('moves to the last page that has results and fetches it', async () => {
+      const { findSpy, patch } = await runAt({ page: 5 }, 60);
+      await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(2));
+      expect(findSpy.mock.calls[0]?.[0]?.skip).toBe(250);
+      expect(findSpy.mock.calls[1]?.[0]?.skip).toBe(50);
+      expect(patch).toHaveBeenCalledWith('t1', { page: 1 });
+    });
+
+    it('moves to the first page when nothing matches', async () => {
+      const { findSpy, patch } = await runAt({ page: 2 }, 0);
+      await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(2));
+      expect(findSpy.mock.calls[1]?.[0]?.skip).toBe(0);
+      expect(patch).toHaveBeenCalledWith('t1', { page: 0 });
+    });
+
+    it('stays put on a last page that is exactly full', async () => {
+      const { findSpy, patch } = await runAt({ page: 1 }, 100);
+      expect(findSpy).toHaveBeenCalledTimes(1);
+      expect(patch.mock.calls.some((c) => c[1].page !== undefined)).toBe(false);
+    });
+
+    it('moves back inside a user limit that no longer reaches the page', async () => {
+      const { findSpy, patch } = await runAt(
+        { page: 3, builder: { projection: [], sort: '', limit: '30' } },
+        500,
+      );
+      await waitFor(() => expect(findSpy).toHaveBeenCalledTimes(1));
+      expect(findSpy.mock.calls[0]?.[0]?.skip).toBe(0);
+      expect(findSpy.mock.calls[0]?.[0]?.limit).toBe(30);
+      expect(patch).toHaveBeenCalledWith('t1', { page: 0 });
+    });
   });
 
   it('stale count from older run is ignored when a newer run completes first', async () => {
@@ -464,7 +614,7 @@ describe('useQueryRunner', () => {
       hasMore: false,
     }));
     installAtelierMock({
-      query: { find: findSpy, count: async () => ({ count: 0 }) },
+      query: { find: findSpy, count: async () => ({ count: 1000 }) },
     });
 
     const patch = vi.fn();
@@ -488,7 +638,7 @@ describe('useQueryRunner', () => {
     expect(findSpy.mock.calls[0][0].limit).toBe(50);
   });
 
-  it('past-cap short-circuit: limit=0 skips the find and patches empty result', async () => {
+  it('past-cap short-circuit: limit=0 never reaches the find, and the page moves back inside the cap', async () => {
     const findSpy = vi.fn<IpcApi['query']['find']>(async () => ({ documents: [], durationMs: 0, hasMore: false }));
     installAtelierMock({
       query: { find: findSpy, count: async () => ({ count: 0 }) },
@@ -517,7 +667,9 @@ describe('useQueryRunner', () => {
       await result.current.run();
     });
 
-    expect(findSpy).not.toHaveBeenCalled();
+    expect(findSpy).toHaveBeenCalledTimes(1);
+    expect(findSpy.mock.calls[0][0].skip).toBe(0);
+    expect(findSpy.mock.calls[0][0].limit).toBe(10);
     const emptyCall = patch.mock.calls.find(
       (c) => c[1].lastRun?.documents?.length === 0 && c[1].totalCount === 10,
     );
@@ -719,7 +871,7 @@ describe('useQueryRunner', () => {
       installAtelierMock({
         query: {
           find: async () => ({ documents: [{ _id: 1 }], durationMs: 1, hasMore: false }),
-          count: async () => ({ count: 0 }),
+          count: async () => ({ count: 1000 }),
           explain: explainSpy,
         },
       });
@@ -845,7 +997,7 @@ describe('useQueryRunner', () => {
       expect(explainSpy.mock.calls[1][0].collation).toBe('{"locale":"en"}');
     });
 
-    it('does not explain on the past-cap short-circuit', async () => {
+    it('explains only the find that follows the past-cap short-circuit', async () => {
       const explainSpy = vi.fn<IpcApi['query']['explain']>(async () => ({ plan, verbosity: 'queryPlanner' }));
       installAtelierMock({
         query: {
@@ -871,7 +1023,7 @@ describe('useQueryRunner', () => {
         await result.current.run();
       });
 
-      expect(explainSpy).not.toHaveBeenCalled();
+      await waitFor(() => expect(explainSpy).toHaveBeenCalledTimes(1));
     });
 
     it('does not explain a refused filter or a failed find', async () => {
