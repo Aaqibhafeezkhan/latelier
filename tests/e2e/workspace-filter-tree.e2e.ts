@@ -63,7 +63,8 @@ test('filter tree editor: build a nested filter in the drawer, run it, then hand
       await win.getByPlaceholder('value').nth(0).fill('x');
 
       // Add a nested group as the root's second child.
-      await win.getByRole('button', { name: 'Add group', exact: true }).click();
+      await win.getByRole('button', { name: 'More ways to add', exact: true }).click();
+      await win.getByRole('menuitem', { name: 'Add group', exact: true }).click();
 
       // The nested group is the second "Group logic" control in the tree —
       // flip it from its AND default to OR.
@@ -273,6 +274,71 @@ test('filter tree editor: starters and chips build filters that run', async () =
       await expect(win.getByText('ALINA')).toBeVisible({ timeout: 8000 });
       await expect(win.getByText('Alice')).toBeVisible();
       await expect(win.getByText('bob')).not.toBeVisible();
+    });
+  });
+});
+
+/**
+ * W13 §6 — the Filter tab's regions keep their places. jsdom has no layout, so
+ * this is the one level that can see it: a control that moves as rows come and
+ * go, or a list that pushes the bottom row off the pane instead of scrolling,
+ * only shows up in a real window.
+ */
+test('filter tab: the add controls, status line and bottom row stay put as conditions are added', async () => {
+  const { host, port } = await startMemoryServer();
+
+  await withApp(async (app) => {
+    const win = await app.firstWindow();
+    await win.waitForLoadState('domcontentloaded');
+
+    await expectConsoleClean(win, async () => {
+      await seedActiveConnectionWithDocs(
+        win,
+        { ...baseConnInput(host, port), name: 'Fixed Regions Target' },
+        { dbName: 'shop', collection: 'orders', docs: [{ name: 'only' }] },
+      );
+      await expectStatusDot(win, 'Fixed Regions Target', 'connected');
+
+      const ws = new WorkspacePage(win);
+      await ws.openCollectionFromNavigator('shop', 'orders');
+      await expect(win.getByText('only')).toBeVisible({ timeout: 8000 });
+
+      const add = win.getByRole('button', { name: 'Add condition', exact: true });
+      const reset = win.getByRole('button', { name: 'Reset', exact: true });
+      const list = win.locator('[data-group-path="root"] > div').last();
+      await expect(win.getByText('Matches every document')).toBeVisible();
+
+      const before = {
+        add: await add.boundingBox(),
+        reset: await reset.boundingBox(),
+        list: await list.boundingBox(),
+      };
+      // Enough rows to overflow the pane at the test window's height.
+      for (let rows = 1; rows <= 12; rows += 1) {
+        await add.click();
+        expect(await add.boundingBox()).toEqual(before.add);
+        expect(await reset.boundingBox()).toEqual(before.reset);
+        // The status line above it kept its height whatever it had to say.
+        expect(await list.boundingBox()).toEqual(before.list);
+      }
+      await expect(win.getByText(/12 conditions/)).toBeVisible();
+
+      // The list took the overflow itself, and the row just added is in view.
+      const { clientHeight, scrollHeight } = await list.evaluate((el) => ({
+        clientHeight: el.clientHeight,
+        scrollHeight: el.scrollHeight,
+      }));
+      expect(scrollHeight).toBeGreaterThan(clientHeight);
+      await expect(win.locator('[data-row-path="11"]')).toBeInViewport();
+
+      // A starter from the menu leaves the caret in its own field: the menu
+      // hands focus back to its button as it closes, and must not win.
+      await win.getByRole('button', { name: 'More ways to add', exact: true }).click();
+      await win.getByRole('menuitem', { name: 'Exists and is not null', exact: true }).click();
+      const starterField = win.locator('[data-row-path="12"] input[placeholder="field"]');
+      await expect(starterField).toBeFocused();
+      await win.waitForTimeout(300);
+      await expect(starterField).toBeFocused();
     });
   });
 });

@@ -126,7 +126,8 @@ describe('Filter drawer — pending-row lifecycle (W13 §5, §11)', () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add raw clause' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More ways to add' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Add raw clause' }));
 
     const rawInput = await screen.findByLabelText('Raw clause 1');
     expect(rawInput).toBeTruthy();

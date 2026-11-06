@@ -1,6 +1,6 @@
 # W15 — Query composition: the whole find, not just the filter
 
-> **Status: Accepted.** Tiers 1–2 and most of §13 shipped. Tier 3 is open only for the 1000-document cap. Of §14, 14.1, 14.3 and 14.5–14.9 shipped; 14.2 and 14.4's "exclude this value" are open.
+> **Status: Accepted.** Tiers 1–2 and most of §13 shipped. Tier 3 is open for the 1000-document cap and §1.2, whose pointer was shipped and then removed. Of §14, 14.1, 14.3 and 14.5–14.9 shipped; 14.2 and 14.4's "exclude this value" are open.
 
 ## Purpose
 
@@ -117,10 +117,11 @@ W14 §2 called the badge a fix for "nothing indicates that projection / sort /
 limit exist and are hidden". It is a fix for users who already know they
 exist. It is not discovery.
 
-> **Shipped (pointer):** under the filter tree the drawer carries one muted
-> line: sort, limit and skip are set in the query bar's advanced row, and
-> projection is under Fields. It is static text, not a control — a pointer is
-> enough once the reader knows where to look.
+> **Shipped (pointer), then removed:** under the filter tree the drawer carried
+> one muted line, gone with [W13 §6](./W13-filter-tree-editor.md#6-ui)'s fixed
+> regions, which keep the Filter tab to the filter and the whole-query actions.
+> It said sort, limit and skip are set in the query bar's advanced row, and
+> projection is under Fields.
 
 
 ### 1.3 The drawer is dimmed dead weight on two of three views — P2
@@ -733,8 +734,8 @@ invoked programmatically by the History button; a user cannot invoke it.
 
 ### 13.7 Acceptance criteria for this section
 
-- The three add-buttons in a group header are mutually distinguishable
-  without reading a tooltip.
+- The add controls in a group header are mutually distinguishable without
+  reading a tooltip: labelled on the root (W13 §6), by glyph on a nested group.
 - Each row offers exactly one Remove affordance.
 - Reset either confirms or is undoable.
 - The "N not applied" banner names or navigates to the offending rows.

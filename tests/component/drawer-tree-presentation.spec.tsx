@@ -93,18 +93,80 @@ afterEach(() => {
 });
 
 describe('W15 §13.1 — the group header\'s three add buttons', () => {
-  it('draw three different glyphs, and `<>` sits on the raw clause', async () => {
-    mountWith(makeState());
+  it('a nested group draws three different glyphs, and `<>` sits on the raw clause', async () => {
+    mountWith(makeState({ queryRaw: '{"x":{"$eq":0},"$or":[{"a":{"$eq":1}},{"b":{"$eq":2}}]}' }));
 
-    const condition = await screen.findByRole('button', { name: 'Add condition' });
-    const group = screen.getByRole('button', { name: 'Add group' });
-    const raw = screen.getByRole('button', { name: 'Add raw clause' });
+    const condition = await screen.findByRole('button', { name: 'Add condition to group 2' });
+    const group = screen.getByRole('button', { name: 'Add group to group 2' });
+    const raw = screen.getByRole('button', { name: 'Add raw clause to group 2' });
 
     const glyphs = [glyphOf(condition), glyphOf(group), glyphOf(raw)];
     expect(new Set(glyphs).size).toBe(3);
     // `<>` reads as raw JSON; it belongs to the one action it describes.
     expect(glyphOf(raw)).toBe('tabler-icon-code');
     expect(glyphOf(group)).not.toBe('tabler-icon-code');
+  });
+
+  it('the root keeps one labelled add and puts the rest in its menu, in words', async () => {
+    mountWith(makeState());
+
+    const condition = await screen.findByRole('button', { name: 'Add condition' });
+    expect(condition.textContent).toBe('Condition');
+    expect(screen.queryByRole('button', { name: 'Add group' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More ways to add' }));
+    await screen.findByRole('menuitem', { name: 'Add group' });
+    expect(screen.getByRole('menuitem', { name: 'Add raw clause' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Last 7 days' })).toBeTruthy();
+  });
+
+  it('a starter from the menu lands below the existing rows, with the caret in its field', async () => {
+    const queryRaw = '{"a":{"$eq":1}}';
+    mountWith(makeState({ queryRaw }));
+    await screen.findAllByPlaceholderText('field');
+
+    fireEvent.click(screen.getByRole('button', { name: 'More ways to add' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Exists and is not null' }));
+
+    const fields = await screen.findAllByPlaceholderText('field');
+    expect((fields as HTMLInputElement[]).map((f) => f.value)).toEqual(['a', '']);
+    await waitFor(() => expect(document.activeElement).toBe(fields[1]));
+  });
+
+  it('the menu follows the tree into read-only, with the add beside it', async () => {
+    mountWith(makeState({ queryRaw: 'not valid json{{{' }));
+
+    await screen.findByText(/isn't valid JSON/);
+    expect(screen.getByRole('button', { name: 'More ways to add' })).toHaveProperty('disabled', true);
+  });
+});
+
+describe('The status line says what the rows add up to', () => {
+  const line = () => screen.getByText(/conditions?( on)?( · .*)?$/);
+
+  it('counts one blank row as waiting, not as applied', async () => {
+    mountWith(makeState());
+    await screen.findByText('Matches every document');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add condition' }));
+
+    await waitFor(() => expect(line().textContent).toBe('1 condition · 1 not filled in'));
+  });
+
+  it('counts a switched-off row, and every row inside a switched-off group, as off', async () => {
+    mountWith(
+      makeState({
+        queryRaw: '{"a":{"$eq":1},"$or":[{"b":{"$eq":2}},{"c":{"$eq":3}}]}',
+      }),
+    );
+    await screen.findAllByPlaceholderText('field');
+    expect(line().textContent).toContain('3 conditions');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Include condition a' }));
+    await waitFor(() => expect(line().textContent).toContain('2 of 3 conditions on'));
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Include group 2' }));
+    await waitFor(() => expect(line().textContent).toContain('0 of 3 conditions on'));
   });
 });
 
@@ -267,8 +329,6 @@ describe('Group and raw-row controls are named by position', () => {
     }
     // The root is the only group without a position, so its names stay short.
     expectNamedButton('Add condition');
-    expectNamedButton('Add group');
-    expectNamedButton('Add raw clause');
   });
 });
 

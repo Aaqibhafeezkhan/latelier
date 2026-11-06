@@ -371,6 +371,53 @@ function focusRowFieldAfterRender(path: NodePath): void {
   });
 }
 
+/**
+ * Scrolls the node at `path` into view once it has rendered. The add controls
+ * stay pinned above a list that scrolls, so a row added to a long list would
+ * land below the fold and read as the button having done nothing.
+ */
+function revealNodeAfterRender(path: NodePath): void {
+  const key = pathKey(path);
+  requestAnimationFrame(() => {
+    document
+      .querySelector(`[data-row-path="${key}"], [data-group-path="${key}"]`)
+      // jsdom has no `scrollIntoView`.
+      ?.scrollIntoView?.({ block: 'nearest' });
+  });
+}
+
+/**
+ * What the status line says about the rows: how many there are, how many are
+ * switched on (a row inside a switched-off group is off too), and how many of
+ * those are still blank, so they sit out of the filter until they're filled in.
+ */
+function countRows(node: GroupNode, ancestorOff = false): { total: number; on: number; pending: number } {
+  const tally = { total: 0, on: 0, pending: 0 };
+  const off = ancestorOff || !!node.disabled;
+  for (const child of node.children) {
+    if (child.kind === 'group') {
+      const nested = countRows(child, off);
+      tally.total += nested.total;
+      tally.on += nested.on;
+      tally.pending += nested.pending;
+      continue;
+    }
+    tally.total += 1;
+    if (off || child.disabled) continue;
+    tally.on += 1;
+    if ((child.kind === 'cond' ? child.field : child.json).trim() === '') tally.pending += 1;
+  }
+  return tally;
+}
+
+function rowsSummary(root: GroupNode): string {
+  const { total, on, pending } = countRows(root);
+  if (total === 0) return '';
+  const noun = total === 1 ? 'condition' : 'conditions';
+  const rows = on === total ? `${total} ${noun}` : `${on} of ${total} ${noun} on`;
+  return pending > 0 ? `${rows} · ${pending} not filled in` : rows;
+}
+
 interface TreeEditProps {
   root: GroupNode;
   /**
@@ -667,7 +714,8 @@ function CondRow({
         flexDirection: 'column',
         gap: 4,
         marginBottom: 8,
-        borderRadius: T.rs,
+        paddingBottom: 8,
+        borderBottom: `1px solid ${T.border}`,
         background: rowDrop.isActive ? T.accentSoft : undefined,
         boxShadow: rowDrop.isActive ? `inset 0 0 0 1.5px ${T.accent}` : undefined,
         transition: 'background 120ms, box-shadow 120ms',
@@ -737,7 +785,7 @@ function CondRow({
             title={opProblem}
             error={!!opProblem}
             size="xs"
-            style={{ width: 100, flexShrink: 0 }}
+            style={{ width: 76, flexShrink: 0 }}
             styles={{ input: { fontFamily: 'monospace' } }}
           />
           <SuggestionPopover
@@ -997,6 +1045,71 @@ function RawRow({
   );
 }
 
+/**
+ * The root's add controls. The common add is one labelled click; the rarer
+ * ones share a menu, starters included, so they stay reachable once the empty
+ * state has gone. Nested groups keep their three icon buttons, where the width
+ * for a label isn't there.
+ */
+function RootAddControls({
+  disabled,
+  onAddCondition,
+  onAddGroup,
+  onAddRaw,
+  onAddTemplate,
+}: {
+  disabled: boolean;
+  onAddCondition: () => void;
+  onAddGroup: () => void;
+  onAddRaw: () => void;
+  onAddTemplate: (tpl: FilterTemplate) => void;
+}) {
+  return (
+    <Button.Group>
+      <Button
+        variant="default"
+        size="compact-xs"
+        leftSection={I.plus}
+        px={5}
+        styles={{ section: { marginInlineEnd: 3 } }}
+        disabled={disabled}
+        onClick={onAddCondition}
+        aria-label="Add condition"
+      >
+        Condition
+      </Button>
+      <Menu position="bottom-start" shadow="md" width={210}>
+        <Menu.Target>
+          <Button
+            variant="default"
+            size="compact-xs"
+            disabled={disabled}
+            aria-label="More ways to add"
+            px={4}
+          >
+            {I.chevD}
+          </Button>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Item leftSection={I.group} onClick={onAddGroup}>
+            Add group
+          </Menu.Item>
+          <Menu.Item leftSection={I.code} onClick={onAddRaw}>
+            Add raw clause
+          </Menu.Item>
+          <Menu.Divider />
+          <Menu.Label>Starters</Menu.Label>
+          {FILTER_TEMPLATES.map((tpl) => (
+            <Menu.Item key={tpl.id} onClick={() => onAddTemplate(tpl)}>
+              {tpl.label}
+            </Menu.Item>
+          ))}
+        </Menu.Dropdown>
+      </Menu>
+    </Button.Group>
+  );
+}
+
 function GroupView({
   node,
   path,
@@ -1009,6 +1122,7 @@ function GroupView({
   isRoot,
   suggestionContext,
   headerExtra,
+  statusLine,
   excludedNoteId,
 }: TreeEditProps & {
   node: GroupNode;
@@ -1018,6 +1132,8 @@ function GroupView({
   suggestionContext: SuggestionContext | null;
   /** Controls placed at the right end of this group's header (the root's Undo / Redo). */
   headerExtra?: React.ReactNode;
+  /** The root's status line, between its header and the list that scrolls. */
+  statusLine?: React.ReactNode;
 }) {
   const T = themeVars;
 
@@ -1068,24 +1184,24 @@ function GroupView({
     applyEdit(insertAt(root, path, condFromDragged(dragged)));
   };
 
-  const addCondition = () => applyEdit(insertAt(root, path, emptyCond()));
-  const addGroup = () => {
-    const group: GroupNode = { kind: 'group', logic: '$and', children: [] };
-    applyEdit(insertAt(root, path, group));
+  // `insertAt` appends, so whatever is added next lands at this index.
+  const nextChild = [...path, node.children.length];
+  const addNode = (child: FilterNode) => {
+    applyEdit(insertAt(root, path, child));
+    revealNodeAfterRender(nextChild);
   };
-  const addRaw = () => {
-    const raw: RawNode = { kind: 'raw', json: '' };
-    applyEdit(insertAt(root, path, raw));
-  };
-  // Only offered on an empty root, so the new row is always row 0.
+  const addCondition = () => addNode(emptyCond());
+  const addGroup = () => addNode({ kind: 'group', logic: '$and', children: [] });
+  const addRaw = () => addNode({ kind: 'raw', json: '' });
   const addTemplate = (tpl: FilterTemplate) => {
     applyEdit(insertAt(root, path, tpl.build(new Date())));
-    focusRowFieldAfterRender([...path, 0]);
+    focusRowFieldAfterRender(nextChild);
   };
   const setLogic = (logic: GroupNode['logic']) => applyEdit(updateAt(root, path, { ...node, logic }));
   const removeGroup = () => applyEdit(removeAt(root, path));
   const toggle = () => applyEdit(updateAt(root, path, toggleDisabled(node)));
   const dim = dimFor(node);
+  const showEmptyState = isRoot && !readOnly && node.children.length === 0;
   const negate = () => applyEdit(wrapInGroup(root, path, '$nor'));
   const removeNegation = () => applyEdit(unwrapGroup(root, path));
   // A nested one-child `$nor` reads as NOT of that child, so it is shown as
@@ -1124,9 +1240,13 @@ function GroupView({
       style={
         isRoot
           ? {
-              // The root's own box owns the pane's drop highlight, filling
-              // the same visible area as the outer drawer wrapper, so no
-              // drop can land outside every group's DOM node.
+              // The root fills the Filter tab, header and status line
+              // included, and owns the pane's drop highlight, so no drop can
+              // land outside every group's DOM node.
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
               background: isActive ? T.accentSoft : undefined,
               boxShadow: isActive ? `inset 0 0 0 1.5px ${T.accent}` : undefined,
               transition: 'background 120ms, box-shadow 120ms',
@@ -1151,8 +1271,8 @@ function GroupView({
           display: 'flex',
           alignItems: 'center',
           gap: 6,
-          padding: isRoot ? '7px 10px' : '0 0 6px',
-          borderBottom: isRoot ? `1px solid ${T.border}` : 'none',
+          padding: isRoot ? '6px 8px' : '0 0 6px',
+          ...(isRoot ? { flexShrink: 0, minHeight: 40, boxSizing: 'border-box' } : {}),
         }}
       >
         {!isRoot && (
@@ -1165,7 +1285,19 @@ function GroupView({
           />
         )}
         {node.disabled && <VisuallyHidden id={noteId}>Excluded: its group is switched off</VisuallyHidden>}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, opacity: dim }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: isRoot ? 4 : 6,
+            flex: 1,
+            minWidth: 0,
+            opacity: dim,
+            // A narrow pane wraps a header rather than clipping it. That
+            // depends on the pane's width alone, never on the rows below it.
+            flexWrap: 'wrap',
+          }}
+        >
           {isNegation ? (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: T.accent }}>NOT</span>
@@ -1185,43 +1317,55 @@ function GroupView({
           ) : (
             <LogicPicker value={node.logic} onChange={setLogic} disabled={readOnly} />
           )}
-          <Tooltip label="Add condition" withArrow>
-            <ActionIcon
-              variant="default"
-              size="sm"
+          {isRoot ? (
+            <RootAddControls
               disabled={readOnly}
-              onClick={addCondition}
-              aria-label={`Add condition${toGroup}`}
-            >
-              {I.plus}
-            </ActionIcon>
-          </Tooltip>
-          {/* Three add buttons, three glyphs. "Add condition" keeps the plus;
-              the nested group takes parentheses (how a boolean group is
-              written); `<>` moves to the raw clause, the only one of the
-              three it actually describes. */}
-          <Tooltip label="Add nested group" withArrow>
-            <ActionIcon
-              variant="default"
-              size="sm"
-              disabled={readOnly}
-              onClick={addGroup}
-              aria-label={`Add group${toGroup}`}
-            >
-              {I.group}
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="Add raw clause" withArrow>
-            <ActionIcon
-              variant="default"
-              size="sm"
-              disabled={readOnly}
-              onClick={addRaw}
-              aria-label={`Add raw clause${toGroup}`}
-            >
-              {I.code}
-            </ActionIcon>
-          </Tooltip>
+              onAddCondition={addCondition}
+              onAddGroup={addGroup}
+              onAddRaw={addRaw}
+              onAddTemplate={addTemplate}
+            />
+          ) : (
+            <>
+            <Tooltip label="Add condition" withArrow>
+              <ActionIcon
+                variant="default"
+                size="sm"
+                disabled={readOnly}
+                onClick={addCondition}
+                aria-label={`Add condition${toGroup}`}
+              >
+                {I.plus}
+              </ActionIcon>
+            </Tooltip>
+            {/* Three add buttons, three glyphs. "Add condition" keeps the plus;
+                the nested group takes parentheses (how a boolean group is
+                written); `<>` moves to the raw clause, the only one of the
+                three it actually describes. */}
+            <Tooltip label="Add nested group" withArrow>
+              <ActionIcon
+                variant="default"
+                size="sm"
+                disabled={readOnly}
+                onClick={addGroup}
+                aria-label={`Add group${toGroup}`}
+              >
+                {I.group}
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Add raw clause" withArrow>
+              <ActionIcon
+                variant="default"
+                size="sm"
+                disabled={readOnly}
+                onClick={addRaw}
+                aria-label={`Add raw clause${toGroup}`}
+              >
+                {I.code}
+              </ActionIcon>
+            </Tooltip>
+            </>
+          )}
           <span style={{ flex: 1 }} />
           {headerExtra}
           {!isRoot && !isNegation && (
@@ -1253,31 +1397,55 @@ function GroupView({
           )}
         </div>
       </div>
-      <div style={{ padding: isRoot ? '6px 10px 4px' : 0, opacity: dim }}>
-        {/* Say what an empty tree's state means and what to do about it, in
-            words, rather than leaving a radiogroup and three icon buttons
-            over blank space — but not while the tree is frozen read-only
-            (§6a), where the empty root is the *unparsed* bar's doing and
-            "matches every document" would be a lie sitting directly under
-            the banner saying the filter text is invalid. */}
-        {isRoot && !readOnly && node.children.length === 0 && (
-          <p style={{ margin: '4px 0 6px', fontSize: 11, color: T.textMuted, lineHeight: 1.45 }}>
-            No conditions yet — this filter matches every document. Add a
-            condition to narrow it down, or drag a field in from the results;
-            the query bar above shows the same filter as text.
-          </p>
-        )}
-        {/* Starters double as examples of the operators behind them; each
-            adds a row with a blank field, so nothing runs until it's named. */}
-        {isRoot && !readOnly && node.children.length === 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-            {FILTER_TEMPLATES.map((tpl) => (
-              <Tooltip key={tpl.id} label={`Uses ${tpl.operator}`} withArrow>
-                <Button variant="light" size="compact-xs" onClick={() => addTemplate(tpl)}>
-                  {tpl.label}
-                </Button>
-              </Tooltip>
-            ))}
+      {statusLine}
+      <div
+        style={
+          isRoot
+            ? {
+                // The one thing in the Filter tab that scrolls: every region
+                // around it keeps its place however many rows there are.
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                padding: '8px 10px',
+                // Clear while a field is over the root, so its highlight shows through.
+                background: isActive ? undefined : T.bg,
+                ...(showEmptyState ? { display: 'flex', flexDirection: 'column' } : {}),
+              }
+            : { opacity: dim }
+        }
+      >
+        {/* Say what to do with an empty tree, in words — but not while it is
+            frozen read-only (§6a), where the empty root is the *unparsed*
+            bar's doing and there's nothing the user can add. Starters double
+            as examples of the operators behind them; each adds a row with a
+            blank field, so nothing runs until it's named. */}
+        {showEmptyState && (
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 14,
+              padding: 16,
+              textAlign: 'center',
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: T.text }}>No conditions yet</p>
+            <p style={{ margin: 0, maxWidth: 260, fontSize: 12, lineHeight: 1.5, color: T.textMuted }}>
+              Drag a field here from the results, or start from a common filter.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 6, maxWidth: 290 }}>
+              {FILTER_TEMPLATES.map((tpl) => (
+                <Tooltip key={tpl.id} label={`Uses ${tpl.operator}`} withArrow>
+                  <Button variant="light" size="compact-xs" onClick={() => addTemplate(tpl)}>
+                    {tpl.label}
+                  </Button>
+                </Tooltip>
+              ))}
+            </div>
           </div>
         )}
         {node.children.map((child, i) => {
@@ -1348,13 +1516,15 @@ function GroupView({
             group (the far more likely spot, since a thin unlabeled strip is
             easy to miss among the rows above it) lands on a row's own
             handler and silently replaces it instead of adding a sibling.
-            Taller + labeled as "+ Add condition" instead of a bare "+" so it
-            reads as the deliberate target it is, not release-anywhere-and-
-            hope. `title` is still worth setting even though the div is
+            Taller + labeled so it reads as the deliberate target it is, not
+            release-anywhere-and-hope, and worded as a target rather than a
+            button, since nothing happens on a click. An empty root has none:
+            its whole list is the target, and its empty state says so.
+            `title` is still worth setting even though the div is
             `aria-hidden` — hover tooltips read `title` independent of the
             accessibility tree; a screen-reader user has the keyboard-
             reachable "Add condition" button above for the same result. */}
-        {!readOnly && (
+        {!readOnly && !showEmptyState && (
           <div
             aria-hidden
             title={`Drop a field here to add a condition to this ${isRoot ? 'filter' : 'group'}`}
@@ -1370,7 +1540,7 @@ function GroupView({
               transition: 'border-color 120ms, color 120ms',
             }}
           >
-            + Add condition
+            Drop a field here
           </div>
         )}
       </div>
@@ -1634,7 +1804,7 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
   // time (the toast after a save or delete), and two buttons both called
   // "Undo" would leave a screen-reader user guessing which is which.
   const historyButtons = (
-    <>
+    <span style={{ display: 'inline-flex', gap: 4 }}>
       <Tooltip label="Undo filter edit" withArrow>
         <ActionIcon
           ref={undoRef}
@@ -1659,115 +1829,98 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
           {I.redo}
         </ActionIcon>
       </Tooltip>
-    </>
+    </span>
   );
 
-  return (
+  const liveCountText =
+    liveCount.state === 'ok'
+      ? `≈${liveCount.count.toLocaleString()} match`
+      : liveCount.state === 'counting'
+        ? 'Counting…'
+        : liveCount.state === 'unavailable'
+          ? 'Match count unavailable'
+          : root.children.length === 0
+            ? 'Matches every document'
+            : '';
+  const summary = rowsSummary(root);
+
+  // Inside the root group's DOM, so a drop on it still lands on the root
+  // (ADR 0007: no drop lands outside every group). Always there, so the list
+  // below starts at the same place whatever the filter's state; only the one
+  // sentence too long to clip, the frozen-tree alert, may wrap past its height.
+  const statusLine = (
     <div
-      // Per-group targeting resolves drops on each GroupView (root
-      // included), which renders below the two banners in this div. A drop
-      // landing exactly on a banner never reaches GroupView's own handler,
-      // since it's a sibling, not an ancestor — that leaves a dead zone the
-      // root GroupView's `stopPropagation()` doesn't cover, and ADR 0007
-      // states no drop should be able to land outside every group's DOM
-      // node. This wrapper is the fallback: it only ever sees a drop
-      // GroupView didn't already claim and stop, so it always means the
-      // root group.
-      onDragOver={(e) => {
-        if (readOnly || !e.dataTransfer.types.includes(DRAGGED_FIELD_MIME)) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
-        // Reaching this handler at all means no GroupView's own
-        // `stopPropagation()`'d handler claimed the event first — the
-        // pointer is over a banner or the wrapper's own padding, a dead
-        // zone that still means "root" per the fallback below.
-        if (activeDropPath !== 'root') setActiveDropPath('root');
-      }}
-      onDrop={(e) => {
-        if (readOnly || !e.dataTransfer.types.includes(DRAGGED_FIELD_MIME)) return;
-        e.preventDefault();
-        setActiveDropPath(null);
-        const raw = e.dataTransfer.getData(DRAGGED_FIELD_MIME);
-        if (!raw) return;
-        // `null` and bare scalars parse too; the field check below refuses them.
-        let dragged: DraggedField | null;
-        try {
-          dragged = JSON.parse(raw) as DraggedField;
-        } catch {
-          return;
-        }
-        // A dragged field can legitimately hold `undefined` (BSON's Undefined
-        // type) — `DocFieldTree`'s drag source now guards against starting
-        // such a drag at all, but this is defense in depth for any other
-        // payload source, since `condFromDragged` crashes downstream on one.
-        if (typeof dragged?.field !== 'string' || !dragged.field || dragged.value === undefined) return;
-        applyEdit(insertAt(root, [], condFromDragged(dragged)));
-      }}
       style={{
-        border: `1.5px solid ${T.border}`,
-        borderRadius: T.r,
-        background: T.bg,
-        overflow: 'hidden',
+        flexShrink: 0,
+        minHeight: 28,
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        gap: 2,
+        padding: '4px 10px',
+        fontSize: 11,
+        lineHeight: 1.35,
+        color: T.textMuted,
+        borderTop: `1px solid ${T.border}`,
+        borderBottom: `1px solid ${T.border}`,
       }}
     >
       {problems.length > 0 && (
         <div
           role="status"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            fontSize: 10,
-            padding: '4px 10px',
-            color: T.redText,
-            background: T.redSoft,
-            borderBottom: `1px solid ${T.redBorder}`,
-          }}
+          title={problemLabels(root, problems).join(', ')}
+          style={{ color: T.redText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
         >
           ⚠ {problems.length} not applied: {problemLabels(root, problems).join(', ')}
         </div>
       )}
       {readOnly && (
-        <div
-          role="alert"
-          style={{
-            fontSize: 10,
-            padding: '4px 10px',
-            color: T.textMuted,
-            background: T.surfaceRaised,
-            borderBottom: `1px solid ${T.border}`,
-          }}
-        >
+        <div role="alert">
           {frozenOnDraft
             ? "Filter text isn't valid JSON — showing this filter as you last left it in the drawer. Fix the text in the bar to edit it."
             : "Filter text isn't valid JSON — the tree below is the last valid version."}
         </div>
       )}
-      {liveCount.state !== 'idle' && (
-        // `aria-live` without `role="status"`: the banners above are the
-        // drawer's status roles, and a count is not a problem report.
-        <div aria-live="polite" style={{ fontSize: 10, padding: '4px 10px', color: T.textMuted }}>
-          {liveCount.state === 'ok' && `≈${liveCount.count.toLocaleString()} match`}
-          {liveCount.state === 'counting' && 'Counting…'}
-          {liveCount.state === 'unavailable' && 'Match count unavailable'}
+      {problems.length === 0 && !readOnly && (
+        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {/* `aria-live` without `role="status"`: the banners above are the
+              drawer's status roles, and a count is not a problem report. Only
+              the count is live, so a keystroke in a row announces nothing. */}
+          {liveCountText && <span aria-live="polite">{liveCountText}</span>}
+          {liveCountText && summary && ' · '}
+          {summary}
         </div>
       )}
-      <GroupView
-        node={root}
-        path={[]}
-        root={root}
-        applyEdit={applyEdit}
-        problems={problems}
-        readOnly={readOnly}
-        activeDropPath={activeDropPath}
-        setActiveDropPath={setActiveDropPath}
-        isRoot
-        suggestionContext={suggestionContext}
-        headerExtra={historyButtons}
-      />
     </div>
   );
+
+  return (
+    <GroupView
+      node={root}
+      path={[]}
+      root={root}
+      applyEdit={applyEdit}
+      problems={problems}
+      readOnly={readOnly}
+      activeDropPath={activeDropPath}
+      setActiveDropPath={setActiveDropPath}
+      isRoot
+      suggestionContext={suggestionContext}
+      headerExtra={historyButtons}
+      statusLine={statusLine}
+    />
+  );
 }
+
+/** Tight enough that the longest label, "Open as pipeline", fits a third of the default pane. */
+const BOTTOM_ROW_BUTTON = {
+  variant: 'default',
+  h: 28,
+  px: 0,
+  fullWidth: true,
+  styles: { label: { fontSize: 11, fontWeight: 500 } },
+} as const;
 
 function BuilderPaneInner({
   savedRefreshKey,
@@ -2008,6 +2161,7 @@ function BuilderPaneInner({
     <div
       style={{
         width: '100%',
+        height: '100%',
         borderLeft: `1px solid ${T.border}`,
         background: T.surface,
         display: 'flex',
@@ -2054,43 +2208,44 @@ function BuilderPaneInner({
           value="Builder"
           style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
         >
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            <div style={{ padding: '12px 12px 8px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <FilterDrawer
-                key={`${meta.tabId}:${loadGen}`}
-                queryRaw={state.queryRaw}
-                filterDraft={state.filterDraft}
-                onCommit={onPatch}
-                suggestionContext={suggestionContext}
-              />
-              <div style={{ fontSize: 10, color: T.textMuted }}>
-                Sort, limit and skip are set in the query bar&apos;s advanced row; projection is
-                under Fields.
-              </div>
-            </div>
-          </div>
+          <FilterDrawer
+            key={`${meta.tabId}:${loadGen}`}
+            queryRaw={state.queryRaw}
+            filterDraft={state.filterDraft}
+            onCommit={onPatch}
+            suggestionContext={suggestionContext}
+          />
 
-          {/* Pinned bottom footer: Reset / Copy code. Save lived here too
-              until the QueryBar toolbar Save (always visible, next to
-              Run/History) made this one a duplicate; `saved.create`'s hint
-              anchor moved with it. `SavedStrip` — a preview of the Saved tab
-              one click away — is gone for the same reason. */}
+          {/* Pinned bottom row: Reset / Copy code / Open as pipeline, three
+              actions on the whole query, so one even row rather than the
+              filter's own controls. Save lived here too until the QueryBar
+              toolbar Save (always visible, next to Run/History) made this one
+              a duplicate; `saved.create`'s hint anchor moved with it.
+              `SavedStrip` — a preview of the Saved tab one click away — is
+              gone for the same reason.
+
+              `auto-fit` keeps three equal columns until a narrow pane can't
+              hold them, then wraps instead of clipping a label. */}
           <div
             style={{
-              display: 'flex',
-              gap: 6,
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))',
+              gap: 4,
               alignItems: 'center',
-              padding: '8px 12px',
+              alignContent: 'center',
+              minHeight: 48,
+              boxSizing: 'border-box',
+              padding: '6px 10px',
               borderTop: `1px solid ${T.border}`,
               flexShrink: 0,
             }}
           >
-            <Button variant="default" size="compact-xs" onClick={handleReset}>
+            <Button {...BOTTOM_ROW_BUTTON} onClick={handleReset}>
               Reset
             </Button>
             <Menu position="top-start" shadow="md">
               <Menu.Target>
-                <Button variant="default" size="compact-xs" leftSection={I.copy}>
+                <Button {...BOTTOM_ROW_BUTTON} rightSection={I.chevD}>
                   Copy code
                 </Button>
               </Menu.Target>
@@ -2102,7 +2257,7 @@ function BuilderPaneInner({
                 ))}
               </Menu.Dropdown>
             </Menu>
-            <Button variant="default" size="compact-xs" onClick={handleOpenAsPipeline}>
+            <Button {...BOTTOM_ROW_BUTTON} onClick={handleOpenAsPipeline}>
               Open as pipeline
             </Button>
           </div>

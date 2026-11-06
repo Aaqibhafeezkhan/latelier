@@ -350,7 +350,7 @@ text:
 4. **Pending node**: a cond with an empty `field`, **or** a raw node whose
    `json` is blank/whitespace. Both are rendered, editable, skipped by the
    printer, and never block anything. Add-condition creates the former,
-   "+ Raw" the latter — without this, a fresh raw row would be a blocking
+   *Add raw clause* the latter — without this, a fresh raw row would be a blocking
    problem (§3) the instant it's created, firing the "N not applied" badge
    before the user has typed anything.
 5. **Commit**: every edit calls `printFilter`. On `ok` with new text, patch
@@ -447,26 +447,40 @@ unchanged.
 
 ```
 ┌─ Filter ─────────────────────────────────────────────┐
-│ [AND|OR|NOR]        + Condition  + Group  + Raw      │
-│ ⚠ 1 not applied                                      │
-│ ┌──────────────────────────────────────────────────┐ │
-│ │ status        $eq      [string ▾] active     ⋮ ✕ │ │
-│ │ qty           $gt      [number ▾] 5          ⋮ ✕ │ │
-│ │ ┌─ OR ─────────────────────────────────  ⋮ ✕ ──┐ │ │
-│ │ │ tier        $eq      [string ▾] gold     ⋮ ✕ │ │ │
-│ │ │ vip         $eq      [boolean▾] true     ⋮ ✕ │ │ │
-│ │ └──────────────────────────────────────────────┘ │ │
-│ │ ┌─ raw clause ───────────────────────────  ⋮ ✕ ┐ │ │
-│ │ │ {"items":{"$elemMatch":{"sku":1}}}           │ │ │
-│ │ │                              [Try to parse]  │ │ │
-│ │ └──────────────────────────────────────────────┘ │ │
-│ └──────────────────────────────────────────────────┘ │
-│ [Reset]  [Copy code]                                 │
+│ [AND|OR|NOR] [+ Condition|▾]              [undo][redo]│
+│ ≈38 match · 8 of 9 conditions on                     │
+├──────────────────────────────────────────────────────┤
+│   status        $eq                              ⋮ ✕ │
+│   [string ▾] active                                  │
+│   ┌─ OR ──────────────────  + ( ) <>  ¬ ✕ ──────┐    │
+│   │ tier        $eq                         ⋮ ✕ │    │
+│   │ [string ▾] gold                             │    │
+│   └─────────────────────────────────────────────┘    │
+│   ┌─ raw clause ───────────────────────────  ⋮ ✕ ┐   │
+│   │ {"items":{"$elemMatch":{"sku":1}}}           │   │
+│   │                              [Try to parse]  │   │
+│   └──────────────────────────────────────────────┘   │
+│   ┄ Drop a field here ┄                     (scrolls)│
+├──────────────────────────────────────────────────────┤
+│ [Reset]        [Copy code ▾]     [Open as pipeline]  │
 └──────────────────────────────────────────────────────┘
 ```
 
-- **Group header**: logic segmented control + the three add buttons. Nested
-  groups render their own header, indented, with a left rule, plus an
+- **Fixed regions.** From the top: tabs, the root's header, one status line,
+  the list, the bottom row. Only the list changes with the rows, and it is the
+  one thing that scrolls, so no control moves as conditions come and go. A row
+  added below the fold is scrolled into view. On a narrow pane the header and
+  the bottom row wrap: that depends on the pane's width, never on the rows.
+- **Status line**: always present. It carries the live count and a summary of
+  the rows (`≈38 match · 8 of 9 conditions on`), *Matches every document* on an
+  empty tree, or the *N not applied* / read-only messages in their place.
+- **Empty state**: fills the list with what to do next and the starters. An
+  empty root has no drop strip, since its whole list is the target.
+- **Group header**: logic segmented control + the add controls. The root has
+  *+ Condition* beside a ▾ menu of *Add group*, *Add raw clause* and the
+  starters, and carries no left rule or card around it. Nested
+  groups render their own header, indented, with a left rule and the three add
+  buttons as icons, plus an
   *Include group N* checkbox before the logic control and a *Negate group N*
   button, where *N* is the group's position counted from 1 (`2.1` is the first
   child of the second), so no two groups' controls share a name. A nested
@@ -495,8 +509,8 @@ unchanged.
 - **Raw row**: monospace textarea plus **Try to parse**, which runs
   `tryParseRaw` and replaces the node with conds when §2 can model it (so a
   clause pasted from elsewhere can be adopted into the tree).
-- **Footer**: `Reset` · `Copy code`. **The pane's Run button is removed** — see
-  §7.
+- **Bottom row**: `Reset` · `Copy code` · `Open as pipeline`, three equal-width
+  actions on the whole query. **The pane's Run button is removed** — see §7.
 - Drag-and-drop targets whichever group or row is under the cursor, not the
   pane as a whole — updated by ADR 0007. A drop on a group inserts
   a fresh `$eq` cond there (`condFromDragged`, retargeted at that group's own
@@ -678,8 +692,8 @@ Retired test ids and controls, so the churn isn't a surprise:
 - A raw node containing `9007199254740993` makes `printFilter` return `ok: false` with that node's path; a raw node containing `{"$numberLong":"9007199254740993"}` prints fine.
 
 **Editing**
-- "+ Condition" adds a row that persists on screen and does not change `queryRaw`.
-- "+ Raw" adds a row that persists on screen and does not change `queryRaw`, same as "+ Condition".
+- *Add condition* adds a row that persists on screen and does not change `queryRaw`.
+- *Add raw clause* adds a row that persists on screen and does not change `queryRaw`, same as *Add condition*.
 - Filling that row's field writes the printed filter to `queryRaw`.
 - Typing in the query bar re-seeds the tree and discards pending rows.
 - Switching tabs re-seeds each tab from its own state, even when both tabs' text is identical: a tab whose draft still matches its `queryRaw` gets its pending and disabled rows back; a tab with no draft shows only what its text holds.
@@ -746,9 +760,11 @@ Retired test ids and controls, so the churn isn't a surprise:
 - **filter-tree-raw.spec.tsx**: convert-to-raw, edit raw, try-to-parse.
 - **filter-tree-print-failure.spec.tsx**: a bad value leaves `queryRaw` untouched and surfaces the row message.
 - **saved-legacy-payload.spec.tsx**: the §8 shim — legacy payload hydrates to its original filter.
+- **drawer-tree-presentation.spec.tsx**: the root's labelled add and its menu, a starter from the menu landing below existing rows, and the status line's row counts.
 
 ### E2E
 - **workspace-filter-tree.e2e.ts**: open a seeded collection → build `(a AND (b OR c))` in the drawer → Run → results → hand-edit the bar to an `$elemMatch` → the drawer shows a raw clause rather than disabling → Run still works. A second test switches a condition off and runs without it, keeps it across a switch to another tab and back, then negates it and runs NOT.
+- **workspace-filter-tree.e2e.ts** also holds §6's fixed regions: the add control, the list and the bottom row keep their bounding boxes across 12 added rows, and the list takes the overflow.
 
 ## 12. Spec migration
 

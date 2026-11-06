@@ -124,10 +124,8 @@ decisions above:
   see, before dropping, which specific group (root vs. a given nested one) is about to receive
   the drop, addressing user feedback that the ambient whole-group highlight alone didn't make
   that legible.
-- **`FilterDrawer`'s pane-level fallback `onDragOver`/`onDrop`.** These were not reintroduced
-  drop-target *resolution* — they exist because the "N not applied" and read-only banners render
-  as siblings of the root `GroupView` inside the same outer wrapper, not as its descendants, so a
-  drop landing exactly on a banner never reaches any `GroupView`'s own `stopPropagation()`'d
-  handler. The wrapper's fallback only ever fires for an event no `GroupView` already claimed,
-  and always resolves to the root group — it is the mechanism that keeps this ADR's own
-  "no drop should land outside every group's DOM node" invariant true, not an exception to it.
+- **The "N not applied" and read-only banners live inside the root `GroupView`,** in its status
+  line, so a drop landing exactly on one reaches the root group's own handler. That keeps this
+  ADR's "no drop should land outside every group's DOM node" invariant true without the pane-level
+  fallback `onDragOver`/`onDrop` that `FilterDrawer` needed while the banners were the root's
+  siblings.

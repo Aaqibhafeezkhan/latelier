@@ -69,7 +69,8 @@ test('a condition row keeps its value box, error and field box usable at the def
     await win.getByRole('button', { name: 'Add condition', exact: true }).click();
     await fillAndMeasure(win, 0);
 
-    await win.getByRole('button', { name: 'Add group', exact: true }).click();
+    await win.getByRole('button', { name: 'More ways to add', exact: true }).click();
+    await win.getByRole('menuitem', { name: 'Add group', exact: true }).click();
     await win.getByRole('button', { name: 'Add condition to group 2', exact: true }).click();
     await fillAndMeasure(win, 1);
   });

@@ -104,11 +104,10 @@ test('drawer presentation: Reset confirms, and the tab strip roves with the arro
 });
 
 /**
- * W15 §14.5 / §1.2 — feedback while composing, in the real app: the drawer
- * shows how many documents the filter matches before Run is pressed, and
- * points at where sort / limit / skip / projection are edited.
+ * W15 §14.5 — feedback while composing, in the real app: the drawer shows how
+ * many documents the filter matches before Run is pressed.
  */
-test('drawer feedback: the match count appears without pressing Run, and the pointer line shows', async () => {
+test('drawer feedback: the match count appears without pressing Run', async () => {
   const { host, port } = await startMemoryServer();
 
   await withApp(async (app) => {
@@ -134,8 +133,6 @@ test('drawer feedback: the match count appears without pressing Run, and the poi
       const ws = new WorkspacePage(win);
       await ws.openCollectionFromNavigator('shop', 'orders');
       await expect(win.getByText('cherry-003')).toBeVisible({ timeout: 8000 });
-
-      await expect(win.getByText(/sort, limit and skip are set in the query bar/i)).toBeVisible();
 
       await win.getByRole('button', { name: 'Add condition' }).click();
       await win.getByPlaceholder('field').first().fill('a');

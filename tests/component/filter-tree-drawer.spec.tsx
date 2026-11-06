@@ -204,7 +204,8 @@ describe('Filter drawer — add / edit / remove / nest through queryRaw (W13 §1
   it('adding a nested group via "Add group" then a condition inside it produces a nested filter', async () => {
     const { updateSpy } = mountWith(makeState({ queryRaw: '{"a":{"$eq":1}}' }));
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add group' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More ways to add' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Add group' }));
     // The new group is the root's second child.
     fireEvent.click(await screen.findByRole('button', { name: 'Add condition to group 2' }));
 

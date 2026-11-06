@@ -390,15 +390,6 @@ describe('Filter drawer — a count that fails for one filter (W15 §14.5)', () 
   });
 });
 
-describe('Filter drawer — pointer to the other query controls (W15 §1.2)', () => {
-  it('says where sort, limit, skip and projection are edited', async () => {
-    mountWith('{}', async () => ({ count: 0 }));
-
-    const note = await screen.findByText(/sort, limit and skip are set in the query bar/i);
-    expect(note.textContent).toMatch(/projection is under fields/i);
-  });
-});
-
 // W14 §9 — a collation changes which documents match, so the live count
 // carries the tab's options to agree with Run, and asks again when they move.
 describe('Live match count — find options', () => {

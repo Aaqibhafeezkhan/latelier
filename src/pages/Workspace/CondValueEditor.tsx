@@ -303,6 +303,9 @@ export function CondValueEditor({
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
+              // Nothing to preview yet, but the line keeps its height, so the
+              // rows below don't jump at the first keystroke.
+              visibility: node.value === '' ? 'hidden' : undefined,
             }}
           >
             {formatCondPreview(node)}
