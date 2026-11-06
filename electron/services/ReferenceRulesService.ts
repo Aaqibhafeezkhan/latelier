@@ -13,6 +13,7 @@ import { NotFoundError } from '../errors.ts';
 import { classifyMongoOpError } from '../mongo/errors.ts';
 import { ejsonEncode, parseEjsonField } from '../mongo/ejson.ts';
 import type { MongoPool } from '../mongo/MongoPool.ts';
+import { EXACT_BSON } from '../mongo/undo.ts';
 import { ownSet } from '../ownProperty.ts';
 import type {
   ReferenceRulePatch,
@@ -21,6 +22,17 @@ import type {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+/**
+ * The string a source value and a found document's field are paired by. EJSON
+ * collapses ObjectId, Date and the like to something comparable; promoting first
+ * makes Int32(5), Long(5) and Double(5) one key, because `$in` matched them as
+ * one value and each side still spells it in its own type.
+ */
+function matchKey(v: unknown): string {
+  // ponytail: a Decimal128, a -0, and a Long against a Double past 2^53 do not promote to the same value, so such a match is left out of the list. Compare numerically if a reference ever keys on those.
+  return JSON.stringify(ejsonEncode(deserialize(serialize({ v }), { bsonRegExp: true }).v, false));
 }
 
 function normalizeProjection(projection: string[] | undefined): string[] {
@@ -168,21 +180,16 @@ export class ReferenceRulesService {
         const docs = await coll
           .find(
             { [rule.targetField]: { $in: value } } as Record<string, unknown>,
-            { projection },
+            { ...EXACT_BSON, projection },
           )
           .toArray();
-        // EJSON-encode both sides so ObjectId/Date/etc. collapse to a matchable string key.
         const ordered: unknown[] = [];
         const docByKey = new Map<string, unknown>();
         for (const d of docs) {
-          const k = JSON.stringify(ejsonEncode((d as Record<string, unknown>)[rule.targetField], false));
-          docByKey.set(k, d);
+          docByKey.set(matchKey((d as Record<string, unknown>)[rule.targetField]), d);
         }
         for (const v of value) {
-          // `$in` matches across numeric types and the found documents are
-          // promoted, so a row's exact Long(5) must key as the driver reads one.
-          const k = JSON.stringify(ejsonEncode(deserialize(serialize({ v })).v, false));
-          const hit = docByKey.get(k);
+          const hit = docByKey.get(matchKey(v));
           if (hit !== undefined) ordered.push(hit);
         }
         return {
@@ -194,7 +201,7 @@ export class ReferenceRulesService {
       }
       const doc = await coll.findOne(
         { [rule.targetField]: value } as Record<string, unknown>,
-        { projection },
+        { ...EXACT_BSON, projection },
       );
       return {
         ruleId: rule.id,

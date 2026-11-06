@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
-import { Collection, Db, MongoServerError } from 'mongodb';
+import { Double, Int32, Long } from 'bson';
+import { Collection, Db, MongoServerError, type Document } from 'mongodb';
 import type { Stage } from '@shared/types';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { AggregationService } from '../../electron/mongo/AggregationService';
@@ -228,6 +229,90 @@ describe('AggregationService', () => {
       verbosity: 'queryPlanner',
     });
     expect(res.writeStageOmitted).toBe(true);
+  });
+
+  // ─── Numbers keep their stored type ──────────────────────────────────────
+
+  describe('numeric types on the wire', () => {
+    const typedColl = 'numeric_types';
+    const stages: Stage[] = [
+      { id: 1, op: '$match', body: '{}', enabled: true },
+      { id: 2, op: '$sort', body: '{"_id":1}', enabled: true },
+    ];
+    const typedInput = { connectionId: connId, dbName, collection: typedColl, stages };
+    const wireDoc = {
+      _id: { $numberInt: '1' },
+      long: { $numberLong: '5' },
+      double: { $numberDouble: '7.0' },
+      int: { $numberInt: '3' },
+      fraction: { $numberDouble: '1.5' },
+      nested: { long: { $numberLong: '5' }, list: [{ $numberLong: '5' }, { $numberDouble: '7.0' }] },
+    };
+
+    beforeAll(async () => {
+      const client = await pool.write(connId).client();
+      const coll = client.db(dbName).collection(typedColl);
+      await coll.deleteMany({});
+      await coll.insertOne({
+        _id: new Int32(1),
+        long: Long.fromNumber(5),
+        double: new Double(7),
+        int: new Int32(3),
+        fraction: new Double(1.5),
+        nested: { long: Long.fromNumber(5), list: [Long.fromNumber(5), new Double(7)] },
+      } as unknown as Document);
+      // The seed itself, so a wrong type here can't be blamed on the read.
+      const stored = await coll.countDocuments({ long: { $type: 'long' }, double: { $type: 'double' } });
+      expect(stored).toBe(1);
+    });
+
+    it('run returns rows and stage samples in their stored type', async () => {
+      const result = await svc.run(typedInput);
+
+      expect(JSON.parse(result.rowsJson)).toEqual([wireDoc]);
+      expect(result.stageSamples[1]).toEqual([wireDoc]);
+      expect(result.stageSamples[2]).toEqual([wireDoc]);
+      // Counts share the samples' cursor but the UI shows them as plain numbers.
+      expect(result.stageCounts).toEqual({ 1: 1, 2: 1 });
+    });
+
+    it('keeps the stored type in the fallback instrumentation too', async () => {
+      const facetSpy = vi
+        .spyOn(svc as unknown as { instrumentFacet: (...a: unknown[]) => unknown }, 'instrumentFacet')
+        .mockRejectedValueOnce(new Error('no $facet here'));
+      try {
+        const result = await svc.run(typedInput);
+
+        expect(result.stageSamples[2]).toEqual([wireDoc]);
+        expect(result.stageCounts).toEqual({ 1: 1, 2: 1 });
+      } finally {
+        facetSpy.mockRestore();
+      }
+    });
+
+    it('previewUpToStage returns its sample in the stored type and its count as a number', async () => {
+      const preview = await svc.previewUpToStage(typedInput);
+
+      expect(preview.sample).toEqual([wireDoc]);
+      expect(preview.count).toBe(1);
+    });
+
+    it('keeps the stored type past the first batch of the cursor', async () => {
+      const many = 'numeric_types_many';
+      const client = await pool.write(connId).client();
+      const coll = client.db(dbName).collection(many);
+      await coll.deleteMany({});
+      // The server's first batch holds 101 documents; the rest come by getMore.
+      await coll.insertMany(
+        Array.from({ length: 150 }, (_, i) => ({ _id: i, long: Long.fromNumber(i) })) as unknown as Document[],
+      );
+
+      const result = await svc.run({ ...typedInput, collection: many });
+
+      const rows = JSON.parse(result.rowsJson) as Array<{ long: unknown }>;
+      expect(rows).toHaveLength(150);
+      expect(rows[149]!.long).toEqual({ $numberLong: '149' });
+    });
   });
 
   // ─── Performance regression guards ───────────────────────────────────────

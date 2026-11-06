@@ -23,6 +23,7 @@ import { logRecentWriteFailure, type RecentQueryService } from '../services/Rece
 import type { Logger } from '../log.ts';
 import { isWriteStage } from './writeStages.ts';
 import { PROBE_TIMEOUT_MS, QUERY_TIMEOUT_MS } from './timeouts.ts';
+import { EXACT_BSON } from './undo.ts';
 
 const COLLECTION_NAME_RE = /^[^$\0][^\0]{0,119}$/;
 const SAMPLE_PER_STAGE = 5;
@@ -174,7 +175,10 @@ export class AggregationService {
         }
       } else {
         const mainPipeline = [...pipeline, { $limit: limit }];
+        // Exact, because these rows are shown, copied and downloaded: a Long or
+        // a whole Double promoted to a JS number would read as an Int32.
         const cursor = coll.aggregate(mainPipeline, {
+          ...EXACT_BSON,
           allowDiskUse: true,
           maxTimeMS: QUERY_TIMEOUT_MS,
           signal: controller.signal,
@@ -274,6 +278,7 @@ export class AggregationService {
     );
     try {
       const sampleCursor = coll.aggregate([...pipeline, { $limit: limit }], {
+        ...EXACT_BSON,
         allowDiskUse: true,
         maxTimeMS: PROBE_TIMEOUT_MS,
       });
@@ -566,6 +571,7 @@ export class AggregationService {
       facet[`sample_${stage.id}`] = [...cumulative, { $limit: SAMPLE_PER_STAGE }];
     }
     const cursor = coll.aggregate([{ $facet: facet }], {
+      ...EXACT_BSON,
       allowDiskUse: true,
       maxTimeMS: QUERY_TIMEOUT_MS,
       signal,
@@ -575,8 +581,10 @@ export class AggregationService {
     const stageCounts: Record<number, number> = {};
     const stageSamples: Record<number, unknown[]> = {};
     for (const stage of stages) {
-      const countBranch = row[`count_${stage.id}`] as Array<{ c?: number }> | undefined;
-      stageCounts[stage.id] = countBranch?.[0]?.c ?? 0;
+      // One cursor reads the samples and the counts, so each count is a BSON
+      // Int32 or Long here; the wire carries it as a plain number.
+      const countBranch = row[`count_${stage.id}`] as Array<{ c?: unknown }> | undefined;
+      stageCounts[stage.id] = Number(countBranch?.[0]?.c ?? 0);
       const sampleBranch = (row[`sample_${stage.id}`] ?? []) as unknown[];
       stageSamples[stage.id] = ejsonEncodeArray(sampleBranch, false);
     }
@@ -612,6 +620,7 @@ export class AggregationService {
       try {
         const sampleDocs = await coll
           .aggregate([...cumulative, { $limit: SAMPLE_PER_STAGE }], {
+            ...EXACT_BSON,
             allowDiskUse: true,
             maxTimeMS: QUERY_TIMEOUT_MS,
             signal,

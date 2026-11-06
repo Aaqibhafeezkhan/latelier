@@ -9,7 +9,7 @@
 // the two surfaces drifted in the first place.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, screen } from '../helpers/render';
-import { Int32, Long, Decimal128 } from 'bson';
+import { Double, Int32, Long, Decimal128 } from 'bson';
 import { OutputPanel } from '../../src/pages/Workspace/Aggregation/OutputPanel';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { ejsonParse, ejsonStringify } from '../../src/utils/ejson';
@@ -128,5 +128,30 @@ describe('OutputPanel — readable EJSON', () => {
     expect(content).toContain('"n": 102');
     expect(content).not.toContain('$numberInt');
     expect(ejsonStringify(ejsonParse(content))).toBe(ejsonStringify(rows));
+  });
+
+  it('downloads a Long and a whole Double as their own type, in the form the wire brings them', async () => {
+    // As preload hands them over: `JSON.parse`d sentinels, not BSON instances.
+    const rows = [{ long: { $numberLong: '5' }, double: { $numberDouble: '7.0' } }];
+    const saveFile = vi.fn<(input: { defaultName: string; content: string }) => Promise<{ path: string }>>(
+      async () => ({ path: '/tmp/out.json' }),
+    );
+    installAtelierMock({ app: { saveFile } as never });
+    renderPanel(rows);
+
+    fireEvent.click(screen.getByText('⇩').closest('button')!);
+
+    await vi.waitFor(() => expect(saveFile).toHaveBeenCalled());
+    const reread = ejsonParse<Array<{ long: unknown; double: unknown }>>(saveFile.mock.calls[0]![0].content);
+    expect(reread[0]!.long).toBeInstanceOf(Long);
+    expect(reread[0]!.double).toBeInstanceOf(Double);
+    expect(ejsonStringify(reread)).toBe(ejsonStringify(rows));
+  });
+
+  it.each(['JSON', 'Tree', 'Table'] as const)('shows them as their own type in the %s view', (view) => {
+    const { container } = renderPanel([{ long: { $numberLong: '5' }, double: { $numberDouble: '7.0' } }], view);
+
+    expect(container.textContent).toContain('$numberLong');
+    expect(container.textContent).toContain('$numberDouble');
   });
 });

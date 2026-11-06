@@ -301,6 +301,84 @@ describe('ReferenceRulesService', () => {
     expect(result.documents.map((d) => (d as Record<string, unknown>).name)).toEqual(['int', 'long', 'double']);
   });
 
+  it('returns a resolved document with its numbers in their stored type', async () => {
+    const client = await pool.write(CONN_ID).client();
+    const db = client.db(DB_NAME);
+    await db.collection('items').deleteMany({});
+    await db.collection('items').insertOne({
+      _id: new Int32(1),
+      code: Long.fromNumber(5),
+      qty: new Double(7),
+      nested: { qty: new Double(7) },
+    } as unknown as Document);
+
+    const rule = svc.create({
+      connectionId: CONN_ID,
+      sourceDb: DB_NAME,
+      sourceCollection: 'orders',
+      sourceField: 'item_code',
+      targetDb: DB_NAME,
+      targetCollection: 'items',
+      targetField: 'code',
+    });
+
+    // The source holds an Int32; the server matches it to the stored Long.
+    const result = await svc.resolve({ ruleId: rule.id, valueEjson: '{"$numberInt":"5"}' });
+
+    expect(result.documents).toEqual([
+      {
+        _id: { $numberInt: '1' },
+        code: { $numberLong: '5' },
+        qty: { $numberDouble: '7.0' },
+        nested: { qty: { $numberDouble: '7.0' } },
+      },
+    ]);
+  });
+
+  it('keeps source order across numeric types and returns each number as stored', async () => {
+    const wide = '9007199254740993';
+    const client = await pool.write(CONN_ID).client();
+    const db = client.db(DB_NAME);
+    await db.collection('items').deleteMany({});
+    await db.collection('items').insertMany([
+      { _id: new Int32(5), name: 'int' },
+      { _id: Long.fromNumber(6), name: 'long' },
+      { _id: new Double(7), name: 'double' },
+      { _id: new Double(2.5), name: 'fraction' },
+      { _id: Long.fromString(wide), name: 'wide' },
+    ] as unknown as Document[]);
+
+    const rule = svc.create({
+      connectionId: CONN_ID,
+      sourceDb: DB_NAME,
+      sourceCollection: 'orders',
+      sourceField: 'item_ids',
+      targetDb: DB_NAME,
+      targetCollection: 'items',
+      projection: ['name'],
+    });
+
+    // Every whole number here is spelled in a type other than the stored one.
+    const result = await svc.resolve({
+      ruleId: rule.id,
+      valueEjson: JSON.stringify([
+        { $numberLong: wide },
+        { $numberLong: '7' },
+        { $numberInt: '6' },
+        { $numberDouble: '2.5' },
+        { $numberDouble: '5.0' },
+      ]),
+    });
+
+    expect(result.documents).toEqual([
+      { _id: { $numberLong: wide }, name: 'wide' },
+      { _id: { $numberDouble: '7.0' }, name: 'double' },
+      { _id: { $numberLong: '6' }, name: 'long' },
+      { _id: { $numberDouble: '2.5' }, name: 'fraction' },
+      { _id: { $numberInt: '5' }, name: 'int' },
+    ]);
+  });
+
   it('returns an empty list for an empty array source', async () => {
     const rule = svc.create({
       connectionId: CONN_ID,

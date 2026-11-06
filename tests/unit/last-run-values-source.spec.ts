@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { lastRunValuesSource } from '../../src/features/fieldSuggestions/sources/lastRunValuesSource';
 import type { SuggestionContext, ValueSuggestion } from '../../src/features/fieldSuggestions/types';
+import { parseChipText } from '../../src/pages/Workspace/condValue';
 
 function ctx(
   field: string,
@@ -75,6 +76,20 @@ describe('lastRunValuesSource', () => {
       ),
     );
     expect(dateOut.map((s) => s.display)).toEqual(['2026-01-01T00:00:00.000Z']);
+  });
+
+  it('renders a Long leaf as its digits and a whole Double leaf with its point, typed apart', () => {
+    const out = sync(
+      lastRunValuesSource(
+        ctx('n', { recentDocs: [{ n: { $numberLong: '5' } }, { n: { $numberDouble: '7.0' } }] }),
+      ),
+    );
+    expect(out.map((s) => [s.value, s.type])).toEqual([
+      ['5', 'long'],
+      ['7.0', 'number'],
+    ]);
+    // `7.0` is what a pick writes into the cond, and a number row reads it back as 7.
+    expect(parseChipText('7.0', 'number')).toBe(7);
   });
 
   it('skips a nested-object leaf rather than suggesting garbage', () => {
