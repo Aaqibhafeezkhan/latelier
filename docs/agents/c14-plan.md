@@ -165,7 +165,7 @@ Dependency edges: A→{B,C,D,F1,F2}; B→{C(repick),D,E}; {C,D}→E; {E,F2}→R;
 | 1 | B, C, D | B is small; when it finishes start F1 in its slot (rolling). C fixture-independent parts only (§5). D calls `parseLine` — pull B first or stub with current `parseLine` (B only adds fields). |
 | 2 | E, F1 (if not started), F2 | E needs B,C,D merged. F2 needs F1's prop interfaces (spec'd below), not its code. |
 | 3 | R (needs E, F2), then G (needs fixture, E, F1, F2, R) | G and R touch disjoint files; run R first, then G on the clean tree, or both in parallel (2 slots). |
-| 4 | Lead | Full DoD chain on integration branch: tsc, lint, `npm test`, `npm run test:mutation`, `npm run audit:ipc` + `ipc-channel-auditor`, `npm run test:e2e`, `spec-compliance-reviewer` vs C14 (status line `Accepted`→`Implemented`; C13 §4.1/§7.1 notes updated; `specs/README.md` index), independent PR reviewer (Gitar disabled), open the PR. |
+| 4 | Lead | Full DoD chain on integration branch: tsc, lint, `npm test`, `npm run test:mutation`, `npm run audit:ipc` + `ipc-channel-auditor`, `npm run test:e2e`, `spec-compliance-reviewer` vs C14 (status line `Accepted`→`Implemented`; C13 §4.1/§7.1 notes updated; `specs/README.md` index), independent PR reviewer, open the PR. |
 
 Overlap hazards and rules:
 - `shared/types.ts`, `shared/ipc.ts`, `electron/preload.ts`, `tests/helpers/atelierMock.ts`: A creates all additions; B–G must not edit them. R is the only later editor. If a worker needs a type tweak it returns a note; lead applies it on the integration branch and tells siblings to rebase.
