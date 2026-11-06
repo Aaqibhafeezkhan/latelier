@@ -16,6 +16,7 @@ import {
   makeReader,
   makeCountingReader,
 } from '../helpers/mongo';
+import { startMongoMemoryServer } from '../helpers/startMongoMemoryServer';
 
 const validConnectionInput: ConnectionInput = {
   name: 'Unreadable',
@@ -1346,7 +1347,7 @@ describe('MongoPool', () => {
       vault = new SecretsVault(tmp.db, createSafeStorageMock());
       // Its own server: this test kills the mongod, so it must not be the one
       // every other test in the suite is sharing.
-      const dedicated = await MongoMemoryServer.create();
+      const dedicated = await startMongoMemoryServer();
       try {
         const conn = makeConnection('lost', uriToHostPort(dedicated.getUri()));
         const pool = new MongoPool({
@@ -1455,15 +1456,15 @@ describe('MongoPool.serverInfo — listDatabases refused', () => {
   let pool: MongoPool;
 
   beforeAll(async () => {
-    ftServer = await MongoMemoryServer.create({
+    ftServer = await startMongoMemoryServer({
       instance: { args: ['--setParameter', 'enableTestCommands=1'] },
     });
   }, 60_000);
 
   afterAll(async () => {
-    await pool.disconnectAll();
-    ftTmp.cleanup();
-    await ftServer.stop();
+    await pool?.disconnectAll();
+    ftTmp?.cleanup();
+    await ftServer?.stop();
   });
 
   it('reports the three derived figures as null rather than zero', async () => {

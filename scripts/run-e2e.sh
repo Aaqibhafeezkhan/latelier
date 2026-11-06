@@ -7,5 +7,5 @@
 # system Node and Electron ABIs and there is nothing left to flip.
 set -euo pipefail
 
-npm run build
+node scripts/run-build-with-timeout.mjs
 npx playwright test "$@"

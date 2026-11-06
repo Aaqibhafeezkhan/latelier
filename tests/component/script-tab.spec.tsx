@@ -406,6 +406,11 @@ describe('ScriptTab result-panel resize keyboard support (#56)', () => {
     );
   }
 
+  it('opts in to the shared keyboard-focus highlight', () => {
+    renderWithResult();
+    expect(screen.getByRole('separator', { name: 'Resize result panel' }).classList.contains('resize-separator')).toBe(true);
+  });
+
   it('is reachable in the tab order right after the result panel content', async () => {
     const user = userEvent.setup();
     renderWithResult();
@@ -522,6 +527,7 @@ describe('ScriptTab — completion database', () => {
         connectionId: 'c1',
         dbName: 'smoke',
         collection: 'wiring',
+        size: 100,
       }),
     );
     expect(sampleSchema).not.toHaveBeenCalledWith(expect.objectContaining({ dbName: 'test' }));

@@ -62,7 +62,8 @@ function ruleToForm(r: ReferenceRule): FormState {
   };
 }
 
-function parseProjection(text: string): string[] {
+/** Reads the rule form's comma-separated field list. */
+function parseFieldList(text: string): string[] {
   return text
     .split(',')
     .map((s) => s.trim())
@@ -94,9 +95,13 @@ export function ReferenceRulesEditor({
     setForm(f);
     setFormInitial(JSON.stringify(f));
   };
+  // The form's focused Create/Cancel button unmounts on close; hand focus back
+  // to the control that opened it so keyboard users keep their place in the dialog.
+  const newRuleRef = React.useRef<HTMLButtonElement>(null);
   const closeForm = () => {
     setForm(null);
     setFormInitial(null);
+    newRuleRef.current?.focus();
   };
   // Compared whole rather than field by field, so the guard covers every buffer
   // the dialog owns — including the `enabled` checkbox, which defaults to
@@ -160,7 +165,7 @@ export function ReferenceRulesEditor({
     setSaving(true);
     setError(null);
     try {
-      const projection = parseProjection(form.projectionText);
+      const projection = parseFieldList(form.projectionText);
       if (form.id) {
         const patch: ReferenceRuleUpdateInput = {
           targetDb: form.targetDb,
@@ -286,6 +291,7 @@ export function ReferenceRulesEditor({
 
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
             <Button
+              ref={newRuleRef}
               size="compact-xs"
               variant="filled"
               leftSection={I.plus}

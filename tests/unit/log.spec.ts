@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { compareLogFiles, createLogger, createRateGate, isLogFile, redactSecrets } from '../../electron/log';
+import { compareLogFiles, createLogger, createRateGate, describeShape, isLogFile, redactSecrets } from '../../electron/log';
 import { useUmask022 } from '../helpers/umask';
 
 describe('createLogger', () => {
@@ -158,9 +158,8 @@ describe('createLogger', () => {
     };
 
     // The caller decides, and the default is the quiet one. An omitted level
-    // must never be the verbose one: `ipc.req` writes raw request payloads at
-    // debug, so a leaky default turns one forgotten argument into user data
-    // on disk.
+    // must never be the verbose one: debug lines carry the most detail, so a
+    // leaky default turns one forgotten argument into far more on disk.
     it('defaults to info, filtering out debug', () => {
       const log = createLogger(dir, { toStderr: false });
       log.debug('t', 'debug-msg');
@@ -645,5 +644,109 @@ describe('createRateGate', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('describeShape', () => {
+  it('keeps top-level key names and drops every leaf value', () => {
+    const payload = {
+      connectionId: 'SENTINEL-9f3a',
+      tags: ['SENTINEL-9f3a', 424242],
+      count: 424242,
+      ok: true,
+      gone: null,
+    };
+    const out = describeShape(payload);
+    const text = JSON.stringify(out);
+    expect(text).not.toContain('SENTINEL-9f3a');
+    expect(text).not.toContain('424242');
+    expect(out).toEqual({
+      connectionId: 'string',
+      tags: ['array(2)', 'string', 'number'],
+      count: 'number',
+      ok: 'boolean',
+      gone: 'null',
+    });
+  });
+
+  // A nested record can be keyed by data: expandedRows by document _id,
+  // column widths by user field names.
+  it('shows a nested object only as its key count, never its keys', () => {
+    const payload = {
+      id: 't1',
+      patch: { state: { expandedRows: { 'a@b.com': true, '65f0c0ffee': true }, columns: { ssn: 120 } } },
+      rows: [{ 'a@b.com': 1 }, {}],
+    };
+    const out = describeShape(payload);
+    const text = JSON.stringify(out);
+    expect(text).not.toContain('a@b.com');
+    expect(text).not.toContain('65f0c0ffee');
+    expect(text).not.toContain('ssn');
+    expect(out).toEqual({ id: 'string', patch: 'object(1)', rows: ['array(2)', 'object(1)', 'object(0)'] });
+  });
+
+  it('cuts a top-level key name to forty characters', () => {
+    const long = 'k'.repeat(45);
+    expect(describeShape({ [long]: 1, ['j'.repeat(40)]: 2 })).toEqual({
+      [`${'k'.repeat(40)}…`]: 'number',
+      ['j'.repeat(40)]: 'number',
+    });
+  });
+
+  it('names the type of every primitive', () => {
+    expect([null, 'x', 1, true, undefined, 1n, Symbol('s'), () => 1].map(describeShape)).toEqual([
+      'null', 'string', 'number', 'boolean', 'undefined', 'bigint', 'symbol', 'function',
+    ]);
+  });
+
+  it('gives an array its length and the shapes of its first three elements', () => {
+    expect(describeShape([])).toBe('array(0)');
+    expect(describeShape(['a', 1, true, null, 'b'])).toEqual(['array(5)', 'string', 'number', 'boolean']);
+  });
+
+  it('shows a non-plain object by its type only, without walking its contents', () => {
+    expect(describeShape({ at: new Date(424242), bytes: new Uint8Array([4, 2]), m: new Map([['k', 'v']]) }))
+      .toEqual({ at: 'Date', bytes: 'Uint8Array', m: 'Map' });
+  });
+
+  it('walks a null-prototype object like a plain one', () => {
+    const bare = Object.assign(Object.create(null) as Record<string, unknown>, { k: 'v' });
+    expect(describeShape(bare)).toEqual({ k: 'string' });
+  });
+
+  it('expands six levels of arrays and summarises the seventh by length', () => {
+    const deep = (n: number): unknown => (n === 0 ? [] : [deep(n - 1)]);
+    const shape = (n: number): unknown => (n === 0 ? 'array(1)' : ['array(1)', shape(n - 1)]);
+    expect(describeShape(deep(8))).toEqual(shape(6));
+    expect(describeShape({ a: deep(7) })).toEqual({ a: shape(5) });
+  });
+
+  it('lists up to fifty keys and counts the rest', () => {
+    const wide = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, i]));
+    const fifty = describeShape(wide(50)) as Record<string, unknown>;
+    expect(Object.keys(fifty)).toHaveLength(50);
+    expect(fifty).not.toHaveProperty('…');
+    const more = describeShape(wide(52)) as Record<string, unknown>;
+    expect(Object.keys(more)).toHaveLength(51);
+    expect(more.k49).toBe('number');
+    expect(more).not.toHaveProperty('k50');
+    expect(more['…']).toBe('2 more keys');
+  });
+
+  it('marks an array that contains itself but expands one shared by two siblings', () => {
+    const list: unknown[] = ['x'];
+    list.push(list);
+    expect(describeShape(list)).toEqual(['array(2)', 'string', '[Circular]']);
+    const inner = ['x'];
+    expect(describeShape([inner, inner])).toEqual(['array(2)', ['array(1)', 'string'], ['array(1)', 'string']]);
+    const loop: Record<string, unknown> = {};
+    loop.self = loop;
+    expect(describeShape(loop)).toEqual({ self: 'object(1)' });
+  });
+
+  it('keeps a __proto__ key as an own key', () => {
+    const out = describeShape(JSON.parse('{"__proto__":{"x":1}}')) as Record<string, unknown>;
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(out, '__proto__')?.value).toBe('object(1)');
   });
 });

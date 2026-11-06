@@ -1,6 +1,7 @@
 import type { IpcMainInvokeEvent } from 'electron';
 import type { Envelope } from '@shared/ipc';
 import { invokeEvent } from './ipcSender';
+import type { Handler as RouteHandler, RegisterOptions, Router, Validator } from '../../electron/ipc/router';
 
 type Handler = (evt: IpcMainInvokeEvent, payload: unknown) => unknown;
 
@@ -23,3 +24,10 @@ export function createIpcShim() {
     },
   };
 }
+
+/** `Router.register` without the channel-signature check, for the router's own tests that register made-up `test:*` channels. */
+export interface UntypedRouter {
+  register<I, O>(channel: string, validate: Validator<I>, handler: RouteHandler<I, O>, opts?: RegisterOptions): void;
+}
+
+export const untypedRouter = (router: Router): UntypedRouter => router as unknown as UntypedRouter;

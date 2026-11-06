@@ -10,6 +10,7 @@ import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { createTestSpawner, type TestSpawner } from '../helpers/runnerSpawner';
 import { uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
+import { startMongoMemoryServer } from '../helpers/startMongoMemoryServer';
 
 /**
  * The script bridge end to end: a real runner process, a real mongod, and a
@@ -37,12 +38,12 @@ let direct: MongoClient | undefined;
 // through `serverStatus`, which is server-wide, so another file's cursors on a
 // shared mongod would shift the count.
 beforeAll(async () => {
-  server = await MongoMemoryServer.create();
+  server = await startMongoMemoryServer();
   hp = uriToHostPort(server.getUri());
 }, 60_000);
 
 afterAll(async () => {
-  await server.stop();
+  await server?.stop();
 });
 
 afterEach(async () => {

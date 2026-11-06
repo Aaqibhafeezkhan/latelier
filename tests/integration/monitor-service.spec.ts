@@ -8,6 +8,7 @@ import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb } from '../helpers/db';
 import { uriToHostPort, makeConnection, makeReader } from '../helpers/mongo';
 import type { CurrentOpSummary } from '@shared/types';
+import { startMongoMemoryServer } from '../helpers/startMongoMemoryServer';
 
 const DB = 'monitor_test';
 
@@ -21,12 +22,12 @@ describe('MonitorService', () => {
   let svc: MonitorService;
 
   beforeAll(async () => {
-    server = await MongoMemoryServer.create();
+    server = await startMongoMemoryServer();
     hp = uriToHostPort(server.getUri());
   });
 
   afterAll(async () => {
-    await server.stop();
+    await server?.stop();
   });
 
   afterEach(async () => {

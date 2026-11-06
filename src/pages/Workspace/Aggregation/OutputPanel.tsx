@@ -161,6 +161,7 @@ export function OutputPanel({
         onKeyDown={onKeyDown}
         tabIndex={0}
         role="separator"
+        className="resize-separator"
         aria-label="Resize output panel"
         aria-valuenow={height}
         aria-valuemin={MIN_HEIGHT}

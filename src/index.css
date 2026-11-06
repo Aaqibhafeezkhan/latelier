@@ -184,6 +184,15 @@ a { text-decoration: none; }
   background: var(--atelier-accent);
 }
 
+/* The handles that are not react-resizable-panels `Separator`s (the sidebar
+   `ResizeHandle`, the script/output panel splitters, the table column
+   resizer) take this class for the same keyboard-only highlight. They set an
+   inline `background` for their resting colour, which outranks a normal rule,
+   hence `!important`. */
+.resize-separator:focus-visible {
+  background: var(--atelier-accent) !important;
+}
+
 /* 0.01ms, not 0: animationend / transitionend listeners still fire. !important
    beats the inline `animation: spin …` on the connection and navigator spinners. */
 @media (prefers-reduced-motion: reduce) {

@@ -13,6 +13,13 @@ function hit(s: string, stageOp?: string) {
   return detectAggGrammar(value, caret, stageOp);
 }
 
+/** The operator context of a key-position hit; fails when the hit is not one. */
+function contextAt(s: string, stageOp: string) {
+  const r = hit(s, stageOp);
+  if (r?.kind !== 'fieldName') throw new Error(`expected a fieldName hit for ${s}`);
+  return r.operatorContext;
+}
+
 describe('detectAggGrammar', () => {
   describe('field-name key position (bare identifier)', () => {
     it('empty object, caret at end', () => {
@@ -250,12 +257,93 @@ describe('detectAggGrammar', () => {
       if (r?.kind === 'fieldName') expect(r.operatorContext).toBeUndefined();
     });
 
-    it('tags matchKey inside $match at any depth', () => {
-      const r1 = hit('{ $e|', '$match');
-      const r2 = hit('{ age: { $g| } }', '$match');
-      if (r1?.kind === 'fieldName') expect(r1.operatorContext).toBe('matchKey');
-      if (r2?.kind === 'fieldName') expect(r2.operatorContext).toBe('matchKey');
+    describe('inside a filter ($match, and the Filter Bar)', () => {
+      it.each([
+        ['the top level', '{ $a|'],
+        ['the top level after a field', '{ age: 3, $a|'],
+        ['a quoted top-level key', '{ "$a|'],
+        ['an $and clause', '{ $and: [{ $a| }] }'],
+        ['an $or clause after another', '{ $or: [{ a: 1 }, { $a| }] }'],
+        ['a $nor clause', '{ $nor: [{ $a| }] }'],
+        ['an $and clause inside an $or clause', '{ $or: [{ $and: [{ $a| }] }] }'],
+      ])('tags filterTop at %s', (_, text) => {
+        expect(contextAt(text, '$match')).toBe('filterTop');
+      });
+
+      it.each([
+        ["a field's object", '{ age: { $g| } }'],
+        ["a quoted field's object", '{ "age": { "$g| } }'],
+        ["a field's object inside an $and clause", '{ $and: [{ age: { $g| } }] }'],
+        ['$not', '{ age: { $not: { $g| } } }'],
+        ['a subfield inside $elemMatch', '{ items: { $elemMatch: { qty: { $g| } } } }'],
+        ['a condition in an $elemMatch clause', '{ items: { $elemMatch: { $or: [{ qty: { $g| } }] } } }'],
+        ['$not inside $elemMatch', '{ items: { $elemMatch: { $not: { $g| } } } }'],
+        ['a geo operator', '{ loc: { $geoWithin: { $g| } } }'],
+      ])('tags matchKey inside %s', (_, text) => {
+        expect(contextAt(text, '$match')).toBe('matchKey');
+      });
+
+      it.each([
+        ['$elemMatch', '{ items: { $elemMatch: { $| } } }'],
+        ['an $elemMatch clause', '{ items: { $elemMatch: { $or: [{ $| }] } } }'],
+        ['$elemMatch inside a field\'s $not', '{ items: { $not: { $elemMatch: { $| } } } }'],
+        ['$elemMatch inside $elemMatch', '{ m: { $elemMatch: { $elemMatch: { $| } } } }'],
+      ])('tags elemMatchKey inside %s', (_, text) => {
+        expect(contextAt(text, '$match')).toBe('elemMatchKey');
+      });
+
+      it.each([
+        ['the top level', '{ $expr: { $c| } }'],
+        ['an $and clause', '{ $and: [{ $expr: { $c| } }] }'],
+        ['a nested expression', '{ $expr: { $gt: [{ $c| }] } }'],
+      ])('tags projectValue inside $expr at %s', (_, text) => {
+        expect(contextAt(text, '$match')).toBe('projectValue');
+      });
+
+      it.each([
+        ['a key-less object', '{ { $a| } }'],
+        ['an exact-match array', '{ tags: [{ $a| }] }'],
+        ['a list operand', '{ age: { $in: [{ $a| }] } }'],
+        ['a logical list inside a field', '{ age: { $and: [{ $a| }] } }'],
+        ['a logical operator holding an object', '{ $and: { $a| } }'],
+        ["$text's options", '{ $text: { $s| } }'],
+      ])('has no context inside %s', (_, text) => {
+        expect(contextAt(text, '$match')).toBeUndefined();
+      });
     });
+
+    it('tags noOperator at a $sort key and sortValue in a sort value', () => {
+      expect(contextAt('{ $|', '$sort')).toBe('noOperator');
+      expect(contextAt('{ score: { $| } }', '$sort')).toBe('sortValue');
+    });
+
+    it.each(['$limit', '$skip', '$count', '$unwind'])(
+      'tags noOperator at every depth inside %s',
+      (stageOp) => {
+        expect(contextAt('{ $|', stageOp)).toBe('noOperator');
+        expect(contextAt('{ a: { $| } }', stageOp)).toBe('noOperator');
+      },
+    );
+
+    it.each([
+      ['$bucket', 'groupValue'],
+      ['$bucketAuto', 'groupValue'],
+      ['$setWindowFields', 'windowValue'],
+    ])('tags an output field of %s with %s', (stageOp, expected) => {
+      expect(contextAt('{ groupBy: "$a", output: { n: { $| } } }', stageOp)).toBe(expected);
+      expect(contextAt('{ output: { n: { $sum: { $| } } } }', stageOp)).toBe(expected);
+      expect(contextAt('{ "output": { "n": { "$|', stageOp)).toBe(expected);
+    });
+
+    it.each(['$bucket', '$bucketAuto', '$setWindowFields'])(
+      'has no context outside an output operator of %s',
+      (stageOp) => {
+        expect(contextAt('{ $|', stageOp)).toBeUndefined();
+        expect(contextAt('{ output: { $| } }', stageOp)).toBeUndefined();
+        expect(contextAt('{ groupBy: { $| } }', stageOp)).toBeUndefined();
+        expect(contextAt('{ sortBy: { a: { $| } } }', stageOp)).toBeUndefined();
+      },
+    );
 
     it('tags groupValue at depth ≥ 2 inside $group', () => {
       const shallow = hit('{ total|', '$group');
@@ -277,8 +365,8 @@ describe('detectAggGrammar', () => {
     });
 
     it('falls back to no context inside $facet', () => {
-      const r = hit('{ byStatus: [{ $match: { stat| } }] }', '$facet');
-      if (r?.kind === 'fieldName') expect(r.operatorContext).toBeUndefined();
+      expect(contextAt('{ byStatus: [{ $match: { stat| } }] }', '$facet')).toBeUndefined();
+      expect(contextAt('{ by|', '$facet')).toBeUndefined();
     });
 
     // MUTATION TARGET — a stageOp not covered by any of the earlier branches
@@ -286,8 +374,7 @@ describe('detectAggGrammar', () => {
     // way through to the final `return undefined`, not stop early on the
     // (unrelated) addFieldsValue check.
     it('resolves to no context for an unrecognized stageOp at depth ≥ 2', () => {
-      const r = hit('{ x: { $c| } }', '$unwind');
-      if (r?.kind === 'fieldName') expect(r.operatorContext).toBeUndefined();
+      expect(contextAt('{ x: { $c| } }', '$lookup')).toBeUndefined();
     });
   });
 

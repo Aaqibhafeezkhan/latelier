@@ -2159,6 +2159,7 @@ function BuilderPaneInner({
 
   return (
     <div
+      data-testid="builder-pane"
       style={{
         width: '100%',
         height: '100%',

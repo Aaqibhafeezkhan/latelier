@@ -726,6 +726,10 @@ Retired test ids and controls, so the churn isn't a surprise:
   not by inspection. Purity is the property that makes this module reusable as
   redesign C's `$match` editor; nothing else in the suite would catch it
   rotting.
+- The Filter tab's add buttons and footer keep their position, within 1 px, at
+  0, 1, 3 and 10 conditions and with the match-count line showing; the pane's
+  bottom meets the drawer's; at 10 conditions the list scrolls by itself while
+  the footer stays on screen (§6).
 
 ## 11. Test cases
 

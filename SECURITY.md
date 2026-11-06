@@ -69,7 +69,7 @@ the two ever disagree.
     docs channel is narrower still (`www.mongodb.com/docs/`)
     ([electron/security/externalUrl.ts](electron/security/externalUrl.ts),
     [electron/ipc/handlers/app.ts](electron/ipc/handlers/app.ts),
-    [electron/ipc/handlers/shell.ts](electron/ipc/handlers/shell.ts)).
+    [electron/ipc/handlers/docs.ts](electron/ipc/handlers/docs.ts)).
   - A connection with an SSH tunnel enabled is rejected, because no tunnel is
     implemented ([electron/ipc/schemas/connection.ts](electron/ipc/schemas/connection.ts)).
     The dependency list carries no SSH client ([package.json](package.json)).

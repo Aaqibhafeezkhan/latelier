@@ -96,7 +96,7 @@ blocking render. `useSuggestions` composes a fixed list per surface.
 | Source | Kind | Cost | Notes |
 |---|---|---|---|
 | `lastRunSource` | sync | free | Walks `ctx.recentDocs` for top-level + dotted paths with inferred `DisplayType` and frequency. |
-| `sampleSchemaSource` | async | 1 IPC | Runs `meta:sampleSchema` (`$facet { recent, random }` in one round trip). Caches per `(connId, db, coll)` with 5-min TTL. Fails open. |
+| `sampleSchemaSource` | async | 1 IPC | Runs `meta:sampleSchema` (`$facet { recent, random }` in one round trip). Requests `size: 100`. Caches per `(connId, db, coll)` with 5-min TTL. Fails open. |
 | `operatorSource` *(X03)* | sync | free | Emits every catalog entry from `OPERATORS`. Not part of `DEFAULT_FIELD_SOURCES`; surfaces opt in explicitly (textarea hook uses `[...DEFAULT_FIELD_SOURCES, operatorSource]`, builder op input uses `[operatorSource]`). |
 
 ### Default value sources
@@ -303,7 +303,8 @@ string-escape handling. At `caret`, classifies the position:
 | Anywhere else | `null` |
 
 `stageOp` is optional. When provided, fieldName hits carry an
-`operatorContext` resolved from `stageOp` + object-nesting depth. See
+`operatorContext` resolved from `stageOp` + the keys along the path to
+the caret. See
 X03 §5 for the resolution table. `$`-prefixed bare keys return a
 fieldName hit so the operator source can consume them.
 

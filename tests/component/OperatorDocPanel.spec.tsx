@@ -18,12 +18,12 @@ const FULL: OperatorDef = {
 };
 
 describe('OperatorDocPanel', () => {
-  let openExternalSpy: Mock<IpcApi['shell']['openExternal']>;
+  let openExternalSpy: Mock<IpcApi['docs']['openExternal']>;
 
   beforeEach(() => {
     openExternalSpy = vi.fn(async () => ({ opened: true as const }));
     installAtelierMock({
-      shell: { openExternal: openExternalSpy },
+      docs: { openExternal: openExternalSpy },
     });
   });
 
@@ -68,7 +68,7 @@ describe('OperatorDocPanel', () => {
     expect(screen.getByText(/No documentation available/)).toBeTruthy();
   });
 
-  it('routes the Learn more click through window.atelier.shell.openExternal', () => {
+  it('routes the Learn more click through window.atelier.docs.openExternal', () => {
     render(<OperatorDocPanel op={FULL} />);
     const link = screen.getByText(/Learn more/);
     fireEvent.click(link);
@@ -89,7 +89,7 @@ describe('OperatorDocPanel — a docs link that cannot open says so', () => {
 
   it('toasts when the link cannot be opened', async () => {
     installAtelierMock({
-      shell: {
+      docs: {
         openExternal: async () => {
           throw { code: 'VALIDATION', message: 'blocked' };
         },

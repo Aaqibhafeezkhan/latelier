@@ -123,6 +123,59 @@ function walk(value: unknown, seen: Map<object, unknown>): unknown {
   return result;
 }
 
+const SHAPE_MAX_DEPTH = 6;
+const SHAPE_MAX_ITEMS = 3;
+const SHAPE_MAX_KEYS = 50;
+const SHAPE_MAX_KEY_LENGTH = 40;
+
+/**
+ * The structure of a value with every leaf value dropped, never a string,
+ * number or its length. Used for the debug `ipc.req` line, so a raised log
+ * level records what a request looked like without copying documents, filters
+ * or shell input to disk.
+ *
+ * Key names appear only for the top-level object, whose keys a channel's schema
+ * fixes. A nested object shows only how many keys it holds: its keys can be
+ * data themselves (a map keyed by document `_id`, by user field names), so
+ * they never reach the log. Top-level key names are cut to a fixed length.
+ * An array shows its length and the shapes of its first few elements; nesting,
+ * element and key counts are capped so one huge payload cannot flood the log,
+ * and an array that contains itself resolves to a marker. A non-plain object
+ * (Date, Uint8Array, Map) shows only its type, since walking its contents would
+ * expose them.
+ */
+export function describeShape(value: unknown): unknown {
+  return shapeOf(value, 0, new Set());
+}
+
+function shapeOf(value: unknown, depth: number, ancestors: Set<object>): unknown {
+  if (value === null) return 'null';
+  if (typeof value !== 'object') return typeof value;
+  if (Array.isArray(value)) {
+    if (ancestors.has(value)) return CIRCULAR_PLACEHOLDER;
+    const label = `array(${value.length})`;
+    if (depth >= SHAPE_MAX_DEPTH || value.length === 0) return label;
+    ancestors.add(value);
+    const items = value.slice(0, SHAPE_MAX_ITEMS).map((v) => shapeOf(v, depth + 1, ancestors));
+    ancestors.delete(value);
+    return [label, ...items];
+  }
+  const tag = Object.prototype.toString.call(value).slice(8, -1);
+  if (tag !== 'Object') return tag;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (depth > 0) return `object(${keys.length})`;
+  const entries: Array<[string, unknown]> = keys
+    .slice(0, SHAPE_MAX_KEYS)
+    .map((k) => [
+      k.length > SHAPE_MAX_KEY_LENGTH ? `${k.slice(0, SHAPE_MAX_KEY_LENGTH)}…` : k,
+      shapeOf(record[k], depth + 1, ancestors),
+    ]);
+  if (keys.length > SHAPE_MAX_KEYS) entries.push(['…', `${keys.length - SHAPE_MAX_KEYS} more keys`]);
+  // fromEntries defines own properties, so a `__proto__` key stays a key.
+  return Object.fromEntries(entries);
+}
+
 function todayStamp(d = new Date()): string {
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
@@ -246,9 +299,10 @@ export function createLogger(userDataDir: string, opts: {
   /** A day's file rolls to the next `.N` part once it holds this many bytes. */
   maxFileBytes?: number;
 } = {}): Logger {
-  // Defaults to the quiet level on purpose. `ipc.req` logs the pre-validation
-  // payload of every channel — documents, filters, shell input — so a debug
-  // default leaks user data to disk for anyone who forgets to pass a level.
+  // Defaults to the quiet level on purpose. Debug lines are the verbose ones:
+  // `ipc.req` writes the shape of every channel's payload, and other debug
+  // tags may carry more, so a debug default writes far more to disk for
+  // anyone who forgets to pass a level.
   // Whoever wants the verbose level has to ask for it; forgetting is safe.
   const level = opts.level ?? 'info';
   const retention = opts.retentionDays ?? 7;

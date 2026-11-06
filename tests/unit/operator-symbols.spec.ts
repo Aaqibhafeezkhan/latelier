@@ -11,12 +11,10 @@ import { operatorSource } from '../../src/features/fieldSuggestions/sources/oper
 /**
  * The query-catalog entry for a name. Not `class === 'query'`: `$type` is
  * `element` and `$mod` is `evaluation`. The query entries are the ones tagged
- * for the match-key context alone; an expression entry carries four contexts.
+ * for a field's operator position; an expression entry never is.
  */
 function queryOp(name: string) {
-  return OPERATORS.find(
-    (op) => op.name === name && op.validIn?.length === 1 && op.validIn[0] === 'matchKey',
-  );
+  return OPERATORS.find((op) => op.name === name && op.validIn?.includes('matchKey'));
 }
 
 describe('resolveOperatorSymbol', () => {

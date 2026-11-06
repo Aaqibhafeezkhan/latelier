@@ -1,4 +1,4 @@
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { startMongoMemoryServer } from './startMongoMemoryServer';
 import type { TestProject } from 'vitest/node';
 
 declare module 'vitest' {
@@ -11,7 +11,7 @@ declare module 'vitest' {
 // every boot costs time and is another chance at the free-port race when
 // several processes start a mongod at once.
 export default async function setup(project: TestProject): Promise<() => Promise<void>> {
-  const server = await MongoMemoryServer.create();
+  const server = await startMongoMemoryServer();
   project.provide('mongoUri', server.getUri());
   process.stderr.write(`[integration] shared mongod at ${server.getUri()}\n`);
   return async () => {

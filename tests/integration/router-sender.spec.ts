@@ -8,6 +8,7 @@ import {
   testSenderCheck,
 } from '../helpers/ipcSender';
 import { senderCheck } from '../../electron/ipc/senderGuard';
+import { untypedRouter } from '../helpers/ipcShim';
 
 /**
  * Sender validation at the boundary it actually protects — a registered channel
@@ -39,7 +40,7 @@ describe('createRouter — sender validation', () => {
   it('runs the handler for the app’s own frame', async () => {
     const shim = createShim();
     const handler = vi.fn(() => ({ value: 1 }));
-    createRouter(shim.ipcMain, testSenderCheck).register(
+    untypedRouter(createRouter(shim.ipcMain, testSenderCheck)).register(
       'test:channel',
       (raw) => raw as unknown,
       handler,
@@ -54,7 +55,7 @@ describe('createRouter — sender validation', () => {
   it('refuses a foreign frame without reaching the handler', async () => {
     const shim = createShim();
     const handler = vi.fn();
-    createRouter(shim.ipcMain, testSenderCheck).register(
+    untypedRouter(createRouter(shim.ipcMain, testSenderCheck)).register(
       'test:channel',
       (raw) => raw as unknown,
       handler,
@@ -80,7 +81,7 @@ describe('createRouter — sender validation', () => {
 
     const shim = createShim();
     const handler = vi.fn();
-    createRouter(shim.ipcMain, check).register('test:channel', (raw) => raw as unknown, handler);
+    untypedRouter(createRouter(shim.ipcMain, check)).register('test:channel', (raw) => raw as unknown, handler);
 
     const result = await shim.invoke(
       'test:channel',
@@ -96,7 +97,7 @@ describe('createRouter — sender validation', () => {
     // the guard runs before `ipc.req` writes anything.
     const shim = createShim();
     const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    createRouter(shim.ipcMain, testSenderCheck, log).register(
+    untypedRouter(createRouter(shim.ipcMain, testSenderCheck, log)).register(
       'test:channel',
       (raw) => raw as unknown,
       vi.fn(),

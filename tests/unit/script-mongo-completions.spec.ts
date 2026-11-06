@@ -230,6 +230,7 @@ describe('mongoCompletionSource — field-position branch', () => {
       connectionId: 'c1',
       dbName: 'mydb',
       collection: 'users',
+      size: 100,
     });
     // FIELD_SLOT_OPERATOR_COMPLETIONS is filtered down to
     // {$or,$and,$nor,$expr} — an operator outside that set (e.g. the

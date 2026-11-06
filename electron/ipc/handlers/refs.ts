@@ -4,10 +4,14 @@ import type { Router } from '../router.ts';
 import { NonEmpty, zodValidator } from '../validators.ts';
 import type { ReferenceRulesService } from '../../services/ReferenceRulesService.ts';
 
+// A namespace is both names or neither: `dbName` alone used to fall through
+// to the whole connection's rules, answering a question nobody asked.
 const ListInputSchema = z.object({
   connectionId: NonEmpty,
   dbName: NonEmpty.optional(),
   collection: NonEmpty.optional(),
+}).refine((i) => (i.dbName === undefined) === (i.collection === undefined), {
+  message: 'dbName and collection must be given together',
 });
 
 const GetInputSchema = z.object({ id: NonEmpty });

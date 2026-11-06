@@ -459,6 +459,11 @@ describe('TableView — rendering and interaction', () => {
       expect(container.querySelector('[data-resize-handle="1"]')).toBeTruthy();
     });
 
+    it('column resize handle opts in to the shared keyboard-focus highlight', () => {
+      const { container } = renderTable([{ _id: 1, name: 'alpha' }]);
+      expect(container.querySelector('[data-resize-handle="1"]')?.classList.contains('resize-separator')).toBe(true);
+    });
+
     it('sort indicator renders when a header is the active sort field', () => {
       const docs = [{ _id: 1, name: 'alpha' }];
       const { getByTestId } = render(

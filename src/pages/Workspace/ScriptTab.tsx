@@ -267,6 +267,7 @@ function ScriptTabInner({ tab, defaultDb, onPatch }: ScriptTabProps) {
           onMouseDown={onResizeStart}
           onKeyDown={onResizeKeyDown}
           tabIndex={0}
+          className="resize-separator"
           style={{
             height: 4,
             cursor: 'ns-resize',

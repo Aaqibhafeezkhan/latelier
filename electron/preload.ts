@@ -1,9 +1,16 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC_CHANNELS, type Envelope, type IpcApi, type MenuCommand } from '@shared/ipc';
+import {
+  IPC_CHANNELS,
+  type ChannelIn,
+  type ChannelOut,
+  type Envelope,
+  type InvokeChannel,
+  type IpcApi,
+  type MenuCommand,
+} from '@shared/ipc';
 import type {
   AggResult,
   AggResultWire,
-  AggSaveCounts,
   DataImportProgressEvent,
   FindResult,
   FindResultWire,
@@ -14,8 +21,13 @@ function invoke<T>(channel: string, payload?: unknown): Promise<Envelope<T>> {
   return ipcRenderer.invoke(channel, payload) as Promise<Envelope<T>>;
 }
 
-async function call<T>(channel: string, payload?: unknown): Promise<T> {
-  const env = await invoke<T>(channel, payload);
+// Typed against the channel's wire signature, so a binding that sends or
+// expects something other than what `ChannelSig` records fails to compile.
+async function call<C extends InvokeChannel>(
+  channel: C,
+  ...payload: undefined extends ChannelIn<C> ? [ChannelIn<C>?] : [ChannelIn<C>]
+): Promise<ChannelOut<C>> {
+  const env = await invoke<ChannelOut<C>>(channel, payload[0]);
   if (!env.ok) throw env.error;
   return env.data;
 }
@@ -86,8 +98,8 @@ const api: IpcApi = {
     },
   },
 
-  shell: {
-    openExternal: (input) => call(IPC_CHANNELS.shellOpenExternal, input),
+  docs: {
+    openExternal: (input) => call(IPC_CHANNELS.docsOpenExternal, input),
   },
 
   mongo: {
@@ -152,8 +164,9 @@ const api: IpcApi = {
   },
 
   prefs: {
-    get: (key) => call(IPC_CHANNELS.prefsGet, { key }),
-    set: (key, value) => call(IPC_CHANNELS.prefsSet, { key, value }),
+    // A pref's value type is the caller's choice; main stores and returns JSON.
+    get: <T>(key: string) => call(IPC_CHANNELS.prefsGet, { key }) as Promise<T | null>,
+    set: <T>(key: string, value: T) => call(IPC_CHANNELS.prefsSet, { key, value }) as Promise<T>,
     getTheme: () => call(IPC_CHANNELS.prefsGetTheme),
     setTheme: (mode) => call(IPC_CHANNELS.prefsSetTheme, { mode }),
     onThemeChanged: (cb) => {
@@ -171,7 +184,7 @@ const api: IpcApi = {
 
   query: {
     find: async (input) => parseFindResult(
-      await call<FindResultWire>(IPC_CHANNELS.queryFind, input),
+      await call(IPC_CHANNELS.queryFind, input),
     ),
     count: (input) => call(IPC_CHANNELS.queryCount, input),
     findOne: (input) => call(IPC_CHANNELS.queryFindOne, input),
@@ -226,12 +239,12 @@ const api: IpcApi = {
 
   agg: {
     run: async (input): Promise<AggResult> => parseAggResult(
-      await call<AggResultWire>(IPC_CHANNELS.aggRun, input),
+      await call(IPC_CHANNELS.aggRun, input),
     ),
     previewUpToStage: (input) => call(IPC_CHANNELS.aggPreviewUpToStage, input),
     cancel: (input) => call(IPC_CHANNELS.aggCancel, input),
     runAndSave: async (input) => parseAggResult(
-      await call<AggResultWire & AggSaveCounts>(IPC_CHANNELS.aggRunAndSave, input),
+      await call(IPC_CHANNELS.aggRunAndSave, input),
     ),
     explain: (input) => call(IPC_CHANNELS.aggExplain, input),
   },

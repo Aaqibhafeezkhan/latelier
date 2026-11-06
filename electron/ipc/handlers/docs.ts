@@ -14,9 +14,9 @@ const DOCS_PATH = '/docs/';
 
 const OpenExternalInput = z.object({ url: z.string() });
 
-export function registerShellChannels(router: Router): void {
+export function registerDocsChannels(router: Router): void {
   router.register(
-    IPC_CHANNELS.shellOpenExternal,
+    IPC_CHANNELS.docsOpenExternal,
     zodValidator(OpenExternalInput),
     async ({ url }) => {
       const parsed = parseAllowedExternalUrl(url, DOCS_HOSTS);

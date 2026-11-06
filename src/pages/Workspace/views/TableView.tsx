@@ -1699,6 +1699,7 @@ export function TableView({
               <div
                 data-resize-handle="1"
                 role="separator"
+                className="resize-separator"
                 aria-orientation="vertical"
                 aria-label={`Resize ${label} column`}
                 aria-valuenow={w}

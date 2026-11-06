@@ -5,6 +5,7 @@ import { MongoClient } from 'mongodb';
 import type { Envelope } from '@shared/ipc';
 import { IPC_CHANNELS } from '@shared/ipc';
 import { createRouter } from '../../electron/ipc/router';
+import { untypedRouter } from '../helpers/ipcShim';
 import { registerQueryChannels } from '../../electron/ipc/handlers/query';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { QueryService } from '../../electron/mongo/QueryService';
@@ -15,6 +16,7 @@ import { createSafeStorageMock } from '../helpers/safeStorageMock';
 import { createTempDb, type TempDb, createTempCipher } from '../helpers/db';
 import { makeConnection, makeReader, uriToHostPort } from '../helpers/mongo';
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
+import { startMongoMemoryServer } from '../helpers/startMongoMemoryServer';
 
 /**
  * X18 §7 / T16: a raw driver error must reach the router already classified,
@@ -50,7 +52,7 @@ describe('a driver error reaches the renderer classified, not as INTERNAL', () =
 
   beforeAll(async () => {
     // `failCommand` needs `enableTestCommands`, so this gets its own server.
-    server = await MongoMemoryServer.create({
+    server = await startMongoMemoryServer({
       instance: { args: ['--setParameter', 'enableTestCommands=1'] },
     });
     const seed = new MongoClient(server.getUri());
@@ -89,9 +91,9 @@ describe('a driver error reaches the renderer classified, not as INTERNAL', () =
   }, 60_000);
 
   afterAll(async () => {
-    await pool.disconnectAll();
-    tmp.cleanup();
-    await server.stop();
+    await pool?.disconnectAll();
+    tmp?.cleanup();
+    await server?.stop();
   });
 
   const failNext = async (commands: string[], errorCode: number): Promise<void> => {
@@ -160,10 +162,10 @@ describe('a driver error reaches the renderer classified, not as INTERNAL', () =
   it('an error that is not from the driver is still INTERNAL', async () => {
     // The backstop must not relabel our own bugs as database problems.
     const local = new Map<string, Handler>();
-    const router = createRouter(
+    const router = untypedRouter(createRouter(
       { handle: (channel: string, fn: Handler) => local.set(channel, fn) } as never,
       testSenderCheck,
-    );
+    ));
     router.register(
       'test:boom',
       (p) => p,
@@ -201,10 +203,10 @@ describe('a driver error reaches the renderer classified, not as INTERNAL', () =
     expect((raw as { codeName?: string })?.codeName).toBe('MaxTimeMSExpired');
 
     const local = new Map<string, Handler>();
-    const router = createRouter(
+    const router = untypedRouter(createRouter(
       { handle: (channel: string, fn: Handler) => local.set(channel, fn) } as never,
       testSenderCheck,
-    );
+    ));
     router.register(
       'test:raw-driver',
       (p) => p,
@@ -234,10 +236,10 @@ describe('a driver error reaches the renderer classified, not as INTERNAL', () =
     ],
   ])('still returns an envelope for %s', async (_what, make) => {
     const local = new Map<string, Handler>();
-    const router = createRouter(
+    const router = untypedRouter(createRouter(
       { handle: (channel: string, fn: Handler) => local.set(channel, fn) } as never,
       testSenderCheck,
-    );
+    ));
     router.register(
       'test:hostile',
       (p) => p,

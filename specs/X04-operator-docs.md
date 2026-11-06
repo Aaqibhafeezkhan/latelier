@@ -467,7 +467,7 @@ Stack layout, top to bottom:
    <class badge word>"` (e.g. `"Class: query operator"`, in
    `fontSize: 10`, color `T.textGhost`). Right: `"Learn more →"` link
    (`color: T.accent`, `textDecoration: none`, `fontSize: 10`; opens via
-   `window.atelier.shell.openExternal(url)` — **DO NOT** use a raw
+   `window.atelier.docs.openExternal(url)` — **DO NOT** use a raw
    `<a href>` because this is Electron and we need to route to the host
    browser explicitly). Footer only renders if `op.url`.
 
@@ -497,16 +497,16 @@ Stack layout, top to bottom:
 
 ### 4.4 `openExternal` contract
 
-There is no existing `api.shell.openExternal`; check
+There is no existing `api.docs.openExternal`; check
 `src/api/atelier.ts`. If missing:
 
-- Add IPC channel `shell:openExternal` (no `SECRET_INPUT`).
+- Add IPC channel `docs:openExternal` (no `SECRET_INPUT`).
   - Input: `{ url: string }`. Validate it starts with `https://www.mongodb.com/docs/`
     in the zod schema — refuse anything else to prevent the doc panel
     becoming an arbitrary-URL opener.
   - Handler: `electron.shell.openExternal(url)` from Electron.
   - Output: `void` (envelope `{ ok: true }`).
-- Expose via `preload.ts` under `window.atelier.shell.openExternal`.
+- Expose via `preload.ts` under `window.atelier.docs.openExternal`.
 - Add to `shared/ipc.ts` types.
 
 This is the only IPC touch in the whole spec.
@@ -830,7 +830,7 @@ Same as 11.3, anchored to the pill.
   keyboard focus.
 - The "Learn more →" link opens in the user's default browser via
   `shell.openExternal`, not inside the Electron window.
-- The `shell:openExternal` IPC rejects any URL that does not start
+- The `docs:openExternal` IPC rejects any URL that does not start
   with `https://www.mongodb.com/docs/`.
 - All existing X02/X03 acceptance criteria still pass.
 
@@ -872,7 +872,7 @@ Same as 11.3, anchored to the pill.
 - Missing `example`: example block not rendered, no empty `<pre>`.
 - `op={null}`: renders placeholder text, no crash.
 - "Learn more →" click calls
-  `window.atelier.shell.openExternal` with the URL (mocked).
+  `window.atelier.docs.openExternal` with the URL (mocked).
 
 **`tests/component/OperatorTooltip.spec.tsx`** (new)
 
@@ -892,9 +892,9 @@ Same as 11.3, anchored to the pill.
 
 ### 13.3 Integration
 
-No IPC-side test except the new `shell:openExternal` channel:
+No IPC-side test except the new `docs:openExternal` channel:
 
-**`tests/integration/shell-open-external.spec.ts`** (new)
+**`tests/integration/docs-open-external.spec.ts`** (new)
 
 - Valid URL → success envelope, `electron.shell.openExternal` called.
 - URL not starting with `https://www.mongodb.com/docs/` → `{ ok: false,
@@ -935,7 +935,7 @@ Each phase should land as one commit. Run tests between phases.
 5. **Placement utility + unit tests**. Commit.
 6. **`OperatorDocPanel` component + its component test**. No consumer
    yet. Commit.
-7. **`shell:openExternal` IPC + its integration test**. Commit.
+7. **`docs:openExternal` IPC + its integration test**. Commit.
 8. **Wire into `SuggestionPopover`**. Commit.
 9. **Wire into `AddStagePill`**. Commit.
 10. **`OperatorTooltip` component + its tests**. Commit.
@@ -956,8 +956,8 @@ Create:
 - `tests/unit/placement.spec.ts`
 - `tests/component/OperatorDocPanel.spec.tsx`
 - `tests/component/OperatorTooltip.spec.tsx`
-- `tests/integration/shell-open-external.spec.ts`
-- `electron/ipc/handlers/shell.ts` (new router for the one channel)
+- `tests/integration/docs-open-external.spec.ts`
+- `electron/ipc/handlers/docs.ts` (new router for the one channel)
 
 Modify:
 
@@ -971,10 +971,9 @@ Modify:
 - `src/pages/Workspace/Aggregation/StageAccordion.tsx` — side panel
   in `AddStagePill`, tooltip on `StageRow` pill.
 - `src/pages/Workspace/BuilderPane.tsx` — `?` icon in `CondRow`.
-- `shared/ipc.ts` — `shell.openExternal` type.
-- `electron/preload.ts` — `shell.openExternal` binding.
-- `electron/main.ts` — register the shell router.
-- `src/api/atelier.ts` — `api.shell.openExternal` wrapper.
+- `shared/ipc.ts` — `docs.openExternal` type.
+- `electron/preload.ts` — `docs.openExternal` binding.
+- `electron/main.ts` — register the docs router (`registerDocsChannels`).
 - `scripts/ipc-secret-allowlist.txt` — **not** added; the channel
   does not accept secrets.
 - `tests/component/SuggestionPopover.spec.tsx` — panel assertions.

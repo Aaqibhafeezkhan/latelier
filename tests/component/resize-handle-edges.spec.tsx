@@ -211,9 +211,11 @@ describe('ResizeHandle keyboard resize (#56)', () => {
     render(<ControlledResizeHandle edge="right" initial={380} min={160} max={560} onCommit={vi.fn()} />);
     const handle = screen.getByRole('separator', { name: 'Resize reference drawer' });
 
-    expect(handle.style.background).toBe('transparent');
+    // jsdom applies no stylesheet, so the keyboard highlight itself (the
+    // `:focus-visible` rule) is proven in e2e; here, that the handle opts in.
+    expect(handle.classList.contains('resize-separator')).toBe(true);
     await user.tab();
-    expect(handle.style.background).not.toBe('transparent');
+    expect(document.activeElement).toBe(handle);
   });
 
   /**

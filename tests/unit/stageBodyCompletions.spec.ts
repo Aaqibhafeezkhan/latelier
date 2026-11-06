@@ -78,7 +78,8 @@ describe('stageBodyCompletionSource', () => {
       getStageOp: () => '$match',
     });
 
-    const result = (await source(fakeCtx('{ █ }'))) as CompletionResult | null;
+    // Inside a field's object: the field-operator position of a filter.
+    const result = (await source(fakeCtx('{ age: { █ } }'))) as CompletionResult | null;
 
     expect(result).not.toBeNull();
     expect(labels(result)).toEqual(expect.arrayContaining(['$exists', '$sum']));

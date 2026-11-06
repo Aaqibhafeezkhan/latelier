@@ -489,6 +489,41 @@ describe('DbCollectionNavigator — AC#6 whole-connection refresh repopulates ex
     expect(dbNameArgs.filter((n) => n === DB_B)).toHaveLength(2);
   });
 
+  it('an explicit Refresh retries the active DB whose first collections fetch failed', async () => {
+    let call = 0;
+    const listCollections = vi.fn(async ({ dbName }: { connectionId: string; dbName: string }) => {
+      call += 1;
+      if (call === 1) throw new Error('transient');
+      return makeColls(`${dbName}-coll`);
+    });
+    installAtelierMock({
+      mongo: { status: async (id: string) => ({ id, status: 'connected' as const }) },
+      meta: {
+        listDatabases: async () => DB_ROWS_MULTI,
+        listCollections: listCollections as never,
+      },
+    });
+    render(
+      <DbCollectionNavigator
+        connectionsWithTabs={new Set()}
+        connections={[connectionFixture({ id: 'c1', name: 'Test' })]}
+        focusedConnectionId="c1"
+        activeDbName={DB_A}
+        activeCollection={null}
+        onOpenCollection={vi.fn()}
+        onOpenAggregation={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(listCollections).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId(`nav-coll-${DB_A}-${DB_A}-coll`)).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    });
+    await screen.findByTestId(`nav-coll-${DB_A}-${DB_A}-coll`);
+    expect(listCollections).toHaveBeenCalledTimes(2);
+  });
+
   it('a previously-expanded DB absent from the refreshed list is skipped: no crash, no fetch', async () => {
     let dbCall = 0;
     const listDatabases = vi.fn(async () => {

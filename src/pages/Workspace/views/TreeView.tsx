@@ -550,7 +550,10 @@ export function TreeView({
       const docId = getFullDocId(doc);
       onRowExpand(docId, !ownGet(expandedRows, docId));
     },
-    [roving, documents, expandedRows, onRowExpand, onEditDoc],
+    // `roving` is a fresh object every render — depend on the members this
+    // actually reads instead (same as `TableView`'s `handleGridKeyDown`).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [roving.onKeyDown, roving.activeIndex, documents, expandedRows, onRowExpand, onEditDoc],
   );
 
   // Memoize so react-window receives a stable rowProps reference. A fresh

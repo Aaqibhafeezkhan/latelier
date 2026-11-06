@@ -351,12 +351,10 @@ describe(' per-group drag targeting for nested filter groups', () => {
   });
 
   it('a drop on the "N not applied" problems banner lands on the root group, not a dead zone', async () => {
-    // The banner is a sibling of the root GroupView inside FilterDrawer's
-    // outer wrapper, not a descendant of it — a drop landing exactly there
-    // never reaches any GroupView's `stopPropagation()`'d handler. ADR 0007
-    // states no drop should be able to land outside every group's DOM node,
-    // so the wrapper itself needs a fallback that treats an unclaimed drop
-    // as targeting the root.
+    // ADR 0007 states no drop should be able to land outside every group's
+    // DOM node. The banner sits between the root group's header and its rows,
+    // inside the root GroupView, so a drop landing exactly on it must still
+    // reach the root group and add a row there.
     mountWith(makeState({ queryRaw: '{"qty":{"$gt":5}}' }));
     const valueInput = await screen.findByPlaceholderText('value');
     fireEvent.change(valueInput, { target: { value: 'not-a-number' } });

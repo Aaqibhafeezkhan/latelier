@@ -74,39 +74,47 @@ function OverviewTab({ conn, runtime }: {
   const T = themeVars;
   const help = useTroubleshooting();
   const [info, setInfo] = React.useState<ServerInfo | null>(null);
-  const [loading, setLoading] = React.useState(false);
+  // The mount load below starts in flight, so a connected tab opens loading.
+  const [loading, setLoading] = React.useState(runtime.status === 'connected');
   const [error, setError] = React.useState<string | null>(null);
   const [stale, setStale] = React.useState(false);
   const [lastLoadedAt, setLastLoadedAt] = React.useState<number | null>(null);
 
-  const load = React.useCallback(async () => {
+  // Sets no state before its first await, so a mount effect can call it.
+  const fetchInfo = React.useCallback(
+    () =>
+      api.mongo
+        .serverInfo(conn.id)
+        .then((r) => {
+          setInfo(r);
+          setStale(false);
+          setLastLoadedAt(Date.now());
+        })
+        .catch((err: unknown) => {
+          if (info) {
+            setStale(true);
+          } else {
+            setError(isIpcError(err) ? err.message : String(err));
+          }
+        })
+        .finally(() => setLoading(false)),
+    [conn.id, info],
+  );
+
+  const load = React.useCallback(() => {
     setLoading(true);
     setError(null);
-    try {
-      const r = await api.mongo.serverInfo(conn.id);
-      setInfo(r);
-      setStale(false);
-      setLastLoadedAt(Date.now());
-    } catch (err) {
-      if (info) {
-        setStale(true);
-      } else {
-        setError(isIpcError(err) ? err.message : String(err));
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [conn.id, info]);
+    return fetchInfo();
+  }, [fetchInfo]);
 
+  // The parent keys this tab on connection id and status, so a new connection
+  // or a reconnect arrives as a fresh mount with `info`/`error`/`stale` reset.
+  const loadOnMount = React.useEffectEvent(() => {
+    if (runtime.status === 'connected') void fetchInfo();
+  });
   React.useEffect(() => {
-    queueMicrotask(() => {
-      setInfo(null);
-      setError(null);
-      setStale(false);
-      if (runtime.status === 'connected') void load();
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conn.id, runtime.status]);
+    loadOnMount();
+  }, []);
 
   React.useEffect(() => {
     if (runtime.status !== 'connected') return;
@@ -554,20 +562,20 @@ export function DetailPanel({ selected, loading, onDelete, onDisconnect }: {
   const [runtime, setRuntime] = React.useState<ConnectionRuntime | null>(null);
 
   React.useEffect(() => {
-    if (!selected) return;
+    const id = selected?.id;
+    if (!id) return;
     let active = true;
-    void api.mongo.status(selected.id).then((r) => {
+    void api.mongo.status(id).then((r) => {
       if (active) setRuntime(r);
     }).catch((err) => logFailure('reading connection status', err));
     const off = api.mongo.onStatus((r) => {
       if (!active) return;
-      if (r.id === selected.id) setRuntime(r);
+      if (r.id === id) setRuntime(r);
     });
     return () => {
       active = false;
       off();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id]);
 
   if (!selected && loading) {
@@ -694,7 +702,7 @@ export function DetailPanel({ selected, loading, onDelete, onDisconnect }: {
       </div>
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {activeTab === 'Overview' && <OverviewTab conn={selected} runtime={effective} />}
+        {activeTab === 'Overview' && <OverviewTab key={`${selected.id}:${effective.status}`} conn={selected} runtime={effective} />}
         {activeTab === 'Monitor' && <MonitorTab conn={selected} runtime={effective} />}
         {activeTab === 'Collections' && <CollectionsTab conn={selected} runtime={effective} />}
         {activeTab === 'Users' && <UsersTab conn={selected} runtime={effective} />}

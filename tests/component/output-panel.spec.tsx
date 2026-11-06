@@ -223,6 +223,11 @@ function ControlledOutputPanel() {
 }
 
 describe('OutputPanel resize keyboard support (#56)', () => {
+  it('opts in to the shared keyboard-focus highlight', () => {
+    render(<ControlledOutputPanel />);
+    expect(screen.getByRole('separator', { name: 'Resize output panel' }).classList.contains('resize-separator')).toBe(true);
+  });
+
   it('is reachable by Tab alone', async () => {
     const user = userEvent.setup();
     render(<ControlledOutputPanel />);

@@ -21,12 +21,23 @@ export type OperatorClass =
   | 'update';
 
 export type OperatorContext =
+  /** The top level of a filter document: field names, `$and`, `$expr`, ... */
+  | 'filterTop'
+  /** A field's own operator object in a filter, `{ field: { $gt: 1 } }`. */
   | 'matchKey'
+  /** Inside `$elemMatch`: a document predicate or a scalar comparison. */
+  | 'elemMatchKey'
+  /** A `$sort` field's value, `{ score: { $meta: "textScore" } }`. */
+  | 'sortValue'
   | 'groupValue'
+  /** A `$setWindowFields` `output` field's window operator. */
+  | 'windowValue'
   | 'projectValue'
   | 'addFieldsValue'
   | 'stage'
-  | 'update';
+  | 'update'
+  /** A stage body that takes no operator (`$sort`, `$limit`, ...): no entry carries it. */
+  | 'noOperator';
 
 export interface OperatorDef {
   name: string;
@@ -56,16 +67,28 @@ export interface OperatorDef {
   url?: string;
 }
 
-// Contexts are errs-toward-inclusive: Phase B ranks off-context ops down rather
-// than hiding them, so an extra tag doesn't hurt.
-const MATCH: readonly OperatorContext[] = ['matchKey'];
+// Off-context ops rank down rather than hide, so a missing tag only costs
+// ranking. A wrong tag is worse: it ranks an invalid operator as valid, so a
+// tag is added only where the operator is accepted.
+const FILTER_TOP: readonly OperatorContext[] = ['filterTop'];
+/** Logical operators, also valid in an `$elemMatch` document predicate. */
+const LOGICAL: readonly OperatorContext[] = ['filterTop', 'elemMatchKey'];
+const MATCH: readonly OperatorContext[] = ['matchKey', 'elemMatchKey'];
 const STAGE: readonly OperatorContext[] = ['stage'];
-const GROUP: readonly OperatorContext[] = ['groupValue'];
+/** Accumulators `$group` and `$setWindowFields` `output` both accept. */
+const GROUP: readonly OperatorContext[] = ['groupValue', 'windowValue'];
+/** Accumulators `$setWindowFields` does not accept. */
+const GROUP_ONLY: readonly OperatorContext[] = ['groupValue'];
+/** Rank, order and gap-filling operators, valid only in `$setWindowFields`. */
+const WINDOW: readonly OperatorContext[] = ['windowValue'];
+// Expressions are not valid in a filter outside `$expr`; the grammar maps the
+// inside of `$expr` to `projectValue`. They also sit inside accumulator
+// arguments, deeper in `$group` and `$setWindowFields` `output`.
 const PROJECT_EXPR: readonly OperatorContext[] = [
   'projectValue',
   'addFieldsValue',
   'groupValue',
-  'matchKey',
+  'windowValue',
 ];
 const UPDATE: readonly OperatorContext[] = ['update'];
 
@@ -85,17 +108,14 @@ export const VALUE_SUGGESTION_OPS: ReadonlySet<string> = new Set([
 /**
  * Names valid directly at a field's own operator position, `{ field: { $op:
  * value } }`. Strictly narrower than `validIn: matchKey` — that tag also
- * covers ~136 expression-class operators (`PROJECT_EXPR` includes `matchKey`)
- * plus keys that only ever appear at the top of a filter document (`$expr`,
- * `$text`, `$where`, `$and`, `$or`, `$nor`, `$jsonSchema`) or as a nested
- * modifier of another operator (`$geometry`, `$box`, `$center`,
- * `$centerSphere`, `$polygon`, `$minDistance`, `$maxDistance`), never as a
+ * covers the geo modifiers nested one level further in (`$geometry`, `$box`,
+ * `$center`, `$centerSphere`, `$polygon`, `$minDistance`, `$maxDistance`),
+ * which the grammar resolves to the same context but which are never a
  * field's own operator.
  *
  * Used only to strictly filter the Query Builder's op box, which always sits
- * in this exact position. The wider catalog mis-tagging above (which also
- * reaches the Filter Bar and stage bodies, and only ranks down rather than
- * hides) is a separate, broader fix tracked outside this list.
+ * in this exact position. The Filter Bar and stage bodies rank by `validIn`
+ * instead, and only rank down rather than hide.
  */
 export const FIELD_POSITION_OPS: ReadonlySet<string> = new Set([
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin',
@@ -797,7 +817,7 @@ const QUERY: readonly OperatorDef[] = [
   {
     name: '$and',
     class: 'logical',
-    validIn: MATCH,
+    validIn: LOGICAL,
     description:
       'Joins query clauses with a logical AND. All clauses must match. ' +
       'Implicit when multiple fields appear in the same query document.',
@@ -808,7 +828,7 @@ const QUERY: readonly OperatorDef[] = [
   {
     name: '$or',
     class: 'logical',
-    validIn: MATCH,
+    validIn: LOGICAL,
     description: 'Joins query clauses with a logical OR. A document matches if any clause matches.',
     syntax: '{ $or: [<clause1>, <clause2>, …] }',
     example: '{ $or: [{ status: "active" }, { trial: true }] }',
@@ -828,7 +848,7 @@ const QUERY: readonly OperatorDef[] = [
   {
     name: '$nor',
     class: 'logical',
-    validIn: MATCH,
+    validIn: LOGICAL,
     description: 'Joins query clauses with a logical NOR. A document matches if no clause matches.',
     syntax: '{ $nor: [<clause1>, <clause2>, …] }',
     example: '{ $nor: [{ status: "archived" }, { banned: true }] }',
@@ -862,7 +882,7 @@ const QUERY: readonly OperatorDef[] = [
   {
     name: '$expr',
     class: 'evaluation',
-    validIn: ['matchKey', 'projectValue', 'addFieldsValue', 'groupValue'],
+    validIn: FILTER_TOP,
     description:
       'Allows using an aggregation expression inside a query. Required ' +
       'when comparing two fields from the same document.',
@@ -873,7 +893,7 @@ const QUERY: readonly OperatorDef[] = [
   {
     name: '$jsonSchema',
     class: 'evaluation',
-    validIn: MATCH,
+    validIn: FILTER_TOP,
     description:
       'Matches documents that satisfy the given JSON Schema. Most ' +
       'commonly used in collection validation rules.',
@@ -914,7 +934,7 @@ const QUERY: readonly OperatorDef[] = [
   {
     name: '$text',
     class: 'evaluation',
-    validIn: MATCH,
+    validIn: FILTER_TOP,
     description:
       'Performs a text search using the collection\'s text index. Only one ' +
       'text index is allowed per collection.',
@@ -925,7 +945,7 @@ const QUERY: readonly OperatorDef[] = [
   {
     name: '$where',
     class: 'evaluation',
-    validIn: MATCH,
+    validIn: FILTER_TOP,
     description:
       'Matches documents against a JavaScript expression. Slow — prefer ' +
       '$expr when possible. Not available on serverless or Atlas free tier.',
@@ -1315,7 +1335,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$covariancePop',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: WINDOW,
     description: 'Returns the population covariance of two numeric expressions. Window-function only.',
     syntax: '{ $covariancePop: [<expr1>, <expr2>] }',
     example: '{ cov: { $covariancePop: ["$x", "$y"] } }',
@@ -1324,7 +1344,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$covarianceSamp',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: WINDOW,
     description: 'Returns the sample covariance of two numeric expressions. Window-function only.',
     syntax: '{ $covarianceSamp: [<expr1>, <expr2>] }',
     example: '{ cov: { $covarianceSamp: ["$x", "$y"] } }',
@@ -1353,7 +1373,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$accumulator',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: GROUP_ONLY,
     description:
       'Defines a custom accumulator with JavaScript init/accumulate/merge/' +
       'finalize functions. Requires server-side scripting.',
@@ -1375,7 +1395,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$function',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: GROUP_ONLY,
     description:
       'Invokes a user-defined JavaScript function over the group. ' +
       'Requires server-side scripting.',
@@ -1386,7 +1406,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$expMovingAvg',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: WINDOW,
     description:
       'Returns the exponential moving average for a numeric expression. ' +
       'Window-function only. Specify N or alpha.',
@@ -1397,7 +1417,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$derivative',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: WINDOW,
     description: 'Returns the derivative (rate of change) of an expression across a window.',
     syntax: '{ $derivative: { input: <expr>, unit: <unit> } }',
     example: '{ slope: { $derivative: { input: "$temp", unit: "minute" } } }',
@@ -1406,7 +1426,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$integral',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: WINDOW,
     description: 'Returns the integral of an expression across a window. Window-function only.',
     syntax: '{ $integral: { input: <expr>, unit: <unit> } }',
     example: '{ area: { $integral: { input: "$rate", unit: "hour" } } }',
@@ -1415,7 +1435,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$shift',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: WINDOW,
     description:
       'Returns the value from a document offset from the current document ' +
       'by the given number of positions. Window-function only.',
@@ -1426,7 +1446,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$denseRank',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: WINDOW,
     description:
       'Returns the dense rank of the current document within the window. ' +
       'Rank increments by one per unique sort key, with no gaps.',
@@ -1437,7 +1457,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$rank',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: WINDOW,
     description:
       'Returns the rank of the current document within the window. Ties ' +
       'share a rank; subsequent ranks skip positions.',
@@ -1448,7 +1468,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$documentNumber',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: WINDOW,
     description: 'Returns the 1-based position of the current document within the window.',
     syntax: '{ $documentNumber: { } }',
     example: '{ rowNum: { $documentNumber: {} } }',
@@ -1457,7 +1477,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$linearFill',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: WINDOW,
     description:
       'Fills null / missing values with linearly interpolated values based ' +
       'on surrounding non-null values. Window-function only.',
@@ -1468,7 +1488,7 @@ const ACCUMULATORS: readonly OperatorDef[] = [
   {
     name: '$locf',
     class: 'accumulator',
-    validIn: GROUP,
+    validIn: WINDOW,
     description:
       'Last-Observation-Carried-Forward — fills null / missing values with ' +
       'the most recent non-null value. Window-function only.',
@@ -1948,7 +1968,8 @@ const EXPRESSIONS: readonly OperatorDef[] = [
   ...EXPRESSION_NAMES.filter((n) => !RICH_EXPRESSION_NAMES.has(n)).map((name) => ({
     name,
     class: 'expression' as const,
-    validIn: PROJECT_EXPR,
+    // `$meta` is also the one operator a `$sort` value accepts.
+    validIn: name === '$meta' ? [...PROJECT_EXPR, 'sortValue' as const] : PROJECT_EXPR,
     summary: EXPRESSION_SUMMARIES[name],
   })),
 ];

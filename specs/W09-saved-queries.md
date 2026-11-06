@@ -61,7 +61,7 @@ export interface SavedQuery extends SavedQuerySummary {
 | ---------------- | ----------------------------------------------------------------- | ---------------------- |
 | `saved:list`     | `{ connectionId?, dbName?, collection?, kind? }`                  | `SavedQuerySummary[]`  |
 | `saved:get`      | `{ id }`                                                          | `SavedQuery`           |
-| `saved:create`   | `Omit<SavedQuery, 'id'\|'createdAt'\|'updatedAt'>`                | `SavedQuery`           |
+| `saved:create`   | `SavedCreateInput`: target, name, and a `kind` with its matching payload; no `description` (derived from the payload) | `SavedQuery`           |
 | `saved:update`   | `{ id, patch: Partial<Pick<SavedQuery,'name'\|'payload'>> }`      | `SavedQuery`           |
 | `saved:delete`   | `{ id }`                                                          | `void`                 |
 | `saved:duplicate`| `{ id, newName: string }`                                         | `SavedQuery`           |

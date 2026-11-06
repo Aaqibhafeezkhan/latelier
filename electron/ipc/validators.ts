@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { SchemaValidator } from './router.ts';
 
 // Re-usable validators shared across domain specs. Domain-specific schemas
 // live in their own files (e.g., electron/mongo/schemas.ts).
@@ -20,7 +21,17 @@ export const CollectionTargetSchema = z.object({
 
 export const IdInputSchema = z.object({ id: NonEmpty });
 
-/** Convenience: shape a Zod parse result into the router's Validator<I> type. */
-export function zodValidator<T>(schema: z.ZodType<T>): (payload: unknown) => T {
-  return (payload: unknown) => schema.parse(payload);
+/**
+ * A schema whose input is `any` would accept every wire type and make the
+ * check meaningless, so it is typed as accepting nothing and fails to register.
+ */
+type Accepted<T> = 0 extends 1 & T ? never : T;
+
+/**
+ * Shape a Zod parse into the router's validator. The result also states what
+ * the schema accepts, so `router.register` can check that every payload
+ * preload sends for the channel is one the schema takes.
+ */
+export function zodValidator<S extends z.ZodType>(schema: S): SchemaValidator<z.output<S>, Accepted<z.input<S>>> {
+  return Object.assign((payload: unknown) => schema.parse(payload), { accepts: () => undefined });
 }

@@ -50,8 +50,13 @@ export type OperatorClass =
   | 'array' | 'geo' | 'accumulator' | 'expression' | 'update';
 
 export type OperatorContext =
-  | 'matchKey' | 'groupValue' | 'projectValue' | 'addFieldsValue'
-  | 'stage' | 'update';
+  | 'filterTop'    // top level of a filter document
+  | 'matchKey'     // a field's own operator object, { field: { $gt: 1 } }
+  | 'elemMatchKey' // inside $elemMatch: a document predicate or a scalar comparison
+  | 'sortValue'    // a $sort field's value, { score: { $meta: "textScore" } }
+  | 'groupValue' | 'windowValue' | 'projectValue' | 'addFieldsValue'
+  | 'stage' | 'update'
+  | 'noOperator';  // a stage body that takes no operator; no entry carries it
 
 export interface OperatorDef {
   name: string;                         // '$eq' — always $-prefixed
@@ -147,19 +152,55 @@ that want operators pass a composition explicitly. See §5 and §8.
 `detectAggGrammar(value, caret, stageOp?)` gains a third parameter.
 The `fieldName` hit grows an `operatorContext?: OperatorContext` field.
 
-Resolution rule (`resolveOperatorContext(stageOp, depth)`):
+Resolution rule (`resolveOperatorContext(stageOp, scopes)`):
 
-| stageOp                    | depth 1 | depth ≥ 2           |
-| -------------------------- | ------- | ------------------- |
-| `$match`                   | matchKey | matchKey           |
-| `$group`                   | —       | groupValue         |
-| `$project`                 | —       | projectValue       |
-| `$set`, `$addFields`       | —       | addFieldsValue     |
-| `$facet`, unknown, absent  | —       | —                  |
+| stageOp                                          | depth 1    | depth ≥ 2                                        |
+| ------------------------------------------------ | ---------- | ------------------------------------------------ |
+| `$match`                                         | filterTop  | walked, see below                                |
+| `$group`                                         | —          | groupValue                                       |
+| `$bucket`, `$bucketAuto`                         | —          | groupValue under `output.<field>` (depth ≥ 3), else — |
+| `$setWindowFields`                               | —          | windowValue under `output.<field>` (depth ≥ 3), else — |
+| `$project`                                       | —          | projectValue                                     |
+| `$set`, `$addFields`                             | —          | addFieldsValue                                   |
+| `$sort`                                          | noOperator | sortValue (only `$meta` carries it)              |
+| `$limit`, `$skip`, `$count`, `$unwind`           | noOperator | noOperator                                       |
+| `$facet`, unknown, absent                        | —          | —                                                |
 
 Depth is `scopes.length` at the caret. "—" means `operatorContext` is
 left undefined, so `operatorSource` falls back to showing the full
-catalog in-context. `$facet` bodies recurse through stage-named keys
+catalog in-context. `noOperator` is carried by no catalog entry, so
+every operator ranks down.
+
+A `$match` body (and the Filter Bar, which passes `stageOp: '$match'`)
+is walked from the outside in:
+
+- The top level, and each object in an `$and`/`$or`/`$nor` list, is
+  `filterTop`: field names and `$and`, `$or`, `$nor`, `$expr`, `$text`,
+  `$where`, `$jsonSchema`.
+- A field's object is `matchKey`, and so is everything nested under it
+  (`$not`, the geo modifiers inside `$geoWithin`/`$near`).
+- An `$elemMatch` object, and each clause of an `$and`/`$or`/`$nor` list
+  inside it, is `elemMatchKey`: it holds either a document predicate
+  (subfields and the logical operators) or a scalar comparison (field
+  operators), so both rank first. A subfield's object inside it is
+  `matchKey` again.
+- Inside `$expr` the context is `projectValue`: only expressions are
+  valid there.
+- Anything else (a key-less object, an array not owned by a logical
+  operator, another top-level `$` key such as `$text`) is undefined.
+
+Catalog tags follow the same positions. A wrong tag is worse than a
+missing one: a missing tag only ranks a valid operator down, but a
+wrong tag ranks an invalid operator as valid. So expressions carry no
+filter context. Window-only operators (`$rank`, `$denseRank`,
+`$documentNumber`, `$shift`, `$derivative`, `$integral`,
+`$expMovingAvg`, `$linearFill`, `$locf`, `$covariancePop`,
+`$covarianceSamp`) carry `windowValue` alone. The other accumulators
+carry both `groupValue` and `windowValue`, except `$accumulator` and
+`$function`, which `$setWindowFields` rejects. The Query Builder's op box
+filters strictly by `FIELD_POSITION_OPS` and is unaffected.
+
+`$facet` bodies recurse through stage-named keys
 (e.g., `byStatus: [{$match: ...}]`); tracking the inner stage at the
 caret is a Phase-B-v2 refinement — the current detector returns no
 context for `$facet`, which is acceptable (full catalog).
@@ -244,10 +285,9 @@ Two popovers in the same row:
 
 - **field input** — `fieldSources: DEFAULT_FIELD_SOURCES` (field-only
   behavior preserved; operators don't pollute the field-path input).
-- **op input** — `fieldSources: [operatorSource]`,
-  `operatorContext: 'matchKey'` (builder filters are `$match`
-  semantics, so query-side ops rank first; stage ops and accumulators
-  still appear, downranked).
+- **op input** — `fieldSources: [fieldOperatorSource]`, which lists
+  exactly the `FIELD_POSITION_OPS` names (the op box always sits at a
+  field's own operator position), so nothing else appears.
 
 On accept, the op input dispatches `{ t: 'patchCond', patch: { op: s.name } }`.
 
@@ -358,16 +398,29 @@ lives in memory.
   stage bodies and the query bar textarea.
 - AddStagePill search accepts bare stage names (`sort` → `$sort`).
 - Builder condition row's op field is an autocomplete input
-  offering the full catalog, with `matchKey`-context ranking.
+  offering exactly the field-position operators (`FIELD_POSITION_OPS`).
 - Typing an op outside `FIELD_OPS[valType]` flags the row and
   disables Run; the warning message names the mismatch.
 - Typing an object-shape op (e.g. `$elemMatch`) flags the row as
   "needs raw JSON" and disables Run.
 - `$mod` with an empty, single-element, or divisor-0 value is
   caught pre-run.
-- Inside `$match` at any depth, query ops rank first and
-  accumulators/stage ops sink.
-- Inside `$group` at depth ≥ 2, accumulators rank first.
+- At the top level of a `$match` body or the Filter Bar, and in each
+  `$and`/`$or`/`$nor` clause, only the top-level filter operators rank
+  first; no expression ranks in-context.
+- Inside a field's object (`{ field: { … } }`), only field operators
+  rank first. Inside `$expr`, expressions rank first.
+- Inside `$group` at depth ≥ 2, accumulators rank first; window-only
+  operators sink.
+- Inside a `$setWindowFields` `output` field, window operators and the
+  accumulators it accepts rank first.
+- Inside a `$bucket` / `$bucketAuto` `output` field, accumulators rank
+  first.
+- Inside a `$limit`, `$skip`, `$count` or `$unwind` body, and at a
+  `$sort` key, no operator ranks in-context. In a `$sort` field's value
+  only `$meta` does.
+- Inside `$elemMatch`, both the logical operators and the field
+  operators rank first.
 - Inside `$project` / `$set` / `$addFields` at depth ≥ 2,
   expression ops rank first.
 - Inside `$facet`, the full catalog is shown (no context filter).
@@ -393,12 +446,23 @@ lives in memory.
   - `offContext` is false when `operatorContext` is unset; correctly
     marked when set (`$eq` in-context for `matchKey`, `$sum`
     off-context).
+  - No two catalog entries share a `(name, class)` pair.
+  - Ranking through the grammar detector: only the top-level filter
+    operators are in-context at the filter top level; every
+    `FIELD_POSITION_OPS` name and no top-level operator is in-context in a
+    field's object; no expression is in-context in a filter outside
+    `$expr`; window-only operators are off-context in `$group` and
+    in-context in `$setWindowFields` `output`; accumulators are
+    in-context in `$bucket` `output`; nothing is in-context in a `$sort`
+    body.
 - **field-suggestions-agg-grammar.spec.ts** — extended with:
   - `$`-prefixed bare keys return a `fieldName` hit (operator source
     consumes it); the old `null`-return tests are rewritten.
   - `operatorContext` resolves correctly for each stageOp + depth
-    combination (matchKey / groupValue / projectValue / addFieldsValue
-    / none for `$facet` or missing stageOp).
+    combination (filterTop / matchKey / groupValue / windowValue /
+    projectValue / addFieldsValue / noOperator / none for `$facet`,
+    unknown or missing stageOp), including the `$match` walk through
+    logical clause lists, `$not`, `$elemMatch` and `$expr`.
 - **builder-compile.spec.ts** — extended with:
   - New shape buckets: `$size`, `$mod`, `$in` all emit the right
     value shape.

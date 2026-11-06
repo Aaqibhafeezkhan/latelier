@@ -103,7 +103,7 @@ export class WorkspaceStateService {
     return rowToTab(row);
   }
 
-  openCollection(input: OpenCollectionInput): WorkspaceTab {
+  openCollection(input: OpenCollectionInput): CollectionTab {
     const reuse = input.reuseExisting ?? true;
     if (reuse) {
       const existing = this.repo.findMatching(
@@ -122,10 +122,10 @@ export class WorkspaceStateService {
           });
           this.repo.updateState(existing.id, merged);
           this.repo.setActiveExclusive(existing.id);
-          return rowToTab({ ...existing, is_active: 1, state_json: merged });
+          return rowToCollectionTab({ ...existing, is_active: 1, state_json: merged });
         }
         this.repo.setActiveExclusive(existing.id);
-        return rowToTab({ ...existing, is_active: 1 });
+        return rowToCollectionTab({ ...existing, is_active: 1 });
       }
     }
     const state: CollectionTabState = {
@@ -147,7 +147,7 @@ export class WorkspaceStateService {
     };
     this.repo.insert(row);
     this.repo.setActiveExclusive(id);
-    return rowToTab({ ...row, is_active: 1 });
+    return rowToCollectionTab({ ...row, is_active: 1 });
   }
 
   /**
@@ -161,7 +161,7 @@ export class WorkspaceStateService {
    * renderer's open call carries no stages: seeding the default empty list
    * would show an empty pipeline whose next Save overwrites the stored one.
    */
-  openAggregation(input: OpenAggregationInput): WorkspaceTab {
+  openAggregation(input: OpenAggregationInput): CollectionTab {
     const storedStages = input.savedId
       ? this.storedPipelineStages(input.savedId, input)
       : undefined;
@@ -193,7 +193,7 @@ export class WorkspaceStateService {
       });
       this.repo.updateState(existing.id, merged);
       this.repo.setActiveExclusive(existing.id);
-      return rowToTab({ ...existing, is_active: 1, state_json: merged });
+      return rowToCollectionTab({ ...existing, is_active: 1, state_json: merged });
     }
 
     return this.openCollection({
@@ -300,7 +300,7 @@ export class WorkspaceStateService {
     };
     this.repo.insert(row);
     this.repo.setActiveExclusive(id);
-    return rowToTab({ ...row, is_active: 1 }) as ScriptTab;
+    return rowToScriptTab({ ...row, is_active: 1 });
   }
 
   /**
@@ -456,33 +456,37 @@ function mergeState(
 }
 
 function rowToTab(row: WorkspaceTabRow): WorkspaceTab {
-  if (row.kind === 'script') {
-    const parsed = parseState<ScriptTabState>(row.state_json);
-    const state: ScriptTabState = {
-      ...DEFAULT_SCRIPT_TAB_STATE,
-      ...parsed,
-    };
-    const tab: ScriptTab = {
-      id: row.id,
-      kind: 'script',
-      connectionId: row.connection_id,
-      dbName: row.db_name,
-      collection: row.collection,
-      position: row.position,
-      isActive: row.is_active === 1,
-      openedAt: row.opened_at,
-      pinned: row.pinned === 1,
-      state,
-    };
-    return tab;
-  }
+  return row.kind === 'script' ? rowToScriptTab(row) : rowToCollectionTab(row);
+}
+
+function rowToScriptTab(row: WorkspaceTabRow): ScriptTab {
+  const parsed = parseState<ScriptTabState>(row.state_json);
+  const state: ScriptTabState = {
+    ...DEFAULT_SCRIPT_TAB_STATE,
+    ...parsed,
+  };
+  return {
+    id: row.id,
+    kind: 'script',
+    connectionId: row.connection_id,
+    dbName: row.db_name,
+    collection: row.collection,
+    position: row.position,
+    isActive: row.is_active === 1,
+    openedAt: row.opened_at,
+    pinned: row.pinned === 1,
+    state,
+  };
+}
+
+function rowToCollectionTab(row: WorkspaceTabRow): CollectionTab {
   const parsed = parseState<CollectionTabState>(row.state_json);
   const state: CollectionTabState = {
     ...DEFAULT_COLLECTION_TAB_STATE,
     ...parsed,
     activeView: normalizeActiveView(parsed.activeView),
   };
-  const tab: CollectionTab = {
+  return {
     id: row.id,
     kind: 'collection',
     connectionId: row.connection_id,
@@ -494,7 +498,6 @@ function rowToTab(row: WorkspaceTabRow): WorkspaceTab {
     pinned: row.pinned === 1,
     state,
   };
-  return tab;
 }
 
 /**

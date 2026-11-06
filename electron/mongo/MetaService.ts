@@ -232,8 +232,9 @@ export class MetaService {
 /**
  * At most `n` documents, the branches taking turns so neither crowds the other
  * out. Each branch asks for `n` so the other's picks can't leave the sample
- * short. Both can pick one document and `$sample` can repeat one, so an `_id`
- * counts once; a document with none (a view can project it away) is kept.
+ * short. Both can pick one document and `$sample` can repeat one, so a
+ * document counts once, by its whole canonical form: a view's `$unwind` can
+ * emit several different rows under one `_id`, which must all stay.
  */
 function blendSample(recent: Document[], random: Document[], n: number): Document[] {
   const seen = new Set<string>();
@@ -242,9 +243,9 @@ function blendSample(recent: Document[], random: Document[], n: number): Documen
   for (let i = 0; i < longest && blended.length < n; i++) {
     for (const doc of [recent[i], random[i]]) {
       if (!doc || blended.length === n) continue;
-      const id = doc._id === undefined ? undefined : ejsonStringify(doc._id);
-      if (id !== undefined && seen.has(id)) continue;
-      if (id !== undefined) seen.add(id);
+      const key = ejsonStringify(doc);
+      if (seen.has(key)) continue;
+      seen.add(key);
       blended.push(doc);
     }
   }

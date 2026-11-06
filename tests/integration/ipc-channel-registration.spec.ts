@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
 import type { Envelope } from '../../shared/ipc';
 
-// app.ts / shell.ts import `dialog` / `shell` from 'electron' at module scope.
+// app.ts / docs.ts import `dialog` / `shell` from 'electron' at module scope.
 // Outside a real Electron process that resolves to a bare path string, so a
 // bare `import ... from 'electron'` blows up at load time — mock it first,
-// same fix as tests/integration/shell-open-external.spec.ts, then pull
+// same fix as tests/integration/docs-open-external.spec.ts, then pull
 // everything else in via dynamic import so it binds to the mock.
 vi.mock('electron', () => ({
   dialog: {
@@ -39,7 +39,7 @@ const { registerRecentChannels } = await import('../../electron/ipc/handlers/rec
 const { registerAuditChannels } = await import('../../electron/ipc/handlers/audit');
 const { registerDataChannels } = await import('../../electron/ipc/handlers/data');
 const { registerAggChannels } = await import('../../electron/ipc/handlers/agg');
-const { registerShellChannels } = await import('../../electron/ipc/handlers/shell');
+const { registerDocsChannels } = await import('../../electron/ipc/handlers/docs');
 const { registerMshellChannels } = await import('../../electron/ipc/handlers/mshell');
 const { registerScriptChannels } = await import('../../electron/ipc/handlers/script');
 const { registerRefsChannels } = await import('../../electron/ipc/handlers/refs');
@@ -160,7 +160,7 @@ describe('IPC channel registration — full router coverage', () => {
     registerAuditChannels(router, stubSvc<Parameters<typeof registerAuditChannels>[1]>());
     registerDataChannels(router, stubSvc<Parameters<typeof registerDataChannels>[1]>(), new Set());
     registerAggChannels(router, stubSvc<Parameters<typeof registerAggChannels>[1]>());
-    registerShellChannels(router);
+    registerDocsChannels(router);
     registerMshellChannels(router, stubSvc<Parameters<typeof registerMshellChannels>[1]>());
     registerScriptChannels(router, stubSvc<Parameters<typeof registerScriptChannels>[1]>());
     registerRefsChannels(router, stubSvc<Parameters<typeof registerRefsChannels>[1]>());

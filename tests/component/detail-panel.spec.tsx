@@ -386,3 +386,38 @@ describe('DetailPanel Monitor tab', () => {
     await waitFor(() => expect(currentOp).toHaveBeenCalled());
   });
 });
+
+describe('DetailPanel Overview connection switch', () => {
+  it('drops the previous connection\'s info before the next load resolves', async () => {
+    const info = (version: string) => ({
+      version, uptimeSeconds: 1, connectionsCurrent: 1, connectionsAvailable: 1,
+      opcountersPerSec: 0, databaseCount: 1, dataSizeBytes: 0, storageSizeBytes: 0,
+      indexCount: 0, topology: 'Single' as const, serverStatsAvailable: true,
+    });
+    let releaseSecond: (v: ReturnType<typeof info>) => void = () => { /* set below */ };
+    installAtelierMock({
+      mongo: {
+        status: async (id) => ({ id, status: 'connected', serverVersion: '7.0.0' }),
+        ping: async () => ({ roundTripMs: 1 }),
+        serverInfo: (id: string) =>
+          id === 'c1'
+            ? Promise.resolve(info('1.1.1'))
+            : new Promise((resolve) => { releaseSecond = resolve; }),
+        onStatus: () => () => { /* ok */ },
+      },
+    });
+    const ui = (conn: ConnectionSummary) => (
+      <MemoryRouter initialEntries={['/connections/c1']}>
+        <DetailPanel selected={conn} loading={false} onDelete={() => {}} onDisconnect={() => {}} />
+      </MemoryRouter>
+    );
+    const { rerender } = render(ui(baseConn));
+    expect(await screen.findByText('1.1.1')).toBeTruthy();
+
+    rerender(ui({ ...baseConn, id: 'c2', name: 'Other' }));
+    await waitFor(() => expect(screen.queryByText('1.1.1')).toBeNull());
+
+    await act(async () => releaseSecond(info('2.2.2')));
+    expect(await screen.findByText('2.2.2')).toBeTruthy();
+  });
+});

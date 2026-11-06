@@ -56,7 +56,7 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
       restart: async (): Promise<{ restarting: boolean }> => ({ restarting: true }),
       onState: () => () => {},
     },
-    shell: {
+    docs: {
       openExternal: async () => ({ opened: true as const }),
     },
     mongo: {
@@ -215,7 +215,7 @@ export function installAtelierMock(overrides: Deep<IpcApi> = {}): IpcApi {
     conn:   { ...base.conn,   ...(overrides.conn   ?? {}) } as IpcApi['conn'],
     app:    { ...base.app,    ...(overrides.app    ?? {}) } as IpcApi['app'],
     updates: { ...base.updates, ...(overrides.updates ?? {}) } as IpcApi['updates'],
-    shell:  { ...base.shell,  ...(overrides.shell  ?? {}) } as IpcApi['shell'],
+    docs:   { ...base.docs,   ...(overrides.docs   ?? {}) } as IpcApi['docs'],
     mongo:  { ...base.mongo,  ...(overrides.mongo  ?? {}) } as IpcApi['mongo'],
     meta:   { ...base.meta,   ...(overrides.meta   ?? {}) } as IpcApi['meta'],
     index:  { ...base.index,  ...(overrides.index  ?? {}) } as IpcApi['index'],
@@ -400,7 +400,7 @@ function makePermissiveStub(): IpcApi {
       restart: async (): Promise<{ restarting: boolean }> => ({ restarting: true }),
       onState: () => () => {},
     },
-    shell: {
+    docs: {
       openExternal: async () => ({ opened: true as const }),
     },
     mongo: {

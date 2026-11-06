@@ -12,7 +12,7 @@ vi.mock('electron', () => ({
 
 // Imports must come after the mock so the handler binds to the stub.
 const { createRouter } = await import('../../electron/ipc/router');
-const { registerShellChannels } = await import('../../electron/ipc/handlers/shell');
+const { registerDocsChannels } = await import('../../electron/ipc/handlers/docs');
 const { IPC_CHANNELS } = await import('../../shared/ipc');
 import { invokeEvent, testSenderCheck } from '../helpers/ipcSender';
 
@@ -37,25 +37,25 @@ function createShim() {
   };
 }
 
-describe('shell:openExternal', () => {
+describe('docs:openExternal', () => {
   let shim: ReturnType<typeof createShim>;
 
   beforeEach(() => {
     openExternalSpy.mockClear();
     shim = createShim();
     const router = createRouter(shim.ipcMain, testSenderCheck);
-    registerShellChannels(router);
+    registerDocsChannels(router);
   });
 
   it('opens a MongoDB docs URL via electron.shell.openExternal', async () => {
     const url = 'https://www.mongodb.com/docs/manual/reference/operator/aggregation/match/';
-    const env = await shim.invoke<{ opened: true }>(IPC_CHANNELS.shellOpenExternal, { url });
+    const env = await shim.invoke<{ opened: true }>(IPC_CHANNELS.docsOpenExternal, { url });
     expect(env).toEqual({ ok: true, data: { opened: true } });
     expect(openExternalSpy).toHaveBeenCalledWith(url);
   });
 
   it('opens the normalised href, not the raw string', async () => {
-    const env = await shim.invoke<{ opened: true }>(IPC_CHANNELS.shellOpenExternal, {
+    const env = await shim.invoke<{ opened: true }>(IPC_CHANNELS.docsOpenExternal, {
       url: 'https://WWW.MongoDB.com/docs/manual/',
     });
     expect(env.ok).toBe(true);
@@ -72,14 +72,14 @@ describe('shell:openExternal', () => {
     ['a different MongoDB host', 'https://mongodb.com/docs/'],
     ['a subdomain lookalike', 'https://www.mongodb.com.evil.example/docs/'],
   ])('rejects %s', async (_label, url) => {
-    const env = await shim.invoke<unknown>(IPC_CHANNELS.shellOpenExternal, { url });
+    const env = await shim.invoke<unknown>(IPC_CHANNELS.docsOpenExternal, { url });
     expect(env.ok).toBe(false);
     if (!env.ok) expect(env.error.code).toBe('VALIDATION');
     expect(openExternalSpy).not.toHaveBeenCalled();
   });
 
   it('rejects URLs outside the MongoDB docs prefix', async () => {
-    const env = await shim.invoke<unknown>(IPC_CHANNELS.shellOpenExternal, {
+    const env = await shim.invoke<unknown>(IPC_CHANNELS.docsOpenExternal, {
       url: 'https://evil.example.com/phishing',
     });
     expect(env.ok).toBe(false);
@@ -90,7 +90,7 @@ describe('shell:openExternal', () => {
   });
 
   it('rejects plain http docs URLs', async () => {
-    const env = await shim.invoke<unknown>(IPC_CHANNELS.shellOpenExternal, {
+    const env = await shim.invoke<unknown>(IPC_CHANNELS.docsOpenExternal, {
       url: 'http://www.mongodb.com/docs/manual/',
     });
     expect(env.ok).toBe(false);
@@ -99,7 +99,7 @@ describe('shell:openExternal', () => {
   });
 
   it('rejects non-string payloads via zod', async () => {
-    const env = await shim.invoke<unknown>(IPC_CHANNELS.shellOpenExternal, { url: 123 });
+    const env = await shim.invoke<unknown>(IPC_CHANNELS.docsOpenExternal, { url: 123 });
     expect(env.ok).toBe(false);
     if (!env.ok) expect(env.error.code).toBe('VALIDATION');
     expect(openExternalSpy).not.toHaveBeenCalled();

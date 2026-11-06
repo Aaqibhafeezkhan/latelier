@@ -348,24 +348,48 @@ export function DbCollectionNavigator({
     !!activeDbName && !!ownGet(cache.colls, activeDbName);
   const activeDbCollsLoading =
     !!activeDbName && !!ownGet(cache.collsLoading, activeDbName);
+  // The collections fetch does not wait for the database list: both go out
+  // together. A DB the list turns out not to have fails into `collsLoadError`.
+  // A whole-connection refresh is the exception: it empties the cache and
+  // re-fetches the list first, and its own loop decides which DBs reload, so
+  // this waits for the list (`dbsPresent` is a dependency) rather than race it.
+  const refreshInFlightRef = React.useRef<Set<string>>(new Set());
+  // A connection that is not connected is never connected by this fetch (the
+  // pool would otherwise open it), and a failed fetch is tried once: a failure
+  // leaves the collections absent, which would re-run this effect forever.
+  const earlyAttemptedRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    if (!connectionId || !activeIsExpandedRoot || !activeDbName || !isConnected) return;
+    const attemptKey = `${connectionId}\u0000${activeDbName}`;
+    if (activeDbCollsPresent) {
+      earlyAttemptedRef.current.delete(attemptKey);
+      return;
+    }
+    if (activeDbCollsLoading || earlyAttemptedRef.current.has(attemptKey)) return;
+    if (refreshInFlightRef.current.has(connectionId) && !dbsPresent) return;
+    earlyAttemptedRef.current.add(attemptKey);
+    queueMicrotask(() => {
+      void loadColls(connectionId, activeDbName);
+    });
+  }, [
+    isConnected,
+    connectionId,
+    activeIsExpandedRoot,
+    activeDbName,
+    activeDbCollsPresent,
+    activeDbCollsLoading,
+    dbsPresent,
+    loadColls,
+  ]);
+
+  // Expanded state is set only once the list shows the DB, so a DB that was
+  // dropped is never left expanded.
   React.useEffect(() => {
     if (!connectionId || !activeIsExpandedRoot || !activeDbName || !dbsPresent) return;
     queueMicrotask(() => {
       dispatch({ type: 'dbExpandedSet', connectionId, dbName: activeDbName, value: true });
-      if (!activeDbCollsPresent && !activeDbCollsLoading) {
-        void loadColls(connectionId, activeDbName);
-      }
     });
-  }, [
-    connectionId,
-    activeIsExpandedRoot,
-    activeDbName,
-    dbsPresent,
-    activeDbCollsPresent,
-    activeDbCollsLoading,
-    loadColls,
-    dispatch,
-  ]);
+  }, [connectionId, activeIsExpandedRoot, activeDbName, dbsPresent, dispatch]);
 
   const filterLower = filter.trim().toLowerCase();
   const filterActive = filterLower.length > 0;
@@ -439,7 +463,6 @@ export function DbCollectionNavigator({
   // forced: an emptied cache means the old in-flight answers are not wanted.
   // A manual refresh is skipped while one runs (keyed by connectionId, so one
   // Connection can't block another); a refresh after a change (`force`) never is.
-  const refreshInFlightRef = React.useRef<Set<string>>(new Set());
   const refreshAll = React.useCallback(
     async (id: string, opts: LoadOptions = {}) => {
       if (!opts.force && refreshInFlightRef.current.has(id)) return;
@@ -447,6 +470,11 @@ export function DbCollectionNavigator({
       try {
         const previouslyExpanded = ownGet(expandedRef.current, id) ?? {};
         dispatch({ type: 'cacheReset', id });
+        // An explicit refresh is a fresh chance for a database whose early
+        // collections fetch failed; the loop below skips the active database.
+        for (const key of earlyAttemptedRef.current) {
+          if (key.startsWith(`${id}\u0000`)) earlyAttemptedRef.current.delete(key);
+        }
         const dbs = await loadDbs(id, { force: true });
         const pending: Promise<void>[] = [];
         for (const db of dbs ?? []) {

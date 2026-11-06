@@ -19,6 +19,7 @@ import type { ConnectionInput } from '@shared/types';
 import { ejsonParse } from '../../electron/mongo/ejson';
 import { NotFoundError } from '../../electron/errors';
 import { getSharedMongoUri, uriToHostPort } from '../helpers/mongo';
+import { startMongoMemoryServer } from '../helpers/startMongoMemoryServer';
 
 /** What the server sends when a role lacks `collStats`: code 13, `Unauthorized`. */
 function unauthorized(ns: string): Error {
@@ -581,6 +582,25 @@ describe('MetaService', () => {
       expect(names.toSorted((a, b) => a.localeCompare(b))).toEqual(['a', 'b', 'c']);
     });
 
+    it('keeps distinct view rows that share an _id, as a $unwind produces', async () => {
+      await setup();
+      const db = (await pool.write(connId).client()).db(DB);
+      await db.dropCollection('unwind_view').catch(() => false);
+      await db.collection('unwind_source').deleteMany({});
+      await db.collection('unwind_source').insertOne({ items: [{ a: 1 }, { b: 2 }, { c: 3 }] });
+      await db.createCollection('unwind_view', {
+        viewOn: 'unwind_source',
+        pipeline: [{ $unwind: '$items' }],
+      });
+      const { docs } = await svc.sampleSchema({
+        connectionId: connId,
+        dbName: DB,
+        collection: 'unwind_view',
+        size: 3,
+      });
+      expect(docs).toHaveLength(3);
+    });
+
     it('keeps documents that have no _id, which a view can project away', async () => {
       await setup();
       const db = (await pool.write(connId).client()).db(DB);
@@ -615,7 +635,7 @@ describe('MetaService', () => {
     let ftConnId: string;
 
     beforeAll(async () => {
-      ftServer = await MongoMemoryServer.create({
+      ftServer = await startMongoMemoryServer({
         instance: { args: ['--setParameter', 'enableTestCommands=1'] },
       });
       const hp = uriToHostPort(ftServer.getUri());
@@ -651,9 +671,9 @@ describe('MetaService', () => {
     }, 60_000);
 
     afterAll(async () => {
-      await ftPool.disconnectAll();
-      ftTmp.cleanup();
-      await ftServer.stop();
+      await ftPool?.disconnectAll();
+      ftTmp?.cleanup();
+      await ftServer?.stop();
     });
 
     it('retries with nameOnly and still returns database names', async () => {

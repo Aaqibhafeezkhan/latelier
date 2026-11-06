@@ -35,39 +35,87 @@ interface Scope {
 
 const IDENT = /[A-Za-z0-9_$.]/;
 
+/** Query operators whose value is a list of clauses, each over the same fields. */
+const LOGICAL_OPS = new Set(['$and', '$or', '$nor']);
+/** Operators that sit between a field and its condition without naming a field. */
+const PASS_THROUGH_OPS = new Set(['$elemMatch', '$not']);
+/** Stages whose body takes no operator at any depth. */
+const NO_OPERATOR_STAGES = new Set(['$limit', '$skip', '$count', '$unwind']);
+/** Stages whose `output` fields each hold one accumulator-like operator. */
+const OUTPUT_STAGES: ReadonlyMap<string, OperatorContext> = new Map([
+  ['$bucket', 'groupValue'],
+  ['$bucketAuto', 'groupValue'],
+  ['$setWindowFields', 'windowValue'],
+]);
+
 /**
- * Map a stageOp + object-nesting depth to the operator context at the caret.
+ * The operator context of a key in a filter document, from the scope stack
+ * at the caret. The top level, and each clause of `$and`/`$or`/`$nor`, takes
+ * field names and the top-level operators. A field's object takes field
+ * operators, and so does everything nested under it: `$not`, the geo
+ * modifiers. `$elemMatch` holds either a document predicate (subfields,
+ * `$and`/`$or`/`$nor`) or a scalar comparison (`$gt`, ...), so its object
+ * and its logical clauses rank both. Inside `$expr` only expressions are
+ * valid. Anything else (a literal array, `$text`'s options, a key-less
+ * object) is unknown.
+ */
+function resolveFilterContext(scopes: Scope[]): OperatorContext | undefined {
+  let context: OperatorContext = 'filterTop';
+  for (let d = 0; d < scopes.length - 1; d++) {
+    const scope = scopes[d]!;
+    // An array's own scope carries no key; the key that owns it decided.
+    if (scope.type === 'arr') continue;
+    const key = scope.lastKey;
+    if (key === null) return undefined;
+    if (scopes[d + 1]!.type === 'arr') {
+      // Only a logical operator's clause list holds further filter documents.
+      if (context === 'matchKey' || !LOGICAL_OPS.has(key)) return undefined;
+    } else if (key === '$elemMatch') {
+      context = 'elemMatchKey';
+    } else if (context === 'filterTop') {
+      if (key === '$expr') return 'projectValue';
+      if (key.startsWith('$')) return undefined;
+      context = 'matchKey';
+    } else {
+      context = 'matchKey';
+    }
+    // ponytail: field-operator position is sticky, so a literal document
+    // compared by `$eq` ranks like a field's object; tell them apart only if
+    // that ranking ever matters.
+  }
+  return context;
+}
+
+/**
+ * Map a stageOp + the scope stack at the caret to its operator context.
  * Depth 1 means "direct child of the stage body object". $facet and unknown
- * stages return null so the full catalog shows.
+ * stages return undefined so the full catalog shows unranked.
  */
 function resolveOperatorContext(
   stageOp: string | undefined,
-  depth: number,
+  scopes: Scope[],
 ): OperatorContext | undefined {
-  // Stryker disable next-line ConditionalExpression,LogicalOperator,StringLiteral:
-  // '$facet' never matches any of the later stageOp comparisons either, and
-  // the function's final fallback is also `undefined` — so this clause is
-  // provably redundant with the rest of the function today (verified with a
-  // probe at both depth <= 1 and depth > 1). Kept for its documented intent
-  // (see the doc comment above): $facet is deliberately excluded here, not
-  // accidentally uncovered by the other branches.
-  if (!stageOp || stageOp === '$facet') return undefined;
-  if (stageOp === '$match') return 'matchKey';
+  if (!stageOp) return undefined;
+  if (stageOp === '$match') return resolveFilterContext(scopes);
+  if (NO_OPERATOR_STAGES.has(stageOp)) return 'noOperator';
+  const depth = scopes.length;
+  // `{ <field>: 1 }`, or `{ <field>: { $meta: "textScore" } }` below it.
+  if (stageOp === '$sort') return depth <= 1 ? 'noOperator' : 'sortValue';
   if (depth <= 1) {
     // Depth 1 inside $group/$project/etc. is a user-defined field name; no
     // operator context narrows to something useful yet.
     return undefined;
+  }
+  const outputContext = OUTPUT_STAGES.get(stageOp);
+  if (outputContext) {
+    // `{ output: { <field>: { <operator>: … } } }`: depth 3 and below.
+    return depth >= 3 && scopes[0]!.lastKey === 'output' ? outputContext : undefined;
   }
   if (stageOp === '$group') return 'groupValue';
   if (stageOp === '$project') return 'projectValue';
   if (stageOp === '$set' || stageOp === '$addFields') return 'addFieldsValue';
   return undefined;
 }
-
-/** Query operators whose value is a list of clauses, each over the same fields. */
-const LOGICAL_OPS = new Set(['$and', '$or', '$nor']);
-/** Operators that sit between a field and its condition without naming a field. */
-const PASS_THROUGH_OPS = new Set(['$elemMatch', '$not']);
 
 /**
  * The field a string value is compared with, as a dotted path, and the `$`
@@ -227,7 +275,7 @@ export function detectAggGrammar(
         token: inner,
         replaceStart,
         replaceEnd,
-        operatorContext: resolveOperatorContext(stageOp, scopes.length),
+        operatorContext: resolveOperatorContext(stageOp, scopes),
       };
     }
     if (prevModeAtStringStart === 'value' || prevModeAtStringStart === 'arr') {
@@ -271,7 +319,7 @@ export function detectAggGrammar(
       token,
       replaceStart: start,
       replaceEnd: caret,
-      operatorContext: resolveOperatorContext(stageOp, scopes.length),
+      operatorContext: resolveOperatorContext(stageOp, scopes),
     };
   }
 

@@ -889,6 +889,20 @@ describe('DocumentEditor — view switching', () => {
     expect((JSON.parse(call.filterJson) as Record<string, unknown>).name).toEqual({ $eq: 'widget' });
   });
 
+  it('repairs a Shell Syntax body on blur and saves it as canonical EJSON', async () => {
+    const { updateOne } = setup();
+    fireEvent.click(viewSwitch('JSON'));
+    const next = JSON.parse(jsonBox().value) as Record<string, unknown>;
+    next.name = 'gadget';
+    const shell = JSON.stringify(next).replace('"name":', 'name:');
+    fireEvent.change(jsonBox(), { target: { value: shell } });
+    fireEvent.blur(jsonBox());
+    expect(jsonBox().value).toContain('"name"');
+    fireEvent.click(save());
+    await waitFor(() => expect(updateOne).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(lastCall(updateOne).updateJson)).toEqual({ $set: { name: 'gadget' } });
+  });
+
   it('Reload refreshes the JSON view text too, not just Fields', async () => {
     const findOne = vi.fn<IpcApi['query']['findOne']>(async () => ({
       document: { ...DOC, name: 'server-name' },

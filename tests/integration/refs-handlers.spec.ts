@@ -204,21 +204,20 @@ describe('refs:* channels via router', () => {
       expect(env.data.map((r) => r.sourceCollection)).toEqual(['invoices']);
     });
 
-    // The handler narrows only when both dbName and collection are present; a
-    // lone dbName is accepted by the schema and ignored.
-    it('ignores a partial filter and returns every rule of the connection', async () => {
+    // A lone dbName or collection would otherwise fall through to the whole
+    // connection's rules, so the schema refuses it outright.
+    it.each([
+      ['dbName', { dbName: DB }],
+      ['collection', { collection: 'invoices' }],
+    ])('refuses a %s given without its pair with VALIDATION', async (_name, partial) => {
       await createRule();
-      await createRule({ sourceCollection: 'invoices' });
       const env = await shim.invoke<ReferenceRule[]>(IPC_CHANNELS.refsList, {
         connectionId: CONN,
-        dbName: DB,
+        ...partial,
       });
-      expect(env.ok).toBe(true);
-      if (!env.ok) return;
-      expect(env.data.map((r) => r.sourceCollection).sort((a, b) => a.localeCompare(b))).toEqual([
-        'invoices',
-        'orders',
-      ]);
+      expect(env.ok).toBe(false);
+      if (env.ok) return;
+      expect(env.error.code).toBe('VALIDATION');
     });
 
     it('rejects a missing connectionId with VALIDATION', async () => {

@@ -43,7 +43,6 @@ export function ResizeHandle({
   const T = themeVars;
   const [hover, setHover] = React.useState(false);
   const [active, setActive] = React.useState(false);
-  const [focused, setFocused] = React.useState(false);
 
   const horizontal = edge === 'left' || edge === 'right';
   // `resizeKeyStep`'s "increase" key is ArrowRight on the horizontal axis but
@@ -114,15 +113,12 @@ export function ResizeHandle({
     onCommit?.(next);
   };
 
-  // Mousedown above calls `preventDefault()`, which blocks the browser's
-  // default click-to-focus step — so `focused` only ever goes true from Tab,
-  // and this can safely double as the keyboard-modality indicator without a
-  // `:focus-visible` selector (inline styles can't express one).
-  const visible = hover || active || focused;
+  const visible = hover || active;
 
   return (
     <div
       role="separator"
+      className="resize-separator"
       aria-orientation={horizontal ? 'vertical' : 'horizontal'}
       aria-label={ariaLabel ?? 'Resize panel'}
       aria-valuenow={value}
@@ -132,8 +128,6 @@ export function ResizeHandle({
       onMouseDown={handleMouseDown}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
       onKeyDown={onKeyDown}
       style={{
         ...(horizontal ? { width: 4 } : { height: 4 }),

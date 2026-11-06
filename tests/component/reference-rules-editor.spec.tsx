@@ -1,5 +1,6 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { render, screen, fireEvent, waitFor } from '../helpers/render';
 import type { ReferenceRule } from '@shared/types';
 import { ReferenceRulesEditor } from '../../src/features/references/ReferenceRulesEditor';
@@ -151,5 +152,57 @@ describe('ReferenceRulesEditor — delete confirm', () => {
 
     expect(deleteSpy).toHaveBeenCalledTimes(1);
     resolveDelete();
+  });
+});
+
+describe('ReferenceRulesEditor — focus after the rule form closes', () => {
+  beforeEach(() => {
+    installAtelierMock({
+      refs: {
+        list: (async () => []) as never,
+        create: (async () => RULE) as never,
+      } as never,
+    });
+  });
+
+  afterEach(() => {
+    uninstallAtelierMock();
+  });
+
+  async function openNewRuleForm() {
+    const user = userEvent.setup();
+    render(
+      <ReferenceRulesEditor
+        connectionId="conn-1"
+        dbName="shop"
+        collection="orders"
+        onClose={() => {}}
+      />,
+    );
+    await user.click(await screen.findByRole('button', { name: 'New rule' }));
+    return user;
+  }
+
+  function expectFocusOnNewRuleButton() {
+    const newRule = screen.getByRole('button', { name: 'New rule' });
+    expect(document.activeElement).toBe(newRule);
+    expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+  }
+
+  it('returns focus to New rule after a successful save unmounts the form', async () => {
+    const user = await openNewRuleForm();
+    await user.type(screen.getByLabelText('Source field'), 'contact_id');
+    await user.type(screen.getByPlaceholderText('contacts'), 'contacts');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(screen.queryByText('Edit rule')).toBeNull());
+    await waitFor(() => expectFocusOnNewRuleButton());
+  });
+
+  it('returns focus to New rule after Cancel unmounts the form', async () => {
+    const user = await openNewRuleForm();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expectFocusOnNewRuleButton());
   });
 });

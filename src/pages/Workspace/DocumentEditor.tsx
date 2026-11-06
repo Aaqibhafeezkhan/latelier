@@ -7,7 +7,8 @@ import { SubmitButton } from '../../components/SubmitButton';
 import { api, getErrorMessage } from '../../api/atelier';
 import { logFailure } from '../../utils/rendererLog';
 import { ejsonParse, ejsonStringify, ejsonStringifyReadable, isPlainDocument } from '../../utils/ejson';
-import { refusalMessage, repairOnCommit, repairToCanonicalEjson } from '../../utils/shellSyntax';
+import { refusalMessage } from '../../utils/shellSyntax';
+import { useShellSyntaxField } from './useShellSyntaxField';
 import { classifyInsertPayload, type InsertPayloadClassification } from '../../utils/insertPayload';
 import { ScriptEditor } from '../../components/ScriptEditor';
 import { checkFieldType, inferType, type TypeWarning } from './schemaSummary';
@@ -577,7 +578,8 @@ export function DocumentEditor(props: DocumentEditorProps) {
   // (blur, switch, Save), the same asymmetry X14's read surfaces use. The
   // transform's own refusal comes first; a text that repairs but isn't
   // usable fails a second, mode-specific check instead.
-  const jsonOutcome = React.useMemo(() => repairToCanonicalEjson(jsonText), [jsonText]);
+  const jsonField = useShellSyntaxField({ value: jsonText, commit: setJsonText });
+  const jsonOutcome = jsonField.outcome;
   const jsonLiveError = React.useMemo(() => {
     if (jsonOutcome.kind === 'failed') return refusalMessage(jsonText, jsonOutcome);
     const canonical = jsonOutcome.kind === 'repaired' ? jsonOutcome.text : jsonText;
@@ -605,7 +607,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   // already carries why, recomputed from the (possibly now repaired) text on
   // the next render.
   const commitJson = (): JsonCommit | null => {
-    const result = repairOnCommit(jsonText, setJsonText);
+    const result = jsonField.commitNow();
     if (result.outcome.kind === 'failed') return null;
     if (mode === 'edit') {
       const parsed = parseJsonDraft(result.text, original._id);

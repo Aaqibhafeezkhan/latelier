@@ -5,7 +5,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron, type ElectronApplication } from 'playwright';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import type { MongoMemoryServer } from 'mongodb-memory-server';
+import { startMongoMemoryServer } from './startMongoMemoryServer';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MAIN_JS = path.resolve(here, '../..', 'dist-electron/main.js');
@@ -196,34 +197,19 @@ export interface MemoryHostPort {
  * tracked in module scope; call `stopAllMemoryServers()` from afterAll to
  * reap on suite teardown.
  *
- * Retries up to 3 times on `Port "<n>" already in use`. Even when the
- * previous server was awaited-stopped, the kernel can hold the port in
- * TIME_WAIT briefly — and `mongodb-memory-server` picks ports randomly,
- * so a retry almost always lands on a fresh one.
+ * Retries a `Port "<n>" already in use` start (see `startMongoMemoryServer`).
  */
 export async function startMemoryServer(
   opts?: ConstructorParameters<typeof MongoMemoryServer>[0],
 ): Promise<MemoryHostPort> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const server = await MongoMemoryServer.create(opts);
-      MEMORY_SERVERS.push(server);
-      const m = server.getUri().match(/mongodb:\/\/([^:/]+):(\d+)/);
-      if (!m) {
-        await server.stop().catch(() => {});
-        throw new Error('cannot parse memory mongo uri');
-      }
-      return { server, host: m[1]!, port: Number(m[2]!) };
-    } catch (err) {
-      lastErr = err;
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!/already in use/i.test(msg)) throw err;
-      // Brief backoff so the port has a chance to clear.
-      await new Promise((r) => setTimeout(r, 250));
-    }
+  const server = await startMongoMemoryServer(opts);
+  MEMORY_SERVERS.push(server);
+  const m = server.getUri().match(/mongodb:\/\/([^:/]+):(\d+)/);
+  if (!m) {
+    await server.stop().catch(() => {});
+    throw new Error('cannot parse memory mongo uri');
   }
-  throw lastErr;
+  return { server, host: m[1]!, port: Number(m[2]!) };
 }
 
 export async function stopAllMemoryServers(): Promise<void> {

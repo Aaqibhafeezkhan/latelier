@@ -13,6 +13,7 @@ import { createTempDb, type TempDb } from '../helpers/db';
 import { createIpcShim } from '../helpers/ipcShim';
 import { testSenderCheck } from '../helpers/ipcSender';
 import { getSharedMongoUri, makeConnection, makeReader, uriToHostPort } from '../helpers/mongo';
+import { startMongoMemoryServer } from '../helpers/startMongoMemoryServer';
 
 /**
  * Drives `meta:*` through the real router, zod validators, `MetaService`,
@@ -260,7 +261,7 @@ describe('meta:sampleSchema fails open when the aggregate errors', () => {
   const target = { connectionId: CONN, dbName: DB, collection: 'products' };
 
   beforeAll(async () => {
-    server = await MongoMemoryServer.create({
+    server = await startMongoMemoryServer({
       instance: { args: ['--setParameter', 'enableTestCommands=1'] },
     });
     const seed = new MongoClient(server.getUri());
@@ -279,9 +280,9 @@ describe('meta:sampleSchema fails open when the aggregate errors', () => {
   }, 60_000);
 
   afterAll(async () => {
-    await pool.disconnectAll();
-    tmp.cleanup();
-    await server.stop();
+    await pool?.disconnectAll();
+    tmp?.cleanup();
+    await server?.stop();
   });
 
   it('answers an empty sample, not an error, when the server rejects the aggregate', async () => {

@@ -154,3 +154,25 @@ describe('SchemaView — table semantics', () => {
     for (const th of headers) expect(th.getAttribute('scope')).toBe('col');
   });
 });
+
+describe('SchemaView — the header names the size the sample ran with', () => {
+  it('keeps "of 200" after the selector moves to 100', async () => {
+    installAtelierMock({ meta: { sampleSchema: async () => ({ docs: [{ a: 1 }] }) } });
+    function Harness() {
+      const [state, setState] = React.useState<SchemaTabState>({ sampleSize: 200 });
+      const onPatch = React.useCallback(
+        (patch: Partial<SchemaTabState>) => setState((s) => ({ ...s, ...patch })),
+        [],
+      );
+      return (
+        <SchemaView connectionId="c1" dbName="shop" collection="orders" state={state} onPatch={onPatch} />
+      );
+    }
+    render(<Harness />);
+    expect(await screen.findByText(/Sampled 1 of 200 documents/)).toBeTruthy();
+
+    await userEvent.selectOptions(screen.getByLabelText('Sample size'), '100');
+
+    expect(screen.getByText(/Sampled 1 of 200 documents/)).toBeTruthy();
+  });
+});

@@ -310,6 +310,85 @@ test('table roving focus: a real click does not trap focus on the row — ArrowD
   }));
 
 /**
+ * The table case above, for the tree view and for the field tree an expanded
+ * document mounts. A row that declares any `tabIndex` (even -1) takes focus
+ * on a real click, and from there the container's own-target guard swallows
+ * the next Arrow — which jsdom's `fireEvent.click` cannot show.
+ */
+async function withClickedTreeFixture(
+  connectionName: string,
+  body: (ctx: { win: Page; ws: WorkspacePage }) => Promise<void>,
+): Promise<void> {
+  const { host, port } = await startMemoryServer();
+  await withApp(async (app) => {
+    const win = await app.firstWindow();
+    await win.waitForLoadState('domcontentloaded');
+    await expectConsoleClean(win, async () => {
+      await seedActiveConnectionWithDocs(
+        win,
+        { ...baseConnInput(host, port), name: connectionName },
+        {
+          dbName: 'shop',
+          collection: 'orders',
+          docs: Array.from({ length: 5 }, (_, i) => ({ seq: i, sku: `sku-${i}` })),
+        },
+      );
+      await expectStatusDot(win, connectionName, 'connected');
+      const ws = new WorkspacePage(win);
+      await ws.openCollectionFromNavigator('shop', 'orders');
+      await ws.viewTreeButton.click();
+      await body({ win, ws });
+    });
+  });
+}
+
+test('tree roving focus: a real click does not trap focus on the row — ArrowDown still moves the tree afterward', async () =>
+  withClickedTreeFixture('Tree Click Focus', async ({ win }) => {
+    const tree = win.getByRole('tree', { name: 'Documents' });
+    await expect(win.locator('#tree-row-1')).toBeVisible({ timeout: 8000 });
+
+    await win.locator('#tree-row-1').click();
+    await expect(tree).toHaveAttribute('aria-activedescendant', 'tree-row-1');
+
+    await win.keyboard.press('ArrowDown');
+    await expect(tree).toBeFocused();
+    await expect(tree).toHaveAttribute('aria-activedescendant', 'tree-row-2');
+  }));
+
+test('field tree roving focus: a real click on a field row does not trap focus — ArrowDown still moves the field tree', async () =>
+  withClickedTreeFixture('Field Tree Click Focus', async ({ win }) => {
+    await expect(win.locator('#tree-row-0')).toBeVisible({ timeout: 8000 });
+    await win.getByRole('button', { name: 'Expand document' }).first().click();
+
+    const fieldRows = win.locator('[id^="field-row-"]');
+    await expect(fieldRows.nth(1)).toBeVisible();
+    const fieldTree = fieldRows.first().locator('xpath=ancestor::*[@role="tree"][1]');
+
+    await fieldRows.first().click();
+    await expect(fieldTree).toHaveAttribute('aria-activedescendant', (await fieldRows.first().getAttribute('id')) ?? '');
+
+    await win.keyboard.press('ArrowDown');
+    await expect(fieldTree).toBeFocused();
+    await expect(fieldTree).toHaveAttribute('aria-activedescendant', (await fieldRows.nth(1).getAttribute('id')) ?? '');
+  }));
+
+/**
+ * Every resize separator that is not a react-resizable-panels one opts in to
+ * `.resize-separator`, whose `:focus-visible` rule paints the accent colour.
+ * jsdom evaluates no stylesheet, so only a real window can show the paint.
+ */
+test('table column separator: Tab-focusing it paints the accent background', async () =>
+  withRovingFocusTable('Separator Focus Target', async ({ win, row }) => {
+    await expect(row(0)).toBeVisible({ timeout: 8000 });
+    const separator = win.getByRole('separator', { name: /^Resize .* column$/ }).first();
+    await expect(separator).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+
+    const { reached } = await tabUntilFocused(win, separator, 60);
+    expect(reached).toBe(true);
+    await expect(separator).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  }));
+
+/**
  * X19 #60 — `table-view.spec.tsx` already proves the active-row outline is
  * set as an inline style; that's the source of truth for whether the code
  * decided to paint it, but it's not proof the browser actually paints it.

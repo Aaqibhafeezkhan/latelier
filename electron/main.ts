@@ -60,7 +60,7 @@ import { registerDocChannels } from './ipc/handlers/doc.ts';
 import { registerSavedChannels } from './ipc/handlers/saved.ts';
 import { registerRecentChannels } from './ipc/handlers/recent.ts';
 import { registerAggChannels } from './ipc/handlers/agg.ts';
-import { registerShellChannels } from './ipc/handlers/shell.ts';
+import { registerDocsChannels } from './ipc/handlers/docs.ts';
 import { registerMshellChannels, makeMshellEmitter } from './ipc/handlers/mshell.ts';
 import { ShellService } from './services/ShellService.ts';
 import { registerScriptChannels } from './ipc/handlers/script.ts';
@@ -927,7 +927,7 @@ app.whenReady().then(() => {
     pickedImports,
   );
   registerAggChannels(router, aggSvc);
-  registerShellChannels(router);
+  registerDocsChannels(router);
 
   // One spawner for both: scripts and shell sessions fork the same bundled entry.
   const runnerSpawner = createUtilityProcessSpawner(path.join(MAIN_DIST, 'script-runner.cjs'));

@@ -1,12 +1,31 @@
 import type { IpcMain } from 'electron';
-import type { Envelope } from '@shared/ipc';
-import type { Logger } from '../log.ts';
+import type { ChannelIn, ChannelOut, Envelope, InvokeChannel } from '@shared/ipc';
+import { describeShape, type Logger } from '../log.ts';
 import type { SenderCheck } from './senderGuard.ts';
 import { success, toIpcError } from './envelope.ts';
 import { classifyIfDriverError } from '../mongo/errors.ts';
 
 export type Validator<I> = (payload: unknown) => I;
 export type Handler<I, O> = (input: I) => Promise<O> | O;
+
+/**
+ * A validator that also states the input it accepts. `accepts` is a no-op at
+ * runtime and exists for its type: a function, so it is checked
+ * contravariantly — a channel's wire payload must be assignable to what the
+ * validator accepts, not the reverse. It is required, so a bare function
+ * cannot stand in for a schema and skip the check.
+ */
+export type SchemaValidator<I, W> = Validator<I> & { readonly accepts: (wire: W) => void };
+
+/**
+ * A type rewritten as plain object literals, all the way down. Shared types are
+ * mostly interfaces, and an interface is never assignable to an index
+ * signature, so a deliberately loose `z.record(...)` schema would otherwise
+ * reject a wire payload it accepts at runtime.
+ */
+type Plain<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends object ? { [K in keyof T]: Plain<T[K]> } : T;
 
 /**
  * Receives every validated invocation once its envelope is settled. Decides
@@ -38,10 +57,15 @@ export interface RegisterOptions {
 }
 
 export interface Router {
-  register<I, O>(
-    channel: string,
-    validate: Validator<I>,
-    handler: Handler<I, O>,
+  /**
+   * Typed against the channel's wire signature in `ChannelSig`: the validator
+   * must accept every payload preload sends, and the handler must resolve
+   * what the renderer is promised.
+   */
+  register<C extends InvokeChannel, I>(
+    channel: C,
+    validate: SchemaValidator<I, Plain<ChannelIn<C>>>,
+    handler: Handler<I, ChannelOut<C>>,
     opts?: RegisterOptions,
   ): void;
 }
@@ -79,8 +103,8 @@ function compactField(v: unknown): unknown {
  * (connection / db / collection) and the few inputs that matter for
  * diagnosing pagination or filter issues without dumping the whole
  * envelope. Filter / sort / projection / aggregation stages get
- * stringified-and-truncated; the full payload is still available at debug
- * level via ipc.req.
+ * stringified-and-truncated. The debug ipc.req line carries only the
+ * payload's shape, never its values.
  */
 function summarizeRequest(raw: unknown): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
@@ -138,11 +162,11 @@ export function createRouter(
           return DENIED;
         }
         const t0 = Date.now();
-        // Full input goes to debug so production (info) stays terse but a
-        // developer can flip the log level for a fine-grained trace of every
-        // DB request — including the filter / sort / projection that was
-        // actually sent to MongoDB.
-        if (!quiet) log?.debug('ipc.req', channel, { input: raw });
+        // Debug records the payload's shape — top-level key names and value
+        // types, nested objects only as a key count — so a developer can
+        // trace every request without the log copying documents, filters,
+        // document ids or shell input to disk.
+        if (!quiet) log?.debug('ipc.req', channel, { shape: describeShape(raw) });
         // Set only once validation passes: a payload that fails its schema
         // never reached a server, and has no trustworthy namespace to record.
         let validated: { input: I } | null = null;

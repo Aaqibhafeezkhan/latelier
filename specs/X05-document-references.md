@@ -119,7 +119,7 @@ No channel carries plaintext secrets — nothing is added to
 
 | Channel | Input | Output |
 |---|---|---|
-| `refs:list` | `{connectionId, dbName?, collection?}` | `ReferenceRule[]` |
+| `refs:list` | `{connectionId}` or `{connectionId, dbName, collection}`; one of `dbName`/`collection` without the other is a `VALIDATION` error | `ReferenceRule[]` |
 | `refs:get` | `{id}` | `ReferenceRule` |
 | `refs:create` | `ReferenceRuleCreateInput` | `ReferenceRule` |
 | `refs:update` | `{id, patch}` | `ReferenceRule` |

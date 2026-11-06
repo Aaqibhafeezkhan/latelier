@@ -5,6 +5,7 @@ import type {
   AggInput,
   AggResult,
   AggRunAndSaveInput,
+  AggResultWire,
   AggSaveCounts,
   AggStagePreview,
   AggregationTabState,
@@ -41,6 +42,7 @@ import type {
   ExplainInput,
   FindInput,
   FindResult,
+  FindResultWire,
   ImportReport,
   IndexCreateInput,
   IndexDropInput,
@@ -70,6 +72,8 @@ import type {
   ReferenceRule,
   ReferenceRuleCreateInput,
   ReferenceRuleUpdateInput,
+  SavedAggregationPayload,
+  SavedFindPayload,
   SavedKind,
   SavedQuery,
   SavedQuerySummary,
@@ -83,6 +87,16 @@ import type {
   ValidationLevel,
   WorkspaceTab,
 } from './types.ts';
+
+/**
+ * What `saved.create` takes. The payload matches its kind, as main's schema
+ * requires, and there is no `description`: the service derives it from the
+ * payload.
+ */
+export type SavedCreateInput = Omit<SavedQuerySummary, 'id' | 'updatedAt' | 'description' | 'kind'> & (
+  | { kind: 'find'; payload: SavedFindPayload }
+  | { kind: 'aggregation'; payload: SavedAggregationPayload }
+);
 
 /** A native menu item that opens a renderer dialog. */
 export type MenuCommand = 'connections.export' | 'connections.import';
@@ -290,7 +304,7 @@ export interface IpcApi {
   };
 
   /** Refuses any URL that does not start with https://www.mongodb.com/docs/. */
-  shell: {
+  docs: {
     openExternal: (input: { url: string }) => Promise<{ opened: true }>;
   };
 
@@ -421,7 +435,7 @@ export interface IpcApi {
   saved: {
     list: (input: { connectionId?: string; dbName?: string; collection?: string; kind?: SavedKind }) => Promise<SavedQuerySummary[]>;
     get: (input: { id: string }) => Promise<SavedQuery>;
-    create: (input: Omit<SavedQuery, 'id' | 'createdAt' | 'updatedAt'>) => Promise<SavedQuery>;
+    create: (input: SavedCreateInput) => Promise<SavedQuery>;
     update: (input: { id: string; patch: Partial<Pick<SavedQuery, 'name' | 'payload'>> }) => Promise<SavedQuery>;
     delete: (input: { id: string }) => Promise<void>;
     duplicate: (input: { id: string; newName: string }) => Promise<SavedQuery>;
@@ -496,7 +510,8 @@ export interface IpcApi {
   };
 
   refs: {
-    list: (input: { connectionId: string; dbName?: string; collection?: string }) => Promise<ReferenceRule[]>;
+    /** A connection's rules, or one collection's: `dbName` and `collection` come together. */
+    list: (input: { connectionId: string } | { connectionId: string; dbName: string; collection: string }) => Promise<ReferenceRule[]>;
     get: (input: { id: string }) => Promise<ReferenceRule>;
     create: (input: ReferenceRuleCreateInput) => Promise<ReferenceRule>;
     update: (input: { id: string; patch: ReferenceRuleUpdateInput }) => Promise<ReferenceRule>;
@@ -541,7 +556,7 @@ export interface IpcApi {
       connectionId: string;
       dbName?: string;
       collection?: string;
-    }) => Promise<CollectionTab>;
+    }) => Promise<WorkspaceTab>;
     openScript: (input: {
       connectionId: string;
       initialState?: Partial<ScriptTabState>;
@@ -599,7 +614,7 @@ export const IPC_CHANNELS = {
   updatesStateEvent: 'updates:state-event',
 
   // Docs-restricted external opener -----------------------------------------
-  shellOpenExternal: 'shell:openExternal',
+  docsOpenExternal:  'docs:openExternal',
 
   // Mongo lifecycle -----------------------------------------
   mongoConnect:     'mongo:connect',
@@ -740,6 +755,89 @@ export const IPC_CHANNELS = {
   tabsSetPinned:       'tabs:setPinned',
   tabsCollectionRenamed: 'tabs:collectionRenamed',
 } as const;
+
+// Wire signatures of the invoke channels -----------------------------------
+//
+// What each channel carries across IPC: the payload preload sends (`in`) and
+// the data the handler resolves (`out`). `router.register` and preload's
+// `call` are both typed against this map, so a handler, a preload binding and
+// `IpcApi` that disagree fail to compile instead of drifting apart.
+
+/** Every channel string; push events end in `-event` and are sent, not invoked. */
+type ChannelName = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
+export type InvokeChannel = Exclude<ChannelName, `${string}-event`>;
+
+type ApiFn<N extends keyof IpcApi, M extends keyof IpcApi[N]> =
+  Extract<IpcApi[N][M], (...args: never[]) => unknown>;
+type ApiArg<N extends keyof IpcApi, M extends keyof IpcApi[N], I extends number = 0> =
+  Parameters<ApiFn<N, M>>[I];
+type ApiOut<N extends keyof IpcApi, M extends keyof IpcApi[N]> =
+  Awaited<ReturnType<ApiFn<N, M>>>;
+
+// Most bindings pass the method's single argument straight through as
+// `ns:method`, so their signature is read off `IpcApi`.
+type ApiEntry = {
+  [N in keyof IpcApi & string]: {
+    [M in keyof IpcApi[N] & string]: IpcApi[N][M] extends (...args: infer A) => infer R
+      ? { channel: `${N}:${M}`; in: A extends [] ? undefined : A[0]; out: Awaited<R> }
+      : never;
+  }[keyof IpcApi[N] & string];
+}[keyof IpcApi & string];
+type PassThroughSig = {
+  [E in ApiEntry as E['channel'] extends InvokeChannel ? E['channel'] : never]: { in: E['in']; out: E['out'] };
+};
+
+/** What preload sends for a method that takes no argument but posts `{}`. */
+type EmptyObject = Record<string, never>;
+
+// Bindings preload adapts: positional arguments wrapped into an object, `{}`
+// sent for a method that takes nothing, a channel named apart from its
+// method, or a result parsed from a wire form.
+interface AdaptedSig {
+  'conn:importOpen':         { in: EmptyObject; out: ApiOut<'conn', 'importOpen'> };
+  'app:diagnosticBundle':    { in: EmptyObject; out: ApiOut<'app', 'diagnosticBundle'> };
+  'app:flushDone':           { in: EmptyObject; out: ApiOut<'app', 'flushDone'> };
+  'updates:getState':        { in: EmptyObject; out: ApiOut<'updates', 'getState'> };
+  'updates:restart':         { in: EmptyObject; out: ApiOut<'updates', 'restart'> };
+  'recent:clearFieldValues': { in: EmptyObject; out: ApiOut<'recent', 'clearFieldValues'> };
+  'conn:get':        { in: { id: ApiArg<'conn', 'get'> }; out: ApiOut<'conn', 'get'> };
+  'conn:getUri':     { in: { id: ApiArg<'conn', 'getUri'> }; out: ApiOut<'conn', 'getUri'> };
+  'conn:update':     { in: { id: ApiArg<'conn', 'update'>; patch: ApiArg<'conn', 'update', 1> }; out: ApiOut<'conn', 'update'> };
+  'conn:delete':     { in: { id: ApiArg<'conn', 'delete'> }; out: ApiOut<'conn', 'delete'> };
+  'conn:touchUsed':  { in: { id: ApiArg<'conn', 'touchUsed'> }; out: ApiOut<'conn', 'touchUsed'> };
+  'conn:parseUri':   { in: { uri: ApiArg<'conn', 'parseUri'> }; out: ApiOut<'conn', 'parseUri'> };
+  'conn:importUris': { in: { uris: ApiArg<'conn', 'importUris'> }; out: ApiOut<'conn', 'importUris'> };
+  'mongo:connect':    { in: { id: ApiArg<'mongo', 'connect'> }; out: ApiOut<'mongo', 'connect'> };
+  'mongo:disconnect': { in: { id: ApiArg<'mongo', 'disconnect'> }; out: ApiOut<'mongo', 'disconnect'> };
+  'mongo:status':     { in: { id: ApiArg<'mongo', 'status'> }; out: ApiOut<'mongo', 'status'> };
+  'mongo:ping':       { in: { id: ApiArg<'mongo', 'ping'> }; out: ApiOut<'mongo', 'ping'> };
+  'mongo:serverInfo': { in: { id: ApiArg<'mongo', 'serverInfo'> }; out: ApiOut<'mongo', 'serverInfo'> };
+  'prefs:get':      { in: { key: string }; out: unknown };
+  'prefs:set':      { in: { key: string; value: unknown }; out: unknown };
+  'prefs:setTheme': { in: { mode: ApiArg<'prefs', 'setTheme'> }; out: ApiOut<'prefs', 'setTheme'> };
+  'secrets:set-plaintext-fallback': {
+    in: { enabled: ApiArg<'secrets', 'setPlaintextFallback'> };
+    out: ApiOut<'secrets', 'setPlaintextFallback'>;
+  };
+  'query:find':     { in: ApiArg<'query', 'find'>; out: FindResultWire };
+  'agg:run':        { in: ApiArg<'agg', 'run'>; out: AggResultWire };
+  'agg:runAndSave': { in: ApiArg<'agg', 'runAndSave'>; out: AggResultWire & AggSaveCounts };
+  'tabs:update':    { in: { id: ApiArg<'tabs', 'update'>; patch: ApiArg<'tabs', 'update', 1> }; out: ApiOut<'tabs', 'update'> };
+  'tabs:close':     { in: { id: ApiArg<'tabs', 'close'> }; out: ApiOut<'tabs', 'close'> };
+  'tabs:setActive': { in: { id: ApiArg<'tabs', 'setActive'> }; out: ApiOut<'tabs', 'setActive'> };
+  'tabs:reorder':   { in: { orderedIds: ApiArg<'tabs', 'reorder'> }; out: ApiOut<'tabs', 'reorder'> };
+}
+
+export type ChannelSig = Omit<PassThroughSig, keyof AdaptedSig> & AdaptedSig;
+export type ChannelIn<C extends InvokeChannel> = ChannelSig[C]['in'];
+export type ChannelOut<C extends InvokeChannel> = ChannelSig[C]['out'];
+
+// The map is total over the invoke channels and names nothing else: a new
+// channel with no IpcApi method, or a method renamed away from its channel,
+// stops compiling here until it gets an AdaptedSig entry.
+type Equal<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+export type ChannelSigIsTotal = Assert<Equal<keyof ChannelSig, InvokeChannel>>;
 
 /** Allowed purposes for app:pickFile — restricts the file dialog filter. */
 export type PickFilePurpose = 'tls-ca' | 'tls-client-cert' | 'ssh-key' | 'data-import';

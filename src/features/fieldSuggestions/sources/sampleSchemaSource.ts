@@ -4,6 +4,9 @@ import { summarizeSchema } from '../../../pages/Workspace/schemaSummary';
 import type { SchemaSampleEntry } from '@shared/types';
 import type { FieldSource, FieldSuggestion } from '../types';
 
+// The sample no longer carries duplicates, so ask for the 100 documents the
+// old default's recent + random concatenation could return.
+const SUGGESTION_SAMPLE_SIZE = 100;
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
 let ttlMs = DEFAULT_TTL_MS;
 
@@ -68,7 +71,12 @@ async function loadEntry(
   self.promise = (async () => {
     let entry: CacheEntry;
     try {
-      const res = await api.meta.sampleSchema({ connectionId, dbName, collection });
+      const res = await api.meta.sampleSchema({
+        connectionId,
+        dbName,
+        collection,
+        size: SUGGESTION_SAMPLE_SIZE,
+      });
       // Reuse lastRunSource's walker by faking a context with the sample
       // as recentDocs. Tag the suggestions as coming from 'sampleSchema'.
       const digested = lastRunSource({
