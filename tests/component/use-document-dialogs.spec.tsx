@@ -105,6 +105,7 @@ function mountDialogs(
         activeTabId: props.activeTabId,
         resolveRunnerTarget,
         readOnly: false,
+        isView: false,
       });
     },
     { initialProps: { activeTabId } },
@@ -695,6 +696,7 @@ describe('useDocumentDialogs', () => {
           return t ? runnerTargetOf(t) : null;
         },
         readOnly: false,
+        isView: false,
       });
       expose(d);
       const a = activeRef.current;

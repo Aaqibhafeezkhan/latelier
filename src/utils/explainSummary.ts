@@ -18,6 +18,8 @@ export interface ExplainSummary {
   stages: string[];
   usesIndex: boolean;
   collscan: boolean;
+  /** The planner read the query's filter as empty. Absent when it can't tell (a sharded plan). */
+  emptyFilter?: true;
   indexName?: string;
   keyPattern?: unknown;
   nReturned?: number;
@@ -136,6 +138,9 @@ export function summarizeExplain(plan: unknown): ExplainSummary | null {
   const idx = findIndexInfo(winningPlan);
 
   const summary: ExplainSummary = { stages, usesIndex, collscan };
+  // A record: `extractWinningPlan` found a winning plan inside it.
+  const parsedQuery = (inner.queryPlanner as Record<string, unknown>).parsedQuery;
+  if (isRecord(parsedQuery) && Object.keys(parsedQuery).length === 0) summary.emptyFilter = true;
   if (idx?.indexName !== undefined) summary.indexName = idx.indexName;
   if (idx && 'keyPattern' in idx) summary.keyPattern = idx.keyPattern;
 

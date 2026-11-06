@@ -246,6 +246,7 @@ function DocCard({
   onDelete,
   onOpenRowMenu,
 }: DocCardProps) {
+  const isView = !!useCollectionWorkspace().meta.isView;
   const json = React.useMemo(() => {
     const visible = redactHidden(doc, hiddenFields);
     try {
@@ -320,7 +321,7 @@ function DocCard({
             {isCopied ? I.check : I.copy}
           </ActionIcon>
         </Tooltip>
-        <Tooltip label="Edit" withArrow openDelay={400}>
+        <Tooltip label={isView ? 'View document' : 'Edit'} withArrow openDelay={400}>
           <ActionIcon
             variant="default"
             size="sm"
@@ -329,25 +330,27 @@ function DocCard({
               e.stopPropagation();
               onEdit(doc);
             }}
-            aria-label={`Edit document ${getDocId(doc)}`}
+            aria-label={`${isView ? 'View' : 'Edit'} document ${getDocId(doc)}`}
           >
             {I.edit}
           </ActionIcon>
         </Tooltip>
-        <Tooltip label="Delete" withArrow openDelay={400}>
-          <ActionIcon
-            variant="default"
-            size="sm"
-            c="var(--atelier-red)"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(doc);
-            }}
-            aria-label={`Delete document ${getDocId(doc)}`}
-          >
-            {I.trash}
-          </ActionIcon>
-        </Tooltip>
+        {!isView && (
+          <Tooltip label="Delete" withArrow openDelay={400}>
+            <ActionIcon
+              variant="default"
+              size="sm"
+              c="var(--atelier-red)"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(doc);
+              }}
+              aria-label={`Delete document ${getDocId(doc)}`}
+            >
+              {I.trash}
+            </ActionIcon>
+          </Tooltip>
+        )}
         <Tooltip label="More actions" withArrow openDelay={400}>
           <ActionIcon
             variant="default"
@@ -626,6 +629,7 @@ export function JsonView({ documents }: JsonViewProps) {
           onDuplicate={onDuplicateDoc}
           onDelete={onDeleteDoc}
           isReadOnly={meta.isReadOnly}
+          isView={meta.isView}
           onClose={closeDocMenu}
         />
       )}

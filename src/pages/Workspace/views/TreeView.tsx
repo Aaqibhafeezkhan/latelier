@@ -201,6 +201,7 @@ function DocRowImpl({
   rowId,
   setActiveIndex,
 }: RowComponentProps<DocRowProps>) {
+  const isView = !!useCollectionWorkspace().meta.isView;
   const doc = documents[index];
   const docId = getFullDocId(doc);
   const shortId = getDocId(doc);
@@ -318,7 +319,7 @@ function DocRowImpl({
         />
 
         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-          <Tooltip label="Edit document" withArrow openDelay={400}>
+          <Tooltip label={isView ? 'View document' : 'Edit document'} withArrow openDelay={400}>
             <ActionIcon
               variant="default"
               c="var(--atelier-text-muted)"
@@ -326,24 +327,26 @@ function DocRowImpl({
                 e.stopPropagation();
                 onEditDoc(doc);
               }}
-              aria-label={`Edit document ${shortId}`}
+              aria-label={`${isView ? 'View' : 'Edit'} document ${shortId}`}
             >
               {I.edit}
             </ActionIcon>
           </Tooltip>
-          <Tooltip label="Delete document" withArrow openDelay={400}>
-            <ActionIcon
-              variant="default"
-              c="var(--atelier-red)"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeleteDoc(doc);
-              }}
-              aria-label={`Delete document ${shortId}`}
-            >
-              {I.trash}
-            </ActionIcon>
-          </Tooltip>
+          {!isView && (
+            <Tooltip label="Delete document" withArrow openDelay={400}>
+              <ActionIcon
+                variant="default"
+                c="var(--atelier-red)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteDoc(doc);
+                }}
+                aria-label={`Delete document ${shortId}`}
+              >
+                {I.trash}
+              </ActionIcon>
+            </Tooltip>
+          )}
           <Tooltip label="More actions" withArrow openDelay={400}>
             <ActionIcon
               variant="default"
@@ -766,6 +769,7 @@ export function TreeView({
           onDuplicate={onDuplicateDoc}
           onDelete={onDeleteDoc}
           isReadOnly={meta.isReadOnly}
+          isView={meta.isView}
           onClose={closeDocMenu}
         />
       )}

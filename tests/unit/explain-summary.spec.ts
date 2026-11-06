@@ -645,6 +645,19 @@ describe('buildPlanTree', () => {
     expect(root?.children[0].nReturned).toBeUndefined();
   });
 
+  it('(13) emptyFilter is true only when the planner parsed an empty query', () => {
+    const plan = (parsedQuery: unknown) => ({
+      queryPlanner: { parsedQuery, winningPlan: { stage: 'COLLSCAN' } },
+    });
+    expect(summarizeExplain(plan({}))?.emptyFilter).toBe(true);
+    expect(summarizeExplain(plan({ a: { $eq: 1 } }))?.emptyFilter).toBeUndefined();
+    expect(summarizeExplain(plan('x'))?.emptyFilter).toBeUndefined();
+    expect(summarizeExplain({ queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } })?.emptyFilter).toBeUndefined();
+    expect(
+      summarizeExplain({ stages: [{ $cursor: plan({}) }] })?.emptyFilter,
+    ).toBe(true);
+  });
+
   it('(10) the badge summary names the index for IXSCAN and none for COLLSCAN', () => {
     expect(summarizeExplain(sortFetchIx)).toMatchObject({ usesIndex: true, collscan: false, indexName: 'a_1' });
     const scan = summarizeExplain({ queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } });

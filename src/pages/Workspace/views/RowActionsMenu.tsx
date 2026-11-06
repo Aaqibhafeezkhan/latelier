@@ -24,6 +24,8 @@ export interface RowActionsMenuProps {
    * matching every other per-row Edit/Delete in the app) but never
    * Duplicate — same gate `TableView`'s own menu already applies. */
   isReadOnly?: boolean;
+  /** A view's document can only be looked at: Edit becomes View and the writes go. */
+  isView?: boolean;
   onClose: () => void;
 }
 
@@ -45,6 +47,7 @@ export function RowActionsMenu({
   onDuplicate,
   onDelete,
   isReadOnly,
+  isView,
   onClose,
 }: RowActionsMenuProps) {
   return (
@@ -56,9 +59,9 @@ export function RowActionsMenu({
         }}
         style={itemStyle}
       >
-        Edit
+        {isView ? 'View document' : 'Edit'}
       </button>
-      {!isReadOnly && onDuplicate && (
+      {!isReadOnly && !isView && onDuplicate && (
         <button
           onClick={() => {
             onDuplicate(doc);
@@ -69,15 +72,17 @@ export function RowActionsMenu({
           Duplicate document
         </button>
       )}
-      <button
-        onClick={() => {
-          onDelete(doc);
-          onClose();
-        }}
-        style={{ ...itemStyle, color: 'var(--atelier-red)' }}
-      >
-        Delete
-      </button>
+      {!isView && (
+        <button
+          onClick={() => {
+            onDelete(doc);
+            onClose();
+          }}
+          style={{ ...itemStyle, color: 'var(--atelier-red)' }}
+        >
+          Delete
+        </button>
+      )}
     </>
   );
 }

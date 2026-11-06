@@ -142,4 +142,27 @@ describe('CollectionHeader — stats refresh', () => {
     fireEvent.click(screen.getByRole('button', { name: 'References (3)' }));
     expect(onOpenReferences).toHaveBeenCalledTimes(1);
   });
+
+  it('reads "1 index", not "1 indexes", and keeps the plural otherwise', async () => {
+    installAtelierMock({
+      meta: { collectionDetails: vi.fn(async () => details({ documentCount: 4, indexCount: 1 })) },
+    });
+    const { container, rerender } = renderHeader(0);
+    await waitFor(() => expect(container.textContent).toContain('1 index'));
+    expect(container.textContent).not.toContain('1 indexes');
+    installAtelierMock({
+      meta: { collectionDetails: vi.fn(async () => details({ documentCount: 4, indexCount: 2 })) },
+    });
+    rerender(
+      <CollectionHeader
+        connectionId="c1"
+        dbName="shop"
+        collection="orders"
+        onOpenReferences={() => {}}
+        referenceRuleCount={0}
+        refreshSignal={1}
+      />,
+    );
+    await waitFor(() => expect(container.textContent).toContain('2 indexes'));
+  });
 });

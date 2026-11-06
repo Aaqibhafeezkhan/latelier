@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, act, waitFor, within } from '../helpers/render';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { CommandPaletteRoot, usePaletteApi, _resetPaletteStoreForTests } from '../../src/commands/CommandPalette';
 import { PaletteContextProvider } from '../../src/commands/PaletteContext';
 import { GlobalCommands } from '../../src/commands/GlobalCommands';
@@ -18,6 +18,10 @@ const setPlatform = (platform: string | undefined) => {
     platform === undefined ? undefined : { platform };
 };
 
+function Where() {
+  return <output data-testid="where">{useLocation().pathname}</output>;
+}
+
 function mount() {
   installAtelierMock({});
   // Commands the Workspace registers; this spec mounts only the global ones.
@@ -32,6 +36,7 @@ function mount() {
           <CommandPaletteRoot>
             <GlobalCommands />
             <ToggleButton />
+            <Where />
           </CommandPaletteRoot>
         </SettingsProvider>
       </PaletteContextProvider>
@@ -190,7 +195,7 @@ describe('keyboard shortcuts cheat sheet', () => {
     mount();
     const dlg = await openFromPalette();
     expect(within(dlg).queryByText('Toggle dark mode')).toBeNull();
-    expect(within(dlg).queryByText('Open settings')).toBeNull();
+    expect(within(dlg).queryByText('Open audit log')).toBeNull();
   });
 });
 
@@ -219,5 +224,57 @@ describe('shortcut hints in tooltips', () => {
     };
     expect(await open('win32')).toBe('Search actions (Ctrl+K)');
     expect(await open('darwin')).toBe('Search actions (⌘K)');
+  });
+
+});
+
+describe('⌘N and ⌘,', () => {
+  it('lists ⌘N and ⌘, and binds them', async () => {
+    setPlatform('darwin');
+    mount();
+    const dlg = await openFromPalette();
+    expect(within(within(dlg).getByText('New connection').closest('li')!).getByText('⌘N')).toBeTruthy();
+    expect(within(within(dlg).getByText('Open settings').closest('li')!).getByText('⌘,')).toBeTruthy();
+    fireEvent.keyDown(dlg, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).toBeNull());
+
+    fireEvent.keyDown(document.body, { key: 'n', metaKey: true });
+    expect(screen.getByTestId('where').textContent).toBe('/connections/new');
+
+    fireEvent.keyDown(document.body, { key: ',', metaKey: true });
+    expect(await screen.findByRole('dialog', { name: /settings/i })).toBeTruthy();
+  });
+
+  it('keeps a bare Ctrl+N and Ctrl+, in a text field, but not ⌘', async () => {
+    setPlatform('darwin');
+    mount();
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    try {
+      fireEvent.keyDown(input, { key: 'n', ctrlKey: true });
+      fireEvent.keyDown(input, { key: ',', ctrlKey: true });
+      expect(screen.getByTestId('where').textContent).toBe('/workspace');
+      expect(screen.queryByRole('dialog', { name: /settings/i })).toBeNull();
+
+      fireEvent.keyDown(input, { key: 'n', metaKey: true });
+      expect(screen.getByTestId('where').textContent).toBe('/connections/new');
+    } finally {
+      input.remove();
+    }
+  });
+
+  it('opens a new connection on Ctrl+N outside a field', () => {
+    setPlatform('darwin');
+    mount();
+    fireEvent.keyDown(document.body, { key: 'n', ctrlKey: true });
+    expect(screen.getByTestId('where').textContent).toBe('/connections/new');
+  });
+
+  it('leaves ⌘N and ⌘, to an open dialog', async () => {
+    setPlatform('darwin');
+    mount();
+    const dlg = await openFromPalette();
+    fireEvent.keyDown(within(dlg).getByText('New connection'), { key: 'n', metaKey: true });
+    expect(screen.getByTestId('where').textContent).toBe('/workspace');
   });
 });

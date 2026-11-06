@@ -103,6 +103,12 @@ export interface CollectionWorkspaceMeta {
    * short-circuit destructive UI without per-leaf prop wiring.
    */
   isReadOnly?: boolean;
+  /**
+   * The collection is a MongoDB view, which has no writes. Unlike `isReadOnly`
+   * the query still runs; only Insert, Edit, Duplicate, Delete, Update, Import
+   * and inline edits go away.
+   */
+  isView?: boolean;
 }
 
 /**

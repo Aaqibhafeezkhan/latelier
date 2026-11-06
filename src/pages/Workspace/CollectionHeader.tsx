@@ -112,7 +112,7 @@ export function CollectionHeader({
             {indexCount !== null && (
               <>
                 <strong style={{ fontWeight: 500, color: T.text }}>{indexCount}</strong>
-                {' indexes'}
+                {indexCount === 1 ? ' index' : ' indexes'}
               </>
             )}
           </span>

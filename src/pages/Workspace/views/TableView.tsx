@@ -263,14 +263,14 @@ function TableCell({
   // the CSS route would also mean introducing a styling mechanism for one cell.
   const affordanceVisible = hovered || expandOpen || focused;
 
-  const canInlineEdit = editable && !meta.isReadOnly && typeof actions.updateField === 'function';
+  const canInlineEdit = editable && !meta.isReadOnly && !meta.isView && typeof actions.updateField === 'function';
   // W18 §8 — a real field this cell can't inline-edit (Date, ObjectId,
   // Object, Array, …) still gets an edit affordance; it opens the Document
   // Editor on the field instead. `_id` keeps neither: it already has the
   // row-level Edit action, and highlighting it as "editable here" would be
   // misleading.
   const canOpenEditorHere =
-    !editable && isFieldColumn && fieldPath !== '_id' && draggable && !meta.isReadOnly;
+    !editable && isFieldColumn && fieldPath !== '_id' && draggable && !meta.isReadOnly && !meta.isView;
 
   const startEdit = () => {
     if (isNumericKind) {
@@ -722,6 +722,7 @@ function TableRowImpl({
   onOpenRowMenu,
   actionsOffset,
 }: RowComponentProps<TableRowProps>) {
+  const isView = !!useCollectionWorkspace().meta.isView;
   const doc = documents[index];
   const isSelected = indices.has(index);
   const isActive = index === activeIndex;
@@ -932,7 +933,7 @@ function TableRowImpl({
           onFocus={() => setActionsFocused(true)}
           onBlur={() => setActionsFocused(false)}
         >
-          <Tooltip label="Edit document" withArrow openDelay={400}>
+          <Tooltip label={isView ? 'View document' : 'Edit document'} withArrow openDelay={400}>
             <ActionIcon
               variant="default"
               size="sm"
@@ -941,25 +942,27 @@ function TableRowImpl({
                 e.stopPropagation();
                 onEditDoc(doc);
               }}
-              aria-label={`Edit document ${getDocId(doc)}`}
+              aria-label={`${isView ? 'View' : 'Edit'} document ${getDocId(doc)}`}
             >
               {I.edit}
             </ActionIcon>
           </Tooltip>
-          <Tooltip label="Delete document" withArrow openDelay={400}>
-            <ActionIcon
-              variant="default"
-              size="sm"
-              c="var(--atelier-red)"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeleteDoc(doc);
-              }}
-              aria-label={`Delete document ${getDocId(doc)}`}
-            >
-              {I.trash}
-            </ActionIcon>
-          </Tooltip>
+          {!isView && (
+            <Tooltip label="Delete document" withArrow openDelay={400}>
+              <ActionIcon
+                variant="default"
+                size="sm"
+                c="var(--atelier-red)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteDoc(doc);
+                }}
+                aria-label={`Delete document ${getDocId(doc)}`}
+              >
+                {I.trash}
+              </ActionIcon>
+            </Tooltip>
+          )}
           <Tooltip label="More actions" withArrow openDelay={400}>
             <ActionIcon
               variant="default"
@@ -1850,6 +1853,7 @@ export function TableView({
             onDuplicate={onDuplicateDoc}
             onDelete={onDeleteDoc}
             isReadOnly={meta.isReadOnly}
+            isView={meta.isView}
             onClose={closeContextMenu}
           />
         </div>

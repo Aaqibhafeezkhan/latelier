@@ -71,6 +71,27 @@ describe('ResultBar plan badge', () => {
     );
   });
 
+  // The plan says what filter ran; the box may have been edited since.
+  const emptyFilterScan = { queryPlanner: { parsedQuery: {}, winningPlan: { stage: 'COLLSCAN' } } };
+  const filteredScan = {
+    queryPlanner: { parsedQuery: { status: { $eq: 'a' } }, winningPlan: { stage: 'COLLSCAN' } },
+  };
+
+  it('does not flag a scan of an empty filter', () => {
+    renderBar(emptyFilterScan, '{}');
+    expect(screen.queryByTestId('plan-badge')).toBeNull();
+  });
+
+  it('does not flag an empty-filter scan because the box now holds a filter', () => {
+    renderBar(emptyFilterScan, '{"status":"a"}');
+    expect(screen.queryByTestId('plan-badge')).toBeNull();
+  });
+
+  it('still says "no index" for a filtered scan when the box now holds {}', () => {
+    renderBar(filteredScan, '{}');
+    expect(screen.getByRole('button', { name: 'Query plan: no index' })).toBeTruthy();
+  });
+
   it('shows no badge without a plan or with an unrecognized one', () => {
     renderBar(undefined);
     expect(screen.queryByTestId('plan-badge')).toBeNull();

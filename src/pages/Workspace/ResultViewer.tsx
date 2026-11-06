@@ -202,7 +202,7 @@ function EmptyState({ onClearFilter, onImport }: { onClearFilter: () => void; on
       ) : isEmptyCollection ? (
         <>
           <span>This collection is empty</span>
-          {!meta.isReadOnly && (
+          {!meta.isReadOnly && !meta.isView && (
             <Button variant="subtle" size="compact-xs" fz={12} td="underline" c={themeVars.accent} onClick={onImport}>
               Import documents…
             </Button>

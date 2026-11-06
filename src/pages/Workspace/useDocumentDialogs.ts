@@ -32,8 +32,12 @@ export function useDocumentDialogs(deps: {
   resolveRunnerTarget: (tabId: string) => RunnerTarget | null;
   /** The Focused Tab's Connection is read-only, so the Document Editor never opens. */
   readOnly: boolean;
+  /** The Focused Tab is a view: it has no writes, and Edit opens the read-only dialog. */
+  isView: boolean;
 }): {
   editing: { doc: unknown; target: DocTarget; focusPath?: string } | null;
+  viewing: { doc: unknown; target: DocTarget } | null;
+  closeViewer: () => void;
   deleteDoc: unknown | null;
   deleteAllOpen: boolean;
   updateAllOpen: boolean;
@@ -65,18 +69,32 @@ export function useDocumentDialogs(deps: {
    * page). */
   writeVersion: number;
 } {
-  const { activeCollectionRef, activeTabId, resolveRunnerTarget, readOnly } = deps;
+  const { activeCollectionRef, activeTabId, resolveRunnerTarget, readOnly, isView } = deps;
   const { run } = deps.queryRunner;
 
   // Target travels inside editing/inserting with the payload, captured at
   // open time, so a tab switch mid-edit can't retarget the eventual write.
   const [editing, setEditing] = React.useState<{ doc: unknown; target: DocTarget; focusPath?: string } | null>(null);
-  const [deleteDoc, setDeleteDoc] = React.useState<unknown | null>(null);
+  const [viewing, setViewing] = React.useState<{ doc: unknown; target: DocTarget } | null>(null);
+  const [deleteDoc, setDeleteDocState] = React.useState<unknown | null>(null);
+  // A view has no deletes; the guard sits here so no caller has to remember it.
+  const setDeleteDoc = React.useCallback<React.Dispatch<React.SetStateAction<unknown | null>>>(
+    (v) => {
+      if (!isView) setDeleteDocState(v);
+    },
+    [isView],
+  );
   const [deleteAllOpen, setDeleteAllOpen] = React.useState(false);
   const [updateAllOpen, setUpdateAllOpen] = React.useState(false);
   // Holds the selected documents, not just ids, so the $in filter can be
   // recomputed from the canonical revived-BSON _id values.
-  const [deleteSelected, setDeleteSelected] = React.useState<unknown[] | null>(null);
+  const [deleteSelected, setDeleteSelectedState] = React.useState<unknown[] | null>(null);
+  const setDeleteSelected = React.useCallback<React.Dispatch<React.SetStateAction<unknown[] | null>>>(
+    (v) => {
+      if (!isView) setDeleteSelectedState(v);
+    },
+    [isView],
+  );
   // `null` duplicateDocJson means opened via plain Insert; the Document
   // Editor's insert mode falls back to '{}'.
   const [inserting, setInserting] = React.useState<{
@@ -89,6 +107,10 @@ export function useDocumentDialogs(deps: {
     (doc: unknown, focusPath?: string) => {
       const a = activeCollectionRef.current;
       if (!a) return;
+      if (isView) {
+        setViewing({ doc, target: targetOf(a) });
+        return;
+      }
       if (readOnly) {
         notify.info('This connection is read-only, so its documents cannot be edited.', {
           title: 'Read-only connection',
@@ -97,16 +119,16 @@ export function useDocumentDialogs(deps: {
       }
       setEditing({ doc, target: targetOf(a), focusPath });
     },
-    [activeCollectionRef, readOnly],
+    [activeCollectionRef, readOnly, isView],
   );
   const openInsertModal = React.useCallback(() => {
     const a = activeCollectionRef.current;
-    if (!a) return;
+    if (!a || isView) return;
     setInserting({ target: targetOf(a), duplicateDocJson: null });
-  }, [activeCollectionRef]);
+  }, [activeCollectionRef, isView]);
   const openDeleteAllModal = React.useCallback(() => {
     const a = activeCollectionRef.current;
-    if (!a) return;
+    if (!a || isView) return;
     // The Run gate's own rule and message (`currentFilterJson` is null
     // exactly when this is not), so the refusal names what to fix.
     const problem = filterProblem(a.state.queryRaw);
@@ -115,10 +137,10 @@ export function useDocumentDialogs(deps: {
       return;
     }
     setDeleteAllOpen(true);
-  }, [activeCollectionRef]);
+  }, [activeCollectionRef, isView]);
   const openUpdateAllModal = React.useCallback(() => {
     const a = activeCollectionRef.current;
-    if (!a) return;
+    if (!a || isView) return;
     // The Run gate's own rule and message (`currentFilterJson` is null
     // exactly when this is not), so the refusal names what to fix.
     const problem = filterProblem(a.state.queryRaw);
@@ -127,14 +149,14 @@ export function useDocumentDialogs(deps: {
       return;
     }
     setUpdateAllOpen(true);
-  }, [activeCollectionRef]);
+  }, [activeCollectionRef, isView]);
   const openDuplicate = React.useCallback(
     (doc: unknown) => {
       const a = activeCollectionRef.current;
-      if (!a) return;
+      if (!a || isView) return;
       setInserting({ target: targetOf(a), duplicateDocJson: stripIdForDuplicate(doc) });
     },
-    [activeCollectionRef],
+    [activeCollectionRef, isView],
   );
 
   // A bare run() would refresh the Focused Tab, not the tab that was written
@@ -170,6 +192,7 @@ export function useDocumentDialogs(deps: {
   }, [inserting, refreshSource]);
 
   const closeEditor = React.useCallback(() => setEditing(null), []);
+  const closeViewer = React.useCallback(() => setViewing(null), []);
   const handleDocSaved = React.useCallback((auditId?: string) => {
     const target = editing?.target;
     setEditing(null);
@@ -179,9 +202,9 @@ export function useDocumentDialogs(deps: {
   }, [editing, refreshSource]);
 
   const closeDeleteDialogs = React.useCallback(() => {
-    setDeleteDoc(null);
+    setDeleteDocState(null);
     setDeleteAllOpen(false);
-    setDeleteSelected(null);
+    setDeleteSelectedState(null);
   }, []);
   // Not routed through refreshSource: DeleteConfirm and UpdateConfirm drop the
   // field-suggestion sample themselves, from their own props, before calling
@@ -241,6 +264,8 @@ export function useDocumentDialogs(deps: {
 
   return {
     editing,
+    viewing,
+    closeViewer,
     deleteDoc,
     deleteAllOpen,
     updateAllOpen,

@@ -262,4 +262,15 @@ describe('ResultBar - the limit that caps the results is visible beside the coun
     renderBar({ limit: 'abc', docCount: 10 });
     expect(chip()).toBeNull();
   });
+
+  it('names an empty page instead of showing the range "1–0"', () => {
+    renderBar({ page: 0, pageSize: 50, totalCount: 0, docCount: 0, durationMs: 5 });
+    expect(screen.queryByText(/showing/)).toBeNull();
+    expect(screen.getByText('nothing to show')).toBeTruthy();
+  });
+
+  it('still shows the range for a page that has documents', () => {
+    renderBar({ page: 0, pageSize: 50, totalCount: 3, docCount: 3, durationMs: 5 });
+    expect(screen.getByText('showing 1–3')).toBeTruthy();
+  });
 });

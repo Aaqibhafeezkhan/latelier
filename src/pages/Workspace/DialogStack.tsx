@@ -15,6 +15,7 @@ import { ConnectionExpandedTable } from '../../features/connections/ConnectionEx
 import { FeatureHint } from '../../hints/FeatureHint';
 import type { UseFeatureHintResult } from '../../hints/useFeatureHint';
 import { SaveModal } from './SaveModal';
+import { ViewDocumentDialog } from './ViewDocumentDialog';
 import { DocumentEditor } from './DocumentEditor';
 import { DeleteConfirm } from './DeleteConfirm';
 import { UpdateConfirm } from './UpdateConfirm';
@@ -222,6 +223,8 @@ export interface DialogStackProps {
   connections: ConnectionSummary[];
   activeCollection: CollectionTab | null;
   focusedConnectionReadOnly: boolean;
+  /** Opens the named collection in a tab, in the connection and database given (a view's source). */
+  openCollectionTab: (target: { connectionId: string; dbName: string; collection: string }) => void;
   referenceRules: UseReferenceRulesResult;
   refDrawer: Pick<
     ReferenceDrawerState,
@@ -248,6 +251,7 @@ export function DialogStack({
   connections,
   activeCollection,
   focusedConnectionReadOnly,
+  openCollectionTab,
   referenceRules,
   refDrawer,
   queryBarSaveOpen,
@@ -263,6 +267,8 @@ export function DialogStack({
   const { refHover, refEditorOpen, setRefEditorOpen } = refDrawer;
   const {
     editing,
+    viewing,
+    closeViewer,
     deleteDoc,
     deleteAllOpen,
     updateAllOpen,
@@ -360,6 +366,17 @@ export function DialogStack({
           onClose={closeInsertDrawer}
           onInserted={handleInserted}
           onPartialInsert={handlePartialInsert}
+        />
+      )}
+
+      {viewing && (
+        <ViewDocumentDialog
+          connectionId={viewing.target.connectionId}
+          dbName={viewing.target.dbName}
+          collection={viewing.target.collection}
+          doc={viewing.doc}
+          onClose={closeViewer}
+          onOpenSource={openCollectionTab}
         />
       )}
 

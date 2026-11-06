@@ -50,13 +50,16 @@ test('COLLSCAN find -> Explain -> Create an index -> Structure lists it -> re-ex
       await ws.openCollectionFromNavigator('shop', 'orders');
       await expect(win.getByText('banana-002')).toBeVisible({ timeout: 8000 });
 
-      // The first run is `{}` over a collection with no index but `_id`: the
-      // plan badge in the result bar already says so.
+      // The first run is `{}`: a scan is the only plan an empty filter has, so
+      // the result bar does not flag it.
       const planBadge = win.getByTestId('plan-badge');
-      await expect(planBadge).toHaveText('no index', { timeout: 8000 });
+      await expect(win.getByText(/\bresults\b/).first()).toBeVisible({ timeout: 8000 });
+      await expect(planBadge).toHaveCount(0);
 
-      // A filter with no supporting index — explains to COLLSCAN.
+      // A filter with no supporting index — explains to COLLSCAN, and the badge says so.
       await ws.queryBarTextarea.fill('{"status":"paid"}');
+      await ws.queryBarRunButton.click();
+      await expect(planBadge).toHaveText('no index', { timeout: 8000 });
       await ws.queryBarRunOptionsButton.click();
       await win.getByRole('menuitem', { name: 'queryPlanner' }).click();
 

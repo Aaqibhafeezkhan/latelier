@@ -24,21 +24,28 @@ export function GlobalCommands() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
 
-  // ⌘/ (Ctrl+/ elsewhere). A text field or editor keeps it: CodeMirror binds it
-  // to toggle-comment, and typing a slash must never open a dialog.
+  // ⌘/ (Ctrl+/ elsewhere), ⌘N and ⌘, — the shortcuts these commands list.
+  // A text field keeps ⌘/: CodeMirror binds it to toggle-comment, and typing a
+  // slash must never open a dialog. In a field only ⌘ reaches ⌘N and ⌘,: a bare
+  // Ctrl+N is macOS's next-line, CodeMirror's too. A dialog that is already open
+  // keeps the keyboard from all three, like ⌘B and ⌘E.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key !== '/' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== '/' && key !== 'n' && key !== ',') return;
       const origin = e.target instanceof HTMLElement ? e.target : null;
-      // Like ⌘B and ⌘E: a dialog that is already open keeps the keyboard.
       if (origin?.closest('[role="dialog"], [role="alertdialog"]')) return;
-      if (origin?.closest('input, textarea, select, [contenteditable]')) return;
+      const inField = origin?.closest('input, textarea, select, [contenteditable]');
+      if (inField && (key === '/' || !e.metaKey)) return;
       e.preventDefault();
-      setShortcutsOpen(true);
+      if (key === '/') setShortcutsOpen(true);
+      else if (key === 'n') void navigate('/connections/new');
+      else settings.open();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [navigate, settings]);
 
   useRegisterCommands(
     [
@@ -54,6 +61,7 @@ export function GlobalCommands() {
         title: 'Open settings',
         group: 'general',
         keywords: ['preferences', 'config'],
+        shortcut: '⌘,',
         perform: () => settings.open(),
       },
       {

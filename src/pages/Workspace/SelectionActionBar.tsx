@@ -102,18 +102,20 @@ export function SelectionActionBar({ onDeleteSelected }: SelectionActionBarProps
           >
             {copied ? 'Copied' : 'Copy'}
           </Button>
-          <Button
-            data-testid="selection-bar-delete"
-            size="compact-xs"
-            variant="subtle"
-            color="red"
-            leftSection={I.trash}
-            onClick={handleDelete}
-            disabled={!deleteFilterJson}
-            title={deleteFilterJson ? undefined : 'Selected documents have no _id to delete by'}
-          >
-            Delete
-          </Button>
+          {!meta.isView && (
+            <Button
+              data-testid="selection-bar-delete"
+              size="compact-xs"
+              variant="subtle"
+              color="red"
+              leftSection={I.trash}
+              onClick={handleDelete}
+              disabled={!deleteFilterJson}
+              title={deleteFilterJson ? undefined : 'Selected documents have no _id to delete by'}
+            >
+              Delete
+            </Button>
+          )}
           <ActionIcon
             data-testid="selection-bar-clear"
             variant="subtle"

@@ -48,6 +48,8 @@ export function ResultBar() {
   const isLoading = meta.isLoading;
   const view = state.view;
   const isReadOnly = !!meta.isReadOnly;
+  // A view runs queries but takes no writes.
+  const isView = !!meta.isView;
   const [exportOpen, setExportOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
   const [planOpen, setPlanOpen] = React.useState(false);
@@ -73,10 +75,13 @@ export function ResultBar() {
 
   // #160 — what the last run's query did: the index it used, or a collection
   // scan. Stale on the same rule as the count: the plan describes the query
-  // that ran, not the text now in the box.
+  // that ran, not the text now in the box. An empty filter matches every
+  // document, so a scan is the only plan it has, not a missing index.
   const planSummary = summarizeExplain(lastRun?.plan);
   const planLabel = planSummary?.collscan
-    ? 'no index'
+    ? planSummary.emptyFilter
+      ? null
+      : 'no index'
     : planSummary?.usesIndex
       ? (planSummary.indexName ?? 'index')
       : null;
@@ -262,8 +267,9 @@ export function ResultBar() {
             {start !== null && end !== null && (
               <>
                 <span>·</span>
+                {/* An empty page has no range: "1–0" reads as a bug. */}
                 <span>
-                  showing {start.toLocaleString()}–{end.toLocaleString()}
+                  {docCount === 0 ? 'nothing to show' : `showing ${start.toLocaleString()}–${end.toLocaleString()}`}
                 </span>
               </>
             )}
@@ -332,7 +338,7 @@ export function ResultBar() {
           selectors looking for `/Insert document/` still match. Hidden for
           read-only consumers (ScriptTab's snapshot provider), same as the
           Documents menu below. */}
-      {!isReadOnly && (
+      {!isReadOnly && !isView && (
         <Tooltip label="Insert a new document into this collection" withArrow>
           <Button
             variant="filled"
@@ -367,12 +373,14 @@ export function ResultBar() {
             </Button>
           </Menu.Target>
           <Menu.Dropdown>
-            <Menu.Item
-              leftSection={I.edit}
-              onClick={() => actions.openUpdateAll()}
-            >
-              Update all matching…
-            </Menu.Item>
+            {!isView && (
+              <Menu.Item
+                leftSection={I.edit}
+                onClick={() => actions.openUpdateAll()}
+              >
+                Update all matching…
+              </Menu.Item>
+            )}
             <Menu.Item
               leftSection={I.download}
               disabled={docCount === null || docCount === 0}
@@ -380,19 +388,23 @@ export function ResultBar() {
             >
               Export…
             </Menu.Item>
-            <Menu.Item
-              leftSection={I.upload}
-              onClick={() => setImportOpen(true)}
-            >
-              Import documents…
-            </Menu.Item>
-            <Menu.Item
-              color="red"
-              leftSection={I.trash}
-              onClick={() => actions.openDeleteAll()}
-            >
-              Delete all matching…
-            </Menu.Item>
+            {!isView && (
+              <Menu.Item
+                leftSection={I.upload}
+                onClick={() => setImportOpen(true)}
+              >
+                Import documents…
+              </Menu.Item>
+            )}
+            {!isView && (
+              <Menu.Item
+                color="red"
+                leftSection={I.trash}
+                onClick={() => actions.openDeleteAll()}
+              >
+                Delete all matching…
+              </Menu.Item>
+            )}
           </Menu.Dropdown>
         </Menu>
       )}
