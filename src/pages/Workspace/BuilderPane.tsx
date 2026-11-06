@@ -11,6 +11,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { confirmDestructive } from '../../utils/confirm';
+import { filledFills } from '../../theme/mantineTheme';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
 import { copyToClipboard } from '../../utils/clipboard';
@@ -228,7 +229,7 @@ function LogicPicker({
               fontWeight: 700,
               letterSpacing: 0.3,
               cursor: disabled ? 'default' : 'pointer',
-              background: active ? T.accent : 'transparent',
+              background: active ? filledFills.violet.bg : 'transparent',
               color: active ? T.accentText : T.textMuted,
               border: 'none',
               borderRight: i < 2 ? `1px solid ${T.border}` : 'none',

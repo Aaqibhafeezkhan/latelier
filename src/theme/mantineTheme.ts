@@ -1,7 +1,9 @@
 import {
   CloseButton,
   createTheme,
+  defaultVariantColorsResolver,
   Tooltip,
+  type VariantColorsResolver,
   type CloseButtonProps,
   type MantineColorsTuple,
   type MantineThemeOverride,
@@ -24,11 +26,31 @@ const violet: MantineColorsTuple = [
   '#251a55',
 ];
 
+// White text on a filled control needs 4.5:1. `primaryShade` is one number for
+// every colour and also drives outline borders and `c="red"` text, so moving it
+// would shift variants that are fine today. Only the filled background and its
+// hover are overridden, and identically in both schemes. Shades come from the
+// palette except red's hover, which is darker than any Mantine red.
+// Components that hand-roll a filled control (BuilderPane's mode switch) read
+// the same values so they cannot drift from the buttons.
+export const filledFills: Record<string, { bg: string; hover: string }> = {
+  violet: { bg: violet[5], hover: violet[6] },
+  red: { bg: '#c92a2a', hover: '#a61e1e' },
+};
+
+const variantColorResolver: VariantColorsResolver = (input) => {
+  const base = defaultVariantColorsResolver(input);
+  const fill = filledFills[input.color ?? ''];
+  if (input.variant !== 'filled' || !fill) return base;
+  return { ...base, background: fill.bg, hover: fill.hover };
+};
+
 export const mantineTheme: MantineThemeOverride = createTheme({
   primaryColor: 'violet',
   respectReducedMotion: true,
   primaryShade: { light: 4, dark: 4 },
   colors: { violet },
+  variantColorResolver,
   defaultRadius: 'md',
   fontFamily: 'Inter, system-ui, sans-serif',
   fontFamilyMonospace: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
