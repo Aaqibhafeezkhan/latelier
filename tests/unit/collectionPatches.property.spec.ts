@@ -123,6 +123,7 @@ const schemaFieldsArb = fc.record(
   {
     sampleSize: fc.nat(),
     sampledCount: fc.nat(),
+    sampledOf: fc.nat(),
     ranAt: fc.string({ maxLength: 10 }),
     durationMs: fc.nat(),
     errorMessage: fc.string({ maxLength: 10 }),

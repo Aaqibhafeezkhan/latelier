@@ -128,19 +128,19 @@ one line in `DEFAULT_FIELD_SOURCES` or `DEFAULT_VALUE_SOURCES`.
   connectionId: string;
   dbName: string;
   collection: string;
-  size?: number;   // integer 1..200, default 50
+  size?: number;   // integer 1..200, default 100; the most `docs` will hold
 }
 
 // Output
 {
-  docs: unknown[];   // sampled documents, canonical EJSON
+  docs: unknown[];   // up to `size` distinct sampled documents, canonical EJSON
 }
 ```
 
 - Main runs `db.coll.aggregate([{ $facet: { recent: [{$sort:{_id:-1}},{$limit: size}], random: [{$sample:{size}}] } }])`
   under a fixed 3 s server-side budget (`STATS_TIMEOUT_MS`; the caller
-  cannot set it) and returns both branches concatenated, so a document
-  both branches pick appears twice.
+  cannot set it) and returns the branches blended, taking turns, up to
+  `size` documents. A document both branches pick counts once, by `_id`.
 - Main does not derive paths. The renderer's `sampleSchemaSource` walks
   `docs` once with `lastRunSource` (one row per dotted path with
   `DisplayType` + frequency) and digests the same sample with

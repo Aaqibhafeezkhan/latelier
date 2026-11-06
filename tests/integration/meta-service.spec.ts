@@ -536,17 +536,69 @@ describe('MetaService', () => {
     }
   });
 
-  it('sampleSchema returns merged recent + random documents', async () => {
-    await setup();
-    const { docs } = await svc.sampleSchema({
-      connectionId: connId,
-      dbName: 'shopdb',
-      collection: 'products',
-      size: 10,
+  describe('sampleSchema honours the size it was asked for', () => {
+    const DB = 'meta_sample_size';
+
+    async function sampleOfMany(size: number) {
+      await setup();
+      const coll = (await pool.write(connId).client()).db(DB).collection('many');
+      await coll.deleteMany({});
+      await coll.insertMany(Array.from({ length: 150 }, (_, idx) => ({ idx })));
+      const { docs } = await svc.sampleSchema({
+        connectionId: connId,
+        dbName: DB,
+        collection: 'many',
+        size,
+      });
+      return (docs as Array<{ idx: { $numberInt: string } }>).map((d) =>
+        Number.parseInt(d.idx.$numberInt, 10),
+      );
+    }
+
+    it.each([1, 10, 100])('returns exactly %i distinct documents from a larger collection', async (size) => {
+      const indexes = await sampleOfMany(size);
+      expect(indexes).toHaveLength(size);
+      expect(new Set(indexes).size).toBe(size);
     });
-    // 3 source docs, 2 facet branches → up to 6 results (with duplicates).
-    expect(docs.length).toBeGreaterThan(0);
-    expect(docs.length).toBeLessThanOrEqual(6);
+
+    it('blends the newest documents with a random draw from the rest', async () => {
+      const indexes = await sampleOfMany(10);
+      expect(indexes).toContain(149);
+      // A recent-only sample would stop at the newest ten.
+      expect(Math.min(...indexes)).toBeLessThan(140);
+    });
+
+    it('counts each document once when the collection is smaller than the size', async () => {
+      await setup();
+      const { docs } = await svc.sampleSchema({
+        connectionId: connId,
+        dbName: 'shopdb',
+        collection: 'products',
+        size: 10,
+      });
+      // products holds 3 documents, and both facet branches pick all of them.
+      const names = (docs as Array<{ name: string }>).map((d) => d.name);
+      expect(names.toSorted((a, b) => a.localeCompare(b))).toEqual(['a', 'b', 'c']);
+    });
+
+    it('keeps documents that have no _id, which a view can project away', async () => {
+      await setup();
+      const db = (await pool.write(connId).client()).db(DB);
+      await db.dropCollection('no_id_view').catch(() => false);
+      await db.collection('no_id_source').deleteMany({});
+      await db.collection('no_id_source').insertMany([{ idx: 1 }, { idx: 2 }]);
+      await db.createCollection('no_id_view', {
+        viewOn: 'no_id_source',
+        pipeline: [{ $project: { _id: 0, idx: 1 } }],
+      });
+      const { docs } = await svc.sampleSchema({
+        connectionId: connId,
+        dbName: DB,
+        collection: 'no_id_view',
+        size: 2,
+      });
+      expect(docs).toHaveLength(2);
+    });
   });
 
   // A dedicated server, not the shared one: `failCommand` needs

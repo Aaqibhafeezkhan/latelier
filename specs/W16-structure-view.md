@@ -859,9 +859,9 @@ Sample values and value distributions ("top values") are out of scope. They
 would write user document values into SQLite with the tab, and the feature this
 tier answers asks only for cardinality and numeric range.
 
-Known ceiling: the sample is the most recent documents plus a random draw, so a
-document can appear twice. `distinct` is unaffected; `avg` is weighted by the
-duplicates.
+The sample is the most recent documents blended with a random draw, each
+document counted once, so a small collection is sampled in full rather than
+twice over and neither `frequency` nor `avg` is weighted by a duplicate.
 
 ### 14.4 The sample-size bound
 
@@ -870,6 +870,11 @@ The sample size selector offers 50, 100 and 200 — `SCHEMA_SAMPLE_MAX`
 unsafe on its own: the `recent` and `random` branches (n documents each) share
 one `$facet` output document with BSON's 16 MB cap, and a breach fails open to
 an empty sample. A tab persisted with a larger size samples at the bound.
+
+The header states the sample on screen: `Sampled <count> of <size> documents`,
+where `<size>` is the size that sample ran at (`sampledOf`), never the selector,
+which only sets the next run. The count never exceeds it. A tab persisted before
+`sampledOf` existed says `Sampled <count> documents` until its next run.
 
 ### 14.5 Acceptance criteria
 
@@ -884,6 +889,9 @@ an empty sample. A tab persisted with a larger size samples at the bound.
 - The schema table shows Distinct and Range, `—` where absent.
 - The sample-size selector offers exactly 50, 100 and 200, and a tab persisted
   with a size above the bound samples at the bound.
+- `meta:sampleSchema` returns at most the requested size, each document once,
+  and the header never states more sampled than that sample asked for, whatever
+  the selector has moved to since.
 
 ### 14.6 Test cases
 
@@ -894,6 +902,12 @@ an empty sample. A tab persisted with a larger size samples at the bound.
   loses `numeric` and keeps `distinct`; a `price` field keeps both.
 - Component, `StructureView`: the Distinct and Range cells; the three sample
   sizes; a restored size above the bound.
+- Integration, `MetaService.sampleSchema`: exactly the requested size from a
+  larger collection, both branches represented, a small collection counted once
+  per document, a view with no `_id` kept.
+- Component, `SchemaView`: the header keeps the size that ran when the selector
+  moves, follows it after a refresh, and names no size on a restored sample that
+  recorded none.
 
 ---
 
