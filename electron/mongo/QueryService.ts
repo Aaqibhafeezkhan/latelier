@@ -29,6 +29,7 @@ import type { MongoPool } from './MongoPool.ts';
 import type { Logger } from '../log.ts';
 import { logRecentWriteFailure, type RecentQueryService } from '../services/RecentQueryService.ts';
 import { ADMIN_LONG_TIMEOUT_MS, PROBE_TIMEOUT_MS, QUERY_TIMEOUT_MS } from './timeouts.ts';
+import { EXACT_BSON } from './undo.ts';
 // The main process has no `src/` precedent, but `exportFormat.ts` is a pure
 // module (no React/Mantine — verified: it imports only `bson`, `utils/ejson`
 // and `views/tableColumns`'s types/`getValueAtPath`), and duplicating its CSV
@@ -184,7 +185,11 @@ export class QueryService {
 
     try {
       const docs = await coll
+        // Exact, because the Document Editor saves what this returns: a Long
+        // or a whole Double promoted to a JS number would read as an Int32, and
+        // writing an array back whole would store its untouched numbers as one.
         .find(filter, {
+          ...EXACT_BSON,
           ...options,
           sort,
           projection,
@@ -285,7 +290,8 @@ export class QueryService {
     try {
       const doc = await db
         .collection(input.collection)
-        .findOne(filter, { projection, sort, maxTimeMS: QUERY_TIMEOUT_MS });
+        // Exact like `find`: the editor compares this with the row it opened.
+        .findOne(filter, { ...EXACT_BSON, projection, sort, maxTimeMS: QUERY_TIMEOUT_MS });
       return {
         document: doc ? ejsonEncode(doc, false) : null,
         durationMs: Date.now() - t0,
@@ -366,6 +372,7 @@ export class QueryService {
     const db = await this.pool.readDb(input.connectionId, input.dbName);
     const coll = db.collection(input.collection);
     const cursor = coll.find(filter, {
+      ...EXACT_BSON,
       ...options,
       sort,
       projection,

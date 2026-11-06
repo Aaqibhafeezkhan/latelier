@@ -59,9 +59,8 @@ const INT64_LIMIT = 2 ** 63;
  * nothing: its digits (or its exponent form, from 1e21) read back as the same
  * double. Everything else stays as bson wrote it.
  *
- * Both kinds reach this walk as the right sentinel: `ejsonEncode` writes the
- * driver's promoted number for a stored Double past 2^53 as `$numberDouble`
- * (`markPromotedDoubles`), and a Long past it as `$numberLong`.
+ * Both kinds reach this walk as the right sentinel, because `find` and
+ * `query:export` read every number as its stored type (`EXACT_BSON`).
  *
  * It walks plain documents and arrays. Any other BSON value is left as it is,
  * so a number inside a `Code`'s `$scope` (CodeWithScope is deprecated) is not
@@ -182,10 +181,11 @@ export function csvCellValue(v: unknown): string {
     // something this export re-parses back into EJSON.
     if (typeof obj.$numberInt === 'string') return obj.$numberInt;
     if (typeof obj.$numberDouble === 'string') return String(Number(obj.$numberDouble));
-    // $numberLong/$numberDecimal/binary/regex/timestamp/… stay wrapped: a
-    // Long or Decimal128 can exceed what a JS number holds exactly, so
-    // unwrapping would silently corrupt the value (ADR 0004) — this falls
-    // through to the generic "nested object" rendering below instead.
+    if (typeof obj.$numberLong === 'string' && Number.isSafeInteger(Number(obj.$numberLong))) return obj.$numberLong;
+    // A wider $numberLong, and $numberDecimal/binary/regex/timestamp/…, stay
+    // wrapped: a Long or Decimal128 can exceed what a JS number holds exactly,
+    // so a spreadsheet would silently corrupt the bare value (ADR 0004) — this
+    // falls through to the generic "nested object" rendering below instead.
   }
   return JSON.stringify(v);
 }

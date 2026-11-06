@@ -132,6 +132,18 @@ describe('csvCellValue', () => {
     expect(csvCellValue({ $numberDouble: '3.5' })).toBe('3.5');
   });
 
+  it.each(['5', '-5', '9007199254740991', '-9007199254740991'])('a $numberLong of %s unwraps to its digits', (digits) => {
+    expect(csvCellValue({ $numberLong: digits })).toBe(digits);
+  });
+
+  it.each(['9007199254740992', '-9007199254740992'])('a $numberLong of %s, past the safe range, stays wrapped', (digits) => {
+    expect(csvCellValue({ $numberLong: digits })).toBe(`{"$numberLong":"${digits}"}`);
+  });
+
+  it('a $numberLong that is not a digit string stays wrapped', () => {
+    expect(csvCellValue({ $numberLong: 5 })).toBe('{"$numberLong":5}');
+  });
+
   it('a $numberLong sentinel stays wrapped (int64 can exceed a JS number exactly)', () => {
     expect(csvCellValue({ $numberLong: '9007199254740993' })).toBe(
       '{"$numberLong":"9007199254740993"}',

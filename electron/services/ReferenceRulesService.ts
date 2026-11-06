@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { deserialize, serialize } from 'bson';
 import type {
   ReferenceAutodetectCandidate,
   ReferenceAutodetectInput,
@@ -178,7 +179,9 @@ export class ReferenceRulesService {
           docByKey.set(k, d);
         }
         for (const v of value) {
-          const k = JSON.stringify(ejsonEncode(v, false));
+          // `$in` matches across numeric types and the found documents are
+          // promoted, so a row's exact Long(5) must key as the driver reads one.
+          const k = JSON.stringify(ejsonEncode(deserialize(serialize({ v })).v, false));
           const hit = docByKey.get(k);
           if (hit !== undefined) ordered.push(hit);
         }

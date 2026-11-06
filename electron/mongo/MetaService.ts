@@ -7,6 +7,7 @@ import { classifyMongoOpError, isMaxTimeMSExpired } from './errors.ts';
 import type { Logger } from '../log.ts';
 import type { MongoPool } from './MongoPool.ts';
 import { QUERY_TIMEOUT_MS, STATS_TIMEOUT_MS } from './timeouts.ts';
+import { EXACT_BSON } from './undo.ts';
 
 const SYSTEM_DBS = new Set(['admin', 'local', 'config']);
 
@@ -215,7 +216,9 @@ export class MetaService {
             },
           },
         ],
-        { allowDiskUse: false, maxTimeMS: STATS_TIMEOUT_MS },
+        // Exact like `find`: the editor warns when a row's type differs from
+        // what this sample says the field usually is.
+        { ...EXACT_BSON, allowDiskUse: false, maxTimeMS: STATS_TIMEOUT_MS },
       );
       const arr = await cursor.toArray();
       const row = (arr[0] ?? {}) as { recent?: Document[]; random?: Document[] };

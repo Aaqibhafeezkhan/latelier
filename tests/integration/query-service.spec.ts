@@ -1,10 +1,13 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { AbstractCursor, Collection, FindCursor, Long, MongoServerSelectionError } from 'mongodb';
+import { AbstractCursor, BSONRegExp, Collection, Double, FindCursor, Int32, Long, MongoServerSelectionError } from 'mongodb';
+import { DocumentService } from '../../electron/mongo/DocumentService';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { QueryService } from '../../electron/mongo/QueryService';
+import { buildUpdateRequest, setAtSegments } from '../../src/pages/Workspace/documentDiff';
+import { ejsonParse } from '../../src/utils/ejson';
 import { RecentQueryService } from '../../electron/services/RecentQueryService';
 import { RecentQueryRepo } from '../../electron/db/repositories/RecentQueryRepo';
 import { ValidationError } from '../../electron/errors';
@@ -741,6 +744,80 @@ describe('QueryService', () => {
       } finally {
         await fs.rm(dir, { recursive: true, force: true });
       }
+    });
+  });
+
+  // Mongo stores a whole-number Long or Double as its own type, and the driver
+  // would otherwise hand both back as a JS number, which then reads as an Int32.
+  describe('number types survive the read paths', () => {
+    const typedColl = 'number_types';
+    const typed = () => ({
+      _id: 'typed',
+      label: 'a',
+      long: Long.fromNumber(5),
+      double: new Double(7),
+      int: new Int32(3),
+      nested: { long: Long.fromNumber(5), double: new Double(7) },
+      list: ['a', Long.fromNumber(5), new Double(7)],
+      rows: [{ name: 'a', long: Long.fromNumber(5) }],
+      regex: new BSONRegExp('a', 'x'),
+    });
+    const expectedWire = {
+      long: { $numberLong: '5' },
+      double: { $numberDouble: '7.0' },
+      int: { $numberInt: '3' },
+      nested: { long: { $numberLong: '5' }, double: { $numberDouble: '7.0' } },
+      list: ['a', { $numberLong: '5' }, { $numberDouble: '7.0' }],
+      rows: [{ name: 'a', long: { $numberLong: '5' } }],
+      regex: { $regularExpression: { pattern: 'a', options: 'x' } },
+    };
+    const target = { connectionId: connId, dbName, collection: typedColl };
+    const rawColl = async () => (await pool.write(connId).client()).db(dbName).collection<{ _id: string; list?: unknown[] }>(typedColl);
+    const bsonType = (v: unknown) => (v as { _bsontype?: string })._bsontype;
+
+    beforeEach(async () => {
+      const coll = await rawColl();
+      await coll.deleteMany({});
+      await coll.insertOne(typed());
+    });
+
+    it('find sends each number as its stored type', async () => {
+      const res = await svc.find({ ...target, filter: '{}', limit: 10, skip: 0 });
+      expect(parseDocs(res.documentsJson)[0]).toMatchObject(expectedWire);
+    });
+
+    it('findOne, the editor conflict re-read, agrees with find', async () => {
+      const res = await svc.findOne({ ...target, filter: '{}' });
+      expect(res.document).toMatchObject(expectedWire);
+    });
+
+    it.each(['json', 'jsonl'] as const)('a canonical %s export writes each number as its stored type', async (format) => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'number-types-'));
+      try {
+        const file = path.join(dir, `out.${format}`);
+        await svc.exportToFile({ ...target, filter: '{}', format }, file);
+        const text = await fs.readFile(file, 'utf8');
+        expect(format === 'json' ? JSON.parse(text)[0] : JSON.parse(text.trim())).toMatchObject(expectedWire);
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('editing a string in an array leaves the untouched numbers beside it their stored type', async () => {
+      const res = await svc.find({ ...target, filter: '{}', limit: 10, skip: 0 });
+      const original = ejsonParse<Record<string, unknown>>(JSON.stringify(parseDocs(res.documentsJson)[0]));
+      const request = buildUpdateRequest(original, setAtSegments(original, ['list', '0'], 'b'));
+      const write = await new DocumentService(pool).updateOne({
+        ...target,
+        filterJson: request!.filterJson,
+        updateJson: request!.updateJson,
+      });
+      expect(write.modifiedCount).toBe(1);
+
+      const stored = await (await rawColl()).findOne({ _id: 'typed' }, { promoteValues: false });
+      expect(stored!.list![0]).toBe('b');
+      expect(bsonType(stored!.list![1])).toBe('Long');
+      expect(bsonType(stored!.list![2])).toBe('Double');
     });
   });
 });

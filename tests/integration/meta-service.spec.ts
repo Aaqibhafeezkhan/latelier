@@ -4,7 +4,7 @@ import { Collection, Db, MongoClient } from 'mongodb';
 import { MongoPool } from '../../electron/mongo/MongoPool';
 import { MetaService } from '../../electron/mongo/MetaService';
 import { CollectionAdminService } from '../../electron/mongo/CollectionAdminService';
-import { Double, EJSON } from 'bson';
+import { Double, EJSON, Int32, Long } from 'bson';
 import { ejsonParse as rendererEjsonParse, ejsonStringifyReadable } from '../../src/utils/ejson';
 import { QUERY_TIMEOUT_MS } from '../../electron/mongo/timeouts';
 import { SecretsVault } from '../../electron/secrets/SecretsVault';
@@ -618,6 +618,21 @@ describe('MetaService', () => {
         size: 2,
       });
       expect(docs).toHaveLength(2);
+    });
+
+    it('sends each number as its stored type, so the editor can compare it with the row', async () => {
+      await setup();
+      const coll = (await pool.write(connId).client()).db(DB).collection('number_types');
+      await coll.deleteMany({});
+      await coll.insertOne({ long: Long.fromNumber(5), double: new Double(7), int: new Int32(3) });
+
+      const { docs } = await svc.sampleSchema({ connectionId: connId, dbName: DB, collection: 'number_types' });
+
+      expect(docs[0]).toMatchObject({
+        long: { $numberLong: '5' },
+        double: { $numberDouble: '7.0' },
+        int: { $numberInt: '3' },
+      });
     });
   });
 
