@@ -31,8 +31,34 @@ function nowIso(): string {
  * one value and each side still spells it in its own type.
  */
 function matchKey(v: unknown): string {
-  // ponytail: a Decimal128, a -0, and a Long against a Double past 2^53 do not promote to the same value, so such a match is left out of the list. Compare numerically if a reference ever keys on those.
+  // ponytail: a Decimal128, a -0, and a Long against a Double past 2^53 do not promote to the same value, so such a match loses its source position. Compare numerically if a reference ever keys on those.
   return JSON.stringify(ejsonEncode(deserialize(serialize({ v }), { bsonRegExp: true }).v, false));
+}
+
+/** A dotted field's value, read through own properties only. */
+function readPath(doc: unknown, path: string): unknown {
+  let cur = doc;
+  for (const seg of path.split('.')) {
+    if (cur === null || typeof cur !== 'object' || !Object.hasOwn(cur, seg)) return undefined;
+    cur = (cur as Record<string, unknown>)[seg];
+  }
+  return cur;
+}
+
+/**
+ * The projection plus `field`, so a found document can be paired by it. Left
+ * as is when a projected path already covers the field or sits under it: the
+ * server refuses a projection that names both `n` and `n.k`.
+ */
+function withField(projection: Record<string, 1> | undefined, field: string): Record<string, 1> | undefined {
+  if (!projection) return undefined;
+  const overlaps = Object.keys(projection).some(
+    (p) => p === field || p.startsWith(`${field}.`) || field.startsWith(`${p}.`),
+  );
+  if (overlaps) return projection;
+  const out = { ...projection };
+  ownSet(out, field, 1);
+  return out;
 }
 
 function normalizeProjection(projection: string[] | undefined): string[] {
@@ -180,18 +206,24 @@ export class ReferenceRulesService {
         const docs = await coll
           .find(
             { [rule.targetField]: { $in: value } } as Record<string, unknown>,
-            { ...EXACT_BSON, projection },
+            { ...EXACT_BSON, projection: withField(projection, rule.targetField) },
           )
           .toArray();
         const ordered: unknown[] = [];
         const docByKey = new Map<string, unknown>();
         for (const d of docs) {
-          docByKey.set(matchKey((d as Record<string, unknown>)[rule.targetField]), d);
+          const k = matchKey(readPath(d, rule.targetField));
+          if (!docByKey.has(k)) docByKey.set(k, d);
         }
         for (const v of value) {
           const hit = docByKey.get(matchKey(v));
           if (hit !== undefined) ordered.push(hit);
         }
+        // The server matched every document here. One the key cannot pair (a
+        // shared value, a Decimal128 against an Int32, -0 against 0) follows in
+        // server order rather than being dropped.
+        const paired = new Set(ordered);
+        for (const d of docs) if (!paired.has(d)) ordered.push(d);
         return {
           ruleId: rule.id,
           found: ordered.length > 0,

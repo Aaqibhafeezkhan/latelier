@@ -379,6 +379,127 @@ describe('ReferenceRulesService', () => {
     ]);
   });
 
+  async function seedItems(docs: Document[]): Promise<void> {
+    const db = (await pool.write(CONN_ID).client()).db(DB_NAME);
+    await db.collection('items').deleteMany({});
+    await db.collection('items').insertMany(docs);
+  }
+
+  function names(result: { documents: unknown[] }): unknown[] {
+    return result.documents.map((d) => (d as Record<string, unknown>).name);
+  }
+
+  it('keeps source order when the projection leaves out the target field (#706)', async () => {
+    await seedItems([
+      { code: 'b', name: 'B' },
+      { code: 'a', name: 'A' },
+    ]);
+    const rule = svc.create({
+      connectionId: CONN_ID,
+      sourceDb: DB_NAME,
+      sourceCollection: 'orders',
+      sourceField: 'item_codes',
+      targetDb: DB_NAME,
+      targetCollection: 'items',
+      targetField: 'code',
+      projection: ['name'],
+    });
+
+    const result = await svc.resolve({ ruleId: rule.id, valueEjson: '["a","b"]' });
+
+    expect(names(result)).toEqual(['A', 'B']);
+  });
+
+  it.each([
+    ['no projection', []],
+    ['a projection without it', ['name']],
+  ])('keeps source order for a dotted target field with %s (#706)', async (_label, projection) => {
+    await seedItems([
+      { n: { k: 'b' }, name: 'B' },
+      { n: { k: 'a' }, name: 'A' },
+    ]);
+    const rule = svc.create({
+      connectionId: CONN_ID,
+      sourceDb: DB_NAME,
+      sourceCollection: 'orders',
+      sourceField: 'item_keys',
+      targetDb: DB_NAME,
+      targetCollection: 'items',
+      targetField: 'n.k',
+      projection,
+    });
+
+    const result = await svc.resolve({ ruleId: rule.id, valueEjson: '["a","b"]' });
+
+    expect(names(result)).toEqual(['A', 'B']);
+  });
+
+  it('projects nothing extra when the projection already covers the target field', async () => {
+    // Adding `n.k` beside `n` would be a path collision the server refuses.
+    await seedItems([
+      { n: { k: 'b' }, name: 'B' },
+      { n: { k: 'a' }, name: 'A' },
+    ]);
+    const rule = svc.create({
+      connectionId: CONN_ID,
+      sourceDb: DB_NAME,
+      sourceCollection: 'orders',
+      sourceField: 'item_keys',
+      targetDb: DB_NAME,
+      targetCollection: 'items',
+      targetField: 'n.k',
+      projection: ['n'],
+    });
+
+    const result = await svc.resolve({ ruleId: rule.id, valueEjson: '["a","b"]' });
+
+    expect(result.documents.map((d) => (d as { n: { k: string } }).n.k)).toEqual(['a', 'b']);
+  });
+
+  it.each([
+    ['a Decimal128 against an Int32', new Int32(5), { $numberDecimal: '5' }],
+    ['a Double against a Long past 2^53', Long.fromString('9007199254740994'), { $numberDouble: '9007199254740994' }],
+    ['-0 against 0', new Double(0), { $numberDouble: '-0.0' }],
+  ])('keeps a match the key cannot pair: %s (#706)', async (_label, stored, source) => {
+    await seedItems([
+      { _id: stored, name: 'odd' },
+      { _id: new Int32(1), name: 'plain' },
+    ] as unknown as Document[]);
+    const rule = svc.create({
+      connectionId: CONN_ID,
+      sourceDb: DB_NAME,
+      sourceCollection: 'orders',
+      sourceField: 'item_ids',
+      targetDb: DB_NAME,
+      targetCollection: 'items',
+    });
+
+    const result = await svc.resolve({ ruleId: rule.id, valueEjson: JSON.stringify([source, { $numberInt: '1' }]) });
+
+    // Paired documents keep source order; the server's other matches follow.
+    expect(names(result)).toEqual(['plain', 'odd']);
+  });
+
+  it('keeps every document that shares a target value (#706)', async () => {
+    await seedItems([
+      { code: 'a', name: 'A1' },
+      { code: 'a', name: 'A2' },
+    ]);
+    const rule = svc.create({
+      connectionId: CONN_ID,
+      sourceDb: DB_NAME,
+      sourceCollection: 'orders',
+      sourceField: 'item_codes',
+      targetDb: DB_NAME,
+      targetCollection: 'items',
+      targetField: 'code',
+    });
+
+    const result = await svc.resolve({ ruleId: rule.id, valueEjson: '["a"]' });
+
+    expect([...names(result)].sort((x, y) => String(x).localeCompare(String(y)))).toEqual(['A1', 'A2']);
+  });
+
   it('returns an empty list for an empty array source', async () => {
     const rule = svc.create({
       connectionId: CONN_ID,
