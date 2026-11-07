@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '../helpers/render';
 import { within } from '@testing-library/react';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
@@ -9,7 +9,11 @@ vi.mock('../../src/theme/notifications', async (orig) => {
   return { ...mod, notify: { ...mod.notify, error: notifyError } };
 });
 
+// The rail section a describe works in; the dialog opens on Appearance.
+let section = '';
+
 afterEach(() => {
+  section = '';
   uninstallAtelierMock();
   vi.restoreAllMocks();
   notifyError.mockReset();
@@ -48,6 +52,7 @@ async function mount(
     </HintsProvider>,
   );
   await waitFor(() => expect(get).toHaveBeenCalledWith('ui.editor.fontSize'));
+  if (section) fireEvent.click(screen.getByRole('tab', { name: section }));
   return { set, setTheme };
 }
 
@@ -96,6 +101,10 @@ describe('SettingsModal: theme', () => {
 });
 
 describe('SettingsModal: default page size', () => {
+  beforeEach(() => {
+    section = 'Results';
+  });
+
   it('shows the stored size', async () => {
     await mount({ 'ui.workspace.defaultPageSize': 250 });
     await waitFor(() =>
@@ -118,6 +127,10 @@ describe('SettingsModal: default page size', () => {
 });
 
 describe('SettingsModal: default result view', () => {
+  beforeEach(() => {
+    section = 'Results';
+  });
+
   it('shows the stored view', async () => {
     await mount({ 'ui.workspace.defaultView': 'JSON' });
     await waitFor(() =>
@@ -145,6 +158,10 @@ describe('SettingsModal: default result view', () => {
 });
 
 describe('SettingsModal: editor font size', () => {
+  beforeEach(() => {
+    section = 'Editor and startup';
+  });
+
   it('shows the stored size', async () => {
     await mount({ 'ui.editor.fontSize': 16 });
     await waitFor(() =>

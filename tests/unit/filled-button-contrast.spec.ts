@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_THEME, mergeMantineTheme } from '@mantine/core';
-import { filledFills, mantineTheme } from '../../src/theme/mantineTheme';
+import { cssVariablesResolver, filledFills, mantineTheme } from '../../src/theme/mantineTheme';
 import { contrastRatio, parseColor } from '../../src/theme/contrast';
 
 // Goes through the resolver Mantine actually calls, so a change to how the
@@ -22,6 +22,12 @@ describe('filled control contrast: white text on rest and hover', () => {
   it('uses the approved danger and primary fills', () => {
     expect(theme.variantColorResolver({ color: 'red', theme, variant: 'filled' }).background).toBe('#c92a2a');
     expect(theme.variantColorResolver({ color: 'violet', theme, variant: 'filled' }).background).toBe('#6857de');
+  });
+
+  it('gives a control with no color or variant the same fill, through the primary-filled variable', () => {
+    const { variables } = cssVariablesResolver(theme);
+    expect(variables['--mantine-primary-color-filled']).toBe(filledFills.violet!.bg);
+    expect(variables['--mantine-primary-color-filled-hover']).toBe(filledFills.violet!.hover);
   });
 
   it('leaves non-filled variants on the stock resolver', () => {

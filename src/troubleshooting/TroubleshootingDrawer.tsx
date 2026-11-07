@@ -80,7 +80,7 @@ export function TroubleshootingDrawer({
           padding: 20,
           display: 'flex',
           flexDirection: 'column',
-          gap: 16,
+          gap: 'var(--atelier-gap-lg)',
         }}
       >
         <Stack gap="xs">

@@ -11,6 +11,17 @@ import { useRovingHighlight } from './useRovingHighlight';
 // than the viewport), which would otherwise loop forever.
 const MAX_SETTLE_FRAMES = 60;
 
+// How many moves in a row stay urgent while each one arrives before the last
+// has settled (see `navigate`). A move costs about three of React's 50 nested
+// updates, so this stays well under the limit, and it is more than any test or
+// person presses before acting on a row they are looking at.
+const URGENT_MOVES_IN_A_RUN = 8;
+
+// A run of moves ends at a pause this long, and only once the last move has
+// settled too. Settling alone isn't enough: a row can hold still for two frames
+// while React still has work pending, and measured that way the count hit 50.
+const RUN_PAUSE_MS = 250;
+
 // Walk up from a row element to the nearest ancestor react-window scrolls —
 // its `<List>` root always carries an inline `overflowY: 'auto'` style (see
 // react-window's own `Oe`/list-render function). Module-level: this is pure
@@ -252,6 +263,32 @@ export function useRovingFocus({
     [scrollToIndex, settle, cancelPendingSettle, rowId],
   );
 
+  // Keys pressed faster than the list renders used to crash the workspace.
+  // React only zeroes its nested-update count on a commit that leaves no sync,
+  // input or default work pending. Rows mounting schedule that work from their
+  // refs and from ResizeObserver, so with an urgent update per key press no
+  // commit ever qualifies, and the count reaches 50 and throws "Maximum update
+  // depth exceeded" with nothing actually looping. Past a few moves with no
+  // pause between them, the rest become transitions, which React can coalesce,
+  // so it catches up. A move that isn't part of such a run stays urgent, because
+  // the caller's next key (Space, `D`, Tab) must act on the row this one moved
+  // to. During a run that key acts on the painted row, which is still the one
+  // the person can see.
+  const movesInRun = React.useRef(0);
+  const lastMoveAt = React.useRef(Number.NEGATIVE_INFINITY);
+  const navigate = React.useCallback(
+    (pick: () => number) => {
+      const now = performance.now();
+      const paused = pendingFrame.current === null && now - lastMoveAt.current >= RUN_PAUSE_MS;
+      movesInRun.current = paused ? 1 : movesInRun.current + 1;
+      lastMoveAt.current = now;
+      const go = () => scrollThenSettle(pick());
+      if (movesInRun.current > URGENT_MOVES_IN_A_RUN) React.startTransition(go);
+      else go();
+    },
+    [scrollThenSettle],
+  );
+
   // #60 — tracks real DOM focus on the container so `highlightIndex` can
   // collapse to `-1` while it's elsewhere, without touching `activeIndex`
   // (see that field's docstring on `RovingFocus`). Guarded the same way
@@ -279,27 +316,31 @@ export function useRovingFocus({
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
-          scrollThenSettle(move(1));
+          navigate(() => move(1));
           return;
         case 'ArrowUp':
           e.preventDefault();
-          scrollThenSettle(move(-1));
+          navigate(() => move(-1));
           return;
         case 'Home':
           e.preventDefault();
-          setIndex(0);
-          scrollThenSettle(0);
+          navigate(() => {
+            setIndex(0);
+            return 0;
+          });
           return;
         case 'End':
           e.preventDefault();
-          // Stryker's `count - 1` -> `count + 1` mutant on this `setIndex`
-          // call is equivalent: `useRovingHighlight`'s `index` getter clamps
-          // via `Math.min(raw, count - 1)`, so `setIndex(count + 1)` and
-          // `setIndex(count - 1)` land on the identical clamped index —
-          // confirmed by reading that clamp, not assumed.
-          // Stryker disable next-line ArithmeticOperator: clampedIndex's Math.min(raw, count - 1) lands count+1 and count-1 on the same clamped index
-          setIndex(count - 1);
-          scrollThenSettle(count - 1);
+          navigate(() => {
+            // Stryker's `count - 1` -> `count + 1` mutant on this `setIndex`
+            // call is equivalent: `useRovingHighlight`'s `index` getter clamps
+            // via `Math.min(raw, count - 1)`, so `setIndex(count + 1)` and
+            // `setIndex(count - 1)` land on the identical clamped index —
+            // confirmed by reading that clamp, not assumed.
+            // Stryker disable next-line ArithmeticOperator: clampedIndex's Math.min(raw, count - 1) lands count+1 and count-1 on the same clamped index
+            setIndex(count - 1);
+            return count - 1;
+          });
           return;
         // Stryker's "drop this `return`" mutant is equivalent: it's the
         // switch's last case and nothing follows the switch in this
@@ -310,7 +351,7 @@ export function useRovingFocus({
           return;
       }
     },
-    [count, move, setIndex, scrollThenSettle],
+    [count, move, setIndex, navigate],
   );
 
   return {

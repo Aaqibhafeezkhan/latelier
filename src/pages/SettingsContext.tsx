@@ -1,8 +1,8 @@
 import React from 'react';
-import { SettingsModal } from './SettingsModal';
+import { SettingsModal, type SettingsSection } from './SettingsModal';
 
 interface SettingsApi {
-  open: () => void;
+  open: (section?: SettingsSection) => void;
 }
 
 const Ctx = React.createContext<SettingsApi>({ open: () => {} });
@@ -17,12 +17,12 @@ export function useSettings(): SettingsApi {
  * command palette — can open it without owning local state.
  */
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = React.useState(false);
-  const api = React.useMemo<SettingsApi>(() => ({ open: () => setOpen(true) }), []);
+  const [opened, setOpened] = React.useState<{ section?: SettingsSection } | null>(null);
+  const api = React.useMemo<SettingsApi>(() => ({ open: (section) => setOpened({ section }) }), []);
   return (
     <Ctx.Provider value={api}>
       {children}
-      {open && <SettingsModal onClose={() => setOpen(false)} />}
+      {opened && <SettingsModal initialSection={opened.section} onClose={() => setOpened(null)} />}
     </Ctx.Provider>
   );
 }

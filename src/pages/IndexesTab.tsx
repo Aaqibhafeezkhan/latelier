@@ -43,6 +43,11 @@ export interface IndexCreateRequest {
   suggestion: IndexSuggestion | null;
 }
 
+// Measured against the rendered table (head plus the shorter `_id_` row, which
+// has no drop button, comes to 30 + one row); confirm again if its padding changes.
+const INDEX_TABLE_BASE_PX = 30;
+const INDEX_ROW_PX = 39;
+
 function humanCount(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
@@ -108,6 +113,7 @@ export function IndexesTab({
   dbName,
   collection,
   viewOn,
+  expectedCount,
   initialCreate,
   onInitialCreateConsumed,
   onChanged,
@@ -115,6 +121,8 @@ export function IndexesTab({
   connectionId: string;
   dbName: string;
   collection: string;
+  /** How many indexes the statistics reported, to hold their space while the list loads. */
+  expectedCount?: number;
   /**
    * Set when the namespace is a view: the collection it reads from. The server
    * rejects `listIndexes` on a view, so no list is requested and no create or
@@ -250,7 +258,7 @@ export function IndexesTab({
 
   if (viewOn !== undefined) {
     return (
-      <div style={{ padding: '10px 16px', fontSize: 12, color: T.textMuted, borderBottom: `1px solid ${T.border}` }}>
+      <div style={{ padding: '10px 16px', fontSize: T.fsSm, color: T.textMuted, borderBottom: `1px solid ${T.border}` }}>
         Views have no indexes of their own. This view uses the indexes of {viewOn}, the collection it reads from.
       </div>
     );
@@ -262,7 +270,7 @@ export function IndexesTab({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: themeVars.gapSm,
           padding: '10px 16px',
           borderBottom: `1px solid ${T.border}`,
           background: T.surface,
@@ -306,7 +314,7 @@ export function IndexesTab({
             color="orange"
             variant="light"
             m="sm"
-            styles={{ message: { fontSize: 12 } }}
+            styles={{ message: { fontSize: T.fsSm } }}
           >
             <Group gap="xs" wrap="nowrap" align="flex-start">
               <Text size="xs">
@@ -327,8 +335,19 @@ export function IndexesTab({
           </Alert>
         )}
 
-        {!indexError && loadingIndexes && !indexes && (
-          <div style={{ padding: 20, color: T.textMuted, fontSize: 13 }}>Loading indexes…</div>
+        {!indexError && !indexes && viewOn === undefined && (
+          <div
+            style={{
+              boxSizing: 'border-box',
+              // The table's height, so the sections below don't move when it replaces this.
+              minHeight: expectedCount ? INDEX_TABLE_BASE_PX + expectedCount * INDEX_ROW_PX : undefined,
+              padding: 20,
+              color: T.textMuted,
+              fontSize: T.fsMd,
+            }}
+          >
+            Loading indexes…
+          </div>
         )}
 
         {drawerOpen && (
@@ -374,9 +393,9 @@ export function IndexesTab({
             withTableBorder
             withColumnBorders={false}
             styles={{
-              table: { fontSize: 12 },
+              table: { fontSize: T.fsSm },
               th: {
-                fontSize: 10,
+                fontSize: T.fsXs,
                 textTransform: 'uppercase',
                 letterSpacing: '0.06em',
                 fontWeight: 600,
@@ -437,7 +456,7 @@ export function IndexesTab({
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={4} wrap="wrap">
+                        <Group gap={T.gapXs} wrap="wrap">
                           {indexBadges(idx).map((b) => (
                             <IndexBadge key={b.label} label={b.label} tone={b.tone} />
                           ))}
@@ -493,7 +512,7 @@ export function IndexesTab({
                             paddingLeft: 38,
                           }}
                         >
-                          <Stack gap={6} py={4}>
+                          <Stack gap={themeVars.gapXs} py={4}>
                             <Text size="xs" c="dimmed">
                               <span style={{ color: T.textMuted }}>Version</span>
                               {' · v'}
@@ -722,13 +741,13 @@ function CreateIndexDrawer({
         body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
       }}
     >
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: T.gapLg }}>
         <Section title="Fields">
           {initialFields && reason && (
             <div
               data-testid="create-index-reason"
               style={{
-                fontSize: 11,
+                fontSize: T.fsXs,
                 color: T.textMuted,
                 marginBottom: 8,
                 lineHeight: 1.4,
@@ -738,7 +757,7 @@ function CreateIndexDrawer({
             </div>
           )}
           {fields.map((f, i) => (
-            <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+            <div key={i} style={{ display: 'flex', gap: themeVars.gapXs, marginBottom: 6 }}>
               <input
                 aria-label={`Field ${i + 1}`}
                 value={f.field}
@@ -847,7 +866,7 @@ function CreateIndexDrawer({
               border: `1px solid ${T.warn}`,
               background: 'rgba(184,76,20,0.08)',
               color: T.warn,
-              fontSize: 11,
+              fontSize: T.fsXs,
             }}
           >
             {error}
@@ -860,7 +879,7 @@ function CreateIndexDrawer({
           paddingTop: 12,
           borderTop: `1px solid ${T.border}`,
           display: 'flex',
-          gap: 8,
+          gap: T.gapSm,
           justifyContent: 'flex-end',
         }}
       >
@@ -892,7 +911,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div>
       <div
         style={{
-          fontSize: 10,
+          fontSize: T.fsXs,
           fontWeight: 600,
           color: T.textMuted,
           textTransform: 'uppercase',
@@ -924,8 +943,8 @@ function Check({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
-        fontSize: 12,
+        gap: themeVars.gapXs,
+        fontSize: T.fsSm,
         color: T.text,
         marginBottom: 4,
         cursor: 'pointer',
@@ -949,7 +968,7 @@ function inputStyle(T: typeof themeVars): React.CSSProperties {
     border: `1px solid ${T.border}`,
     borderRadius: T.rs,
     padding: '4px 8px',
-    fontSize: 12,
+    fontSize: T.fsSm,
     color: T.text,
     background: T.surfaceRaised,
     outline: 'none',
@@ -1015,7 +1034,7 @@ function DropConfirmDialog({
         <Text size="xs" c="dimmed" lh={1.5}>
           This is permanent. Queries that relied on this index may slow down.
         </Text>
-        <Stack gap={6}>
+        <Stack gap={themeVars.gapXs}>
           <Text size="xs" c="dimmed">
             Type the index name to confirm:
           </Text>

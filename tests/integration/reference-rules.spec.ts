@@ -540,6 +540,186 @@ describe('ReferenceRulesService', () => {
     expect(result.documents).toEqual([]);
   });
 
+  describe('array source, a document the server matched is never dropped', () => {
+    async function seedItems(docs: unknown[]): Promise<void> {
+      const client = await pool.write(CONN_ID).client();
+      const items = client.db(DB_NAME).collection('items');
+      await items.deleteMany({});
+      await items.insertMany(docs as Document[]);
+    }
+
+    function itemsRule(targetField: string, projection?: string[]) {
+      return svc.create({
+        connectionId: CONN_ID,
+        sourceDb: DB_NAME,
+        sourceCollection: 'orders',
+        sourceField: 'item_ids',
+        targetDb: DB_NAME,
+        targetCollection: 'items',
+        targetField,
+        projection,
+      });
+    }
+
+    it('pairs by a targetField the projection leaves out, and does not show it', async () => {
+      await seedItems([
+        { _id: 1, code: 'c', name: 'C' },
+        { _id: 2, code: 'a', name: 'A' },
+        { _id: 3, code: 'b', name: 'B' },
+      ]);
+      const rule = itemsRule('code', ['name']);
+
+      const result = await svc.resolve({ ruleId: rule.id, valueEjson: JSON.stringify(['a', 'b', 'c']) });
+
+      expect(result.found).toBe(true);
+      expect(result.documents).toEqual([
+        { _id: { $numberInt: '2' }, name: 'A' },
+        { _id: { $numberInt: '3' }, name: 'B' },
+        { _id: { $numberInt: '1' }, name: 'C' },
+      ]);
+    });
+
+    it('pairs by a dotted targetField', async () => {
+      await seedItems([
+        { _id: 1, n: { k: 'c' }, name: 'C' },
+        { _id: 2, n: { k: 'a' }, name: 'A' },
+      ]);
+      const rule = itemsRule('n.k');
+
+      const result = await svc.resolve({ ruleId: rule.id, valueEjson: JSON.stringify(['a', 'c']) });
+
+      expect(result.documents.map((d) => (d as Record<string, unknown>).name)).toEqual(['A', 'C']);
+    });
+
+    it('pairs by a dotted targetField the projection leaves out, without leaking its parent', async () => {
+      await seedItems([
+        { _id: 1, n: { k: 'c' }, name: 'C' },
+        { _id: 2, n: { k: 'a' }, name: 'A' },
+      ]);
+      const rule = itemsRule('n.k', ['name']);
+
+      const result = await svc.resolve({ ruleId: rule.id, valueEjson: JSON.stringify(['a', 'c']) });
+
+      expect(result.documents).toEqual([
+        { _id: { $numberInt: '2' }, name: 'A' },
+        { _id: { $numberInt: '1' }, name: 'C' },
+      ]);
+    });
+
+    it('pairs when the projection already reaches into the targetField', async () => {
+      await seedItems([
+        { _id: 1, n: { k: 'c', z: 1 } },
+        { _id: 2, n: { k: 'a', z: 2 } },
+      ]);
+      const rule = itemsRule('n.k', ['n.k', 'n.z']);
+
+      const result = await svc.resolve({ ruleId: rule.id, valueEjson: JSON.stringify(['a', 'c']) });
+
+      expect(result.documents).toEqual([
+        { _id: { $numberInt: '2' }, n: { k: 'a', z: { $numberInt: '2' } } },
+        { _id: { $numberInt: '1' }, n: { k: 'c', z: { $numberInt: '1' } } },
+      ]);
+    });
+
+    it('pairs when the projection holds only a part of the targetField', async () => {
+      await seedItems([
+        { _id: 1, n: { k: { x: 1, y: 1 } }, name: 'C' },
+        { _id: 2, n: { k: { x: 2, y: 2 } }, name: 'A' },
+      ]);
+      const rule = itemsRule('n.k.x', ['n.k.y']);
+
+      const result = await svc.resolve({ ruleId: rule.id, valueEjson: JSON.stringify([2, 1]) });
+
+      expect(result.documents).toEqual([
+        { _id: { $numberInt: '2' }, n: { k: { y: { $numberInt: '2' } } } },
+        { _id: { $numberInt: '1' }, n: { k: { y: { $numberInt: '1' } } } },
+      ]);
+    });
+
+    it('pairs through an array of subdocuments on the targetField path', async () => {
+      await seedItems([
+        { _id: 1, n: [{ k: 'x' }, { k: 'c' }], name: 'C' },
+        { _id: 2, n: [{ k: 'a' }], name: 'A' },
+      ]);
+      const rule = itemsRule('n.k');
+
+      const result = await svc.resolve({ ruleId: rule.id, valueEjson: JSON.stringify(['a', 'c']) });
+
+      expect(result.documents.map((d) => (d as Record<string, unknown>).name)).toEqual(['A', 'C']);
+    });
+
+    it('keeps every document that shares a targetField value', async () => {
+      await seedItems([
+        { _id: 1, code: 'a', name: 'first' },
+        { _id: 2, code: 'a', name: 'second' },
+      ]);
+      const rule = itemsRule('code');
+
+      const result = await svc.resolve({ ruleId: rule.id, valueEjson: JSON.stringify(['a', 'a']) });
+
+      expect(result.documents.map((d) => (d as Record<string, unknown>).name)).toEqual(['first', 'second']);
+    });
+
+    it('keeps a Decimal128 source value that matches a stored Int32', async () => {
+      await seedItems([{ _id: new Int32(5), name: 'int' }]);
+      const rule = itemsRule('_id', ['name']);
+
+      const result = await svc.resolve({ ruleId: rule.id, valueEjson: '[{"$numberDecimal":"5"}]' });
+
+      expect(result.found).toBe(true);
+      expect(result.documents).toEqual([{ _id: { $numberInt: '5' }, name: 'int' }]);
+    });
+
+    it('keeps a Double source value that matches a wide stored Long', async () => {
+      const wide = '9007199254740994';
+      await seedItems([{ _id: Long.fromString(wide), name: 'wide' }]);
+      const rule = itemsRule('_id', ['name']);
+
+      const result = await svc.resolve({ ruleId: rule.id, valueEjson: `[{"$numberDouble":"${wide}.0"}]` });
+
+      expect(result.found).toBe(true);
+      expect(result.documents).toEqual([{ _id: { $numberLong: wide }, name: 'wide' }]);
+    });
+
+    it('keeps a negative-zero source value that matches a stored zero', async () => {
+      await seedItems([{ _id: new Double(0), name: 'zero' }]);
+      const rule = itemsRule('_id', ['name']);
+
+      const result = await svc.resolve({ ruleId: rule.id, valueEjson: '[{"$numberDouble":"-0.0"}]' });
+
+      expect(result.found).toBe(true);
+      expect(result.documents).toEqual([{ _id: { $numberDouble: '0.0' }, name: 'zero' }]);
+    });
+
+    it('puts a document that pairs with no source value after the ones that do, in server order', async () => {
+      await seedItems([
+        { _id: new Int32(1), name: 'one' },
+        { _id: new Int32(5), name: 'five' },
+        { _id: new Int32(2), name: 'two' },
+      ]);
+      const rule = itemsRule('_id', ['name']);
+
+      // 1 and 2 pair; Decimal128(5) matches the stored Int32 5 but keys apart.
+      const result = await svc.resolve({
+        ruleId: rule.id,
+        valueEjson: '[{"$numberInt":"2"},{"$numberDecimal":"5"},{"$numberInt":"1"}]',
+      });
+
+      expect(result.documents.map((d) => (d as Record<string, unknown>).name)).toEqual(['two', 'one', 'five']);
+    });
+
+    it('agrees with the single-value path on the same rule and value', async () => {
+      await seedItems([{ _id: 1, code: 'a', name: 'A' }]);
+      const rule = itemsRule('code', ['name']);
+
+      const single = await svc.resolve({ ruleId: rule.id, valueEjson: '"a"' });
+      const array = await svc.resolve({ ruleId: rule.id, valueEjson: '["a"]' });
+
+      expect(array.found).toBe(single.found);
+      expect(array.documents).toEqual(single.documents);
+    });
+  });
+
   it('rejects malformed EJSON values', async () => {
     const rule = svc.create({
       connectionId: CONN_ID,

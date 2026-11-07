@@ -1,8 +1,10 @@
 import React from 'react';
+import { useMediaQuery } from '@mantine/hooks';
 import { api } from '../../api/atelier';
 import { notify } from '../../theme/notifications';
 import { logFailure } from '../../utils/rendererLog';
 import { BUILDER_DEFAULT_PCT } from './panelSizes';
+import { narrowOpenPanel, ONE_PANEL_BELOW_PX, toggleNarrowPanel, type SidePanel } from './sidePanels';
 
 // One fixed id: a drag fires a write per release, and a failing store would
 // otherwise stack a toast for each.
@@ -28,6 +30,8 @@ export function useWorkspacePanelPrefs(): {
   toggleSidebar: () => void;
   builderCollapsed: boolean;
   commitBuilderCollapsed: (next: boolean) => void;
+  /** Below the width that fits both side panels. Layout changes here are not the user's stored layout. */
+  onePanelOnly: boolean;
 } {
   const [leftWidth, setLeftWidth] = React.useState(206);
   // Pixels, not a percentage: a plain flex column resized via the bespoke ResizeHandle, not a react-resizable-panels Panel.
@@ -70,11 +74,24 @@ export function useWorkspacePanelPrefs(): {
     };
   }, []);
 
+  const onePanelOnly = useMediaQuery(`(max-width: ${ONE_PANEL_BELOW_PX - 0.02}px)`, false, {
+    getInitialValueInEffect: false,
+  });
+  // Undefined until a toggle while narrow; forgotten once the window is wide
+  // again, so the stored layout comes straight back.
+  const [narrowChoice, setNarrowChoice] = React.useState<SidePanel | null | undefined>(undefined);
+  if (!onePanelOnly && narrowChoice !== undefined) setNarrowChoice(undefined);
+  const narrowOpen = narrowOpenPanel(narrowChoice, sidebarCollapsed, builderCollapsed);
+
   const toggleSidebar = React.useCallback(() => {
+    if (onePanelOnly) {
+      setNarrowChoice(toggleNarrowPanel(narrowOpen, 'navigator', narrowOpen === 'navigator'));
+      return;
+    }
     const next = !sidebarCollapsed;
     setSidebarCollapsed(next);
     persistPref('ui.workspace.sidebarCollapsed', next);
-  }, [sidebarCollapsed]);
+  }, [onePanelOnly, narrowOpen, sidebarCollapsed]);
 
   const commitLeftWidth = React.useCallback((v: number) => {
     persistPref('ui.workspace.leftWidth', v);
@@ -94,10 +111,17 @@ export function useWorkspacePanelPrefs(): {
     persistPref('ui.workspace.innerHSplit', v);
   }, []);
 
-  const commitBuilderCollapsed = React.useCallback((next: boolean) => {
-    setBuilderCollapsed(next);
-    persistPref('ui.workspace.builderCollapsed', next);
-  }, []);
+  const commitBuilderCollapsed = React.useCallback(
+    (next: boolean) => {
+      if (onePanelOnly) {
+        setNarrowChoice(toggleNarrowPanel(narrowOpen, 'builder', next));
+        return;
+      }
+      setBuilderCollapsed(next);
+      persistPref('ui.workspace.builderCollapsed', next);
+    },
+    [onePanelOnly, narrowOpen],
+  );
 
   return {
     prefsReady,
@@ -111,9 +135,10 @@ export function useWorkspacePanelPrefs(): {
     commitInnerHSplit,
     shellSplit,
     commitShellSplit,
-    sidebarCollapsed,
+    sidebarCollapsed: onePanelOnly ? narrowOpen !== 'navigator' : sidebarCollapsed,
     toggleSidebar,
-    builderCollapsed,
+    builderCollapsed: onePanelOnly ? narrowOpen !== 'builder' : builderCollapsed,
     commitBuilderCollapsed,
+    onePanelOnly,
   };
 }

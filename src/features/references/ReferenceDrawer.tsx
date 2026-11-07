@@ -31,6 +31,8 @@ interface LoadedFrame {
   result: ReferenceResolveResult | null;
   loading: boolean;
   error: string | null;
+  /** Opened from a list with its document in hand, so there is nothing to resolve. */
+  picked?: boolean;
 }
 
 export function ReferenceDrawer({
@@ -62,7 +64,7 @@ export function ReferenceDrawer({
   }, [stack]);
 
   React.useEffect(() => {
-    if (!topFrame) return;
+    if (!topFrame || loaded[topFrame.id]?.picked) return;
     let cancelled = false;
     setLoaded((prev) => {
       if (prev[topFrame.id]) return prev;
@@ -122,21 +124,23 @@ export function ReferenceDrawer({
     onPush({ id: makeFrameId(rule), rule, value, label: field });
   };
 
-  // Drilling into one element of a multi-doc list pushes a child frame whose
-  // value is that element's targetField. The drawer's resolve effect then
-  // rerolls into the single-doc UI for the new frame.
+  // Drilling into one element of a multi-doc list opens the document already in
+  // hand. Resolving again by its targetField could not: the field may be dotted
+  // or outside the rule's projection, and a value two documents share would only
+  // resolve back to this list.
   const handleListPick = (doc: Record<string, unknown>) => {
-    const pickValue = doc[topFrame.rule.targetField];
-    if (pickValue === undefined) return;
+    const id = makeFrameId(topFrame.rule);
+    const result = { ruleId: topFrame.rule.id, found: true, documents: [doc], durationMs: 0 };
+    setLoaded((prev) => ({ ...prev, [id]: { result, loading: false, error: null, picked: true } }));
     const label =
       (topFrame.rule.displayTemplate
         ? renderDisplayTemplate(topFrame.rule.displayTemplate, doc)
         : '') ||
       topFrame.rule.targetCollection;
     onPush({
-      id: makeFrameId(topFrame.rule),
+      id,
       rule: topFrame.rule,
-      value: pickValue,
+      value: doc[topFrame.rule.targetField] ?? doc._id,
       label,
     });
   };
@@ -158,7 +162,7 @@ export function ReferenceDrawer({
       }}
     >
       <Group
-        gap={6}
+        gap={themeVars.gapXs}
         wrap="nowrap"
         style={{
           padding: '8px 10px',
@@ -213,7 +217,7 @@ export function ReferenceDrawer({
             background: T.surface,
           }}
         >
-          <Text size="10px" c="dimmed" tt="uppercase" style={{ letterSpacing: '0.06em' }}>
+          <Text fz={T.fsXs} c="dimmed" tt="uppercase" style={{ letterSpacing: '0.06em' }}>
             {topFrame.rule.targetDb}.{topFrame.rule.targetCollection}
           </Text>
           <Text size="sm" fw={600} mt={4}>
@@ -222,13 +226,13 @@ export function ReferenceDrawer({
         </div>
 
         {frame?.loading && (
-          <div style={{ padding: 14, color: T.textMuted, fontSize: 12 }}>Loading…</div>
+          <div style={{ padding: 14, color: T.textMuted, fontSize: T.fsSm }}>Loading…</div>
         )}
         {frame?.error && (
-          <div style={{ padding: 14, color: T.warn, fontSize: 12 }}>{frame.error}</div>
+          <div style={{ padding: 14, color: T.warn, fontSize: T.fsSm }}>{frame.error}</div>
         )}
         {frame && !frame.loading && !frame.error && frame.result && !frame.result.found && (
-          <div style={{ padding: 14, color: T.textMuted, fontSize: 12 }}>
+          <div style={{ padding: 14, color: T.textMuted, fontSize: T.fsSm }}>
             No matching document.
           </div>
         )}
@@ -253,7 +257,7 @@ export function ReferenceDrawer({
 
 function BreadcrumbTrail({ stack }: { stack: ReferenceFrame[] }) {
   return (
-    <Group gap={4} wrap="nowrap" style={{ overflow: 'hidden' }}>
+    <Group gap={themeVars.gapXs} wrap="nowrap" style={{ overflow: 'hidden' }}>
       {stack.map((f, i) => {
         const last = i === stack.length - 1;
         return (
@@ -296,7 +300,7 @@ function DocList({ docs, displayTemplate, onPick }: DocListProps) {
               style={{
                 padding: '8px 12px',
                 borderBottom: `1px solid ${T.border}`,
-                fontSize: 12,
+                fontSize: T.fsSm,
                 color: T.textMuted,
                 fontStyle: 'italic',
               }}
@@ -315,7 +319,7 @@ function DocList({ docs, displayTemplate, onPick }: DocListProps) {
             variant="subtle"
             color="gray"
             size="compact-sm"
-            fz={12}
+            fz={T.fsSm}
             fw={400}
             fullWidth
             radius={0}
@@ -333,6 +337,8 @@ function DocList({ docs, displayTemplate, onPick }: DocListProps) {
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 display: 'block',
+                height: 'auto',
+                textAlign: 'left',
               },
             }}
           >
@@ -370,7 +376,7 @@ function DocFields({ doc, rulesByField, onFollow }: DocFieldsProps) {
   const entries = Object.entries(doc);
   if (entries.length === 0) {
     return (
-      <div style={{ padding: 14, color: T.textMuted, fontSize: 12, fontStyle: 'italic' }}>
+      <div style={{ padding: 14, color: T.textMuted, fontSize: T.fsSm, fontStyle: 'italic' }}>
         Document is empty.
       </div>
     );
@@ -387,10 +393,10 @@ function DocFields({ doc, rulesByField, onFollow }: DocFieldsProps) {
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 6,
+              gap: themeVars.gapXs,
               padding: '6px 12px',
               borderBottom: `1px solid ${T.border}`,
-              fontSize: 11,
+              fontSize: T.fsXs,
             }}
           >
             <span

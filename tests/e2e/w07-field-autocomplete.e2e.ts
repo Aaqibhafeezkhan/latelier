@@ -158,7 +158,7 @@ test('autocomplete: a value from an aggregation $match is offered in the builder
       // Close the completion list (if any) so Run is not hidden under it.
       await win.keyboard.press('Escape');
       await win.getByRole('button', { name: 'Run', exact: true }).click();
-      await expect(win.getByText('Pipeline returned no documents.')).toBeVisible({ timeout: 8000 });
+      await expect(win.getByText('The pipeline returned no documents')).toBeVisible({ timeout: 8000 });
 
       await ws.tablist.getByRole('tab', { name: /Documents/ }).click();
       await win.getByRole('button', { name: 'Add condition' }).click();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BUILDER_COLLAPSED_PCT,
+  asPercent,
+  BUILDER_COLLAPSED_PX,
   BUILDER_MIN_PCT,
   isUserChosenBuilderSplit,
 } from '../../src/pages/Workspace/panelSizes';
@@ -20,9 +21,10 @@ import {
  */
 describe('isUserChosenBuilderSplit', () => {
   it('rejects the collapsed rail width', () => {
-    // The whole bug in one assertion: 4 is not 0, so the old `< 1` test let it
-    // through and it was written to the user's stored split.
-    expect(isUserChosenBuilderSplit(BUILDER_COLLAPSED_PCT)).toBe(false);
+    // The whole bug in one assertion: the rail is not 0 wide, so the old `< 1`
+    // test let it through and it was written to the user's stored split. The
+    // layout map reports it as a percent of a 1000 px group here.
+    expect(isUserChosenBuilderSplit((BUILDER_COLLAPSED_PX / 1000) * 100)).toBe(false);
   });
 
   it('rejects anything below the draggable minimum', () => {
@@ -44,8 +46,17 @@ describe('isUserChosenBuilderSplit', () => {
   });
 
   // The rail must stay below the minimum, or the guard cannot tell a collapse
-  // from a drag and the bug comes straight back.
+  // from a drag and the bug comes straight back. Even in a 600 px group.
   it('keeps the rail below the draggable minimum', () => {
-    expect(BUILDER_COLLAPSED_PCT).toBeLessThan(BUILDER_MIN_PCT);
+    expect((BUILDER_COLLAPSED_PX / 600) * 100).toBeLessThan(BUILDER_MIN_PCT);
+  });
+});
+
+// react-resizable-panels reads a bare number as pixels, so a percent handed to
+// a Panel as a number lets the drawer be dragged down to 15 px.
+describe('asPercent', () => {
+  it('turns a percent into the string a Panel reads as percent', () => {
+    expect(asPercent(BUILDER_MIN_PCT)).toBe('15%');
+    expect(typeof asPercent(26)).toBe('string');
   });
 });

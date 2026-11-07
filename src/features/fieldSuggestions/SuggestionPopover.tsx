@@ -259,9 +259,9 @@ export function SuggestionPopover({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 8,
+          gap: T.gapSm,
           padding: '4px 10px',
-          fontSize: 11,
+          fontSize: T.fsXs,
           fontFamily: 'monospace',
           background: active ? T.accentSoft : 'transparent',
           color: T.text,
@@ -274,7 +274,7 @@ export function SuggestionPopover({
         {name && (
           <span
             style={{
-              fontSize: 10,
+              fontSize: T.fsXs,
               color: T.textMuted,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -288,7 +288,7 @@ export function SuggestionPopover({
         {badge && (
           <span
             style={{
-              fontSize: 9,
+              fontSize: T.fsXs,
               color: T.textGhost,
               textTransform: 'uppercase',
               letterSpacing: '0.04em',
@@ -321,7 +321,7 @@ export function SuggestionPopover({
           id={headerId}
           style={{
             padding: '4px 10px 2px',
-            fontSize: 9,
+            fontSize: T.fsXs,
             color: T.textGhost,
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
@@ -385,7 +385,7 @@ export function SuggestionPopover({
             style={{
               borderTop: `1px solid ${T.border}`,
               padding: '3px 10px',
-              fontSize: 10,
+              fontSize: T.fsXs,
               color: T.textMuted,
             }}
           >

@@ -7,6 +7,8 @@ interface ReferenceChipProps {
   onHover: (rect: DOMRect) => void;
   onLeave: () => void;
   onClick: (rect: DOMRect) => void;
+  /** `-1` takes the chip out of the Tab order while keeping it clickable. */
+  tabIndex?: number;
 }
 
 /**
@@ -14,7 +16,7 @@ interface ReferenceChipProps {
  * matches. Hovering opens a preview popover (handled by the parent); clicking
  * opens the reference drawer.
  */
-export function ReferenceChip({ rule, onHover, onLeave, onClick }: ReferenceChipProps) {
+export function ReferenceChip({ rule, onHover, onLeave, onClick, tabIndex }: ReferenceChipProps) {
   const T = themeVars;
   const ref = React.useRef<HTMLButtonElement>(null);
   const hoverTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -46,6 +48,7 @@ export function ReferenceChip({ rule, onHover, onLeave, onClick }: ReferenceChip
     <button
       ref={ref}
       type="button"
+      tabIndex={tabIndex}
       aria-label={`Open reference to ${rule.targetCollection}`}
       title={`→ ${rule.targetCollection}`}
       onMouseEnter={handleEnter}
@@ -71,9 +74,9 @@ export function ReferenceChip({ rule, onHover, onLeave, onClick }: ReferenceChip
         background: T.accentSoft,
         border: `1px solid ${T.accentBorder}`,
         borderRadius: 3,
-        color: T.accent,
+        color: T.accentInk,
         cursor: 'pointer',
-        fontSize: 10,
+        fontSize: T.fsXs,
         fontWeight: 600,
         lineHeight: 1,
         flexShrink: 0,

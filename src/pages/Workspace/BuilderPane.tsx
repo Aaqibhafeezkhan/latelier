@@ -225,7 +225,7 @@ function LogicPicker({
             onClick={() => onChange(v)}
             style={{
               padding: '2px 9px',
-              fontSize: 10,
+              fontSize: T.fsXs,
               fontWeight: 700,
               letterSpacing: 0.3,
               cursor: disabled ? 'default' : 'pointer',
@@ -713,7 +713,7 @@ function CondRow({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 4,
+        gap: T.gapXs,
         marginBottom: 8,
         paddingBottom: 8,
         borderBottom: `1px solid ${T.border}`,
@@ -722,7 +722,7 @@ function CondRow({
         transition: 'background 120ms, box-shadow 120ms',
       }}
     >
-      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: T.gapXs, alignItems: 'center' }}>
         <IncludeBox
           node={node}
           label={node.field.trim() ? `Include condition ${node.field}` : 'Include condition'}
@@ -730,7 +730,7 @@ function CondRow({
           onToggle={toggle}
           describedBy={excludedNoteId}
         />
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flex: 1, minWidth: 0, opacity: dim }}>
+        <div style={{ display: 'flex', gap: T.gapXs, alignItems: 'center', flex: 1, minWidth: 0, opacity: dim }}>
           <TextInput
             ref={fieldInputRef}
             placeholder="field"
@@ -786,7 +786,10 @@ function CondRow({
             title={opProblem}
             error={!!opProblem}
             size="xs"
-            style={{ width: 76, flexShrink: 0 }}
+            // Gives up width before the row overflows the drawer: the field
+            // box keeps its floor, and the remove button is the last control
+            // and the first to be cut off when the row is too wide.
+            style={{ flex: '0 1 76px', minWidth: 52 }}
             styles={{ input: { fontFamily: 'monospace' } }}
           />
           <SuggestionPopover
@@ -827,7 +830,7 @@ function CondRow({
                 size={18}
                 c={T.textGhost}
                 aria-label={`Documentation for ${node.op}`}
-                style={{ fontSize: 10, fontWeight: 600, cursor: 'help', flexShrink: 0 }}
+                style={{ fontSize: T.fsXs, fontWeight: 600, cursor: 'help', flexShrink: 0 }}
               >
                 ?
               </ActionIcon>
@@ -861,7 +864,7 @@ function CondRow({
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start', opacity: dim }}>
+      <div style={{ display: 'flex', gap: T.gapXs, alignItems: 'flex-start', opacity: dim }}>
         <Select
           value={node.valType}
           disabled={readOnly}
@@ -879,10 +882,13 @@ function CondRow({
           size="xs"
           allowDeselect={false}
           withCheckIcon={false}
-          style={{ width: 88, flexShrink: 0 }}
+          rightSectionWidth={20}
+          // Wide enough for OBJECTID, the longest type, once the padding is this tight.
+          style={{ width: 92, flexShrink: 0 }}
           styles={{
             input: {
-              fontSize: 9,
+              paddingInlineStart: 8,
+              fontSize: T.fsXs,
               fontWeight: 700,
               textTransform: 'uppercase',
               letterSpacing: 0.4,
@@ -907,20 +913,20 @@ function CondRow({
           size="compact-xs"
           disabled={readOnly}
           onClick={convertToRaw}
-          styles={{ root: { alignSelf: 'flex-start', fontSize: 10, padding: '0 4px' } }}
+          styles={{ root: { alignSelf: 'flex-start', fontSize: T.fsXs, padding: '0 4px' } }}
         >
           Convert to raw clause
         </Button>
       )}
 
       {opProblem && (
-        <span role="alert" style={{ fontSize: 10, color: T.warn, lineHeight: 1.3 }}>
+        <span role="alert" style={{ fontSize: T.fsXs, color: T.warn, lineHeight: 1.3 }}>
           {opProblem}
         </span>
       )}
 
       {typeWarning && (
-        <span style={{ fontSize: 10, color: T.textMuted, lineHeight: 1.3, opacity: dim }}>
+        <span style={{ fontSize: T.fsXs, color: T.textMuted, lineHeight: 1.3, opacity: dim }}>
           Sample: {typeWarning.field} is {typeWarning.expectedType} in {typeWarning.percent}% of documents that have it
         </span>
       )}
@@ -975,7 +981,7 @@ function RawRow({
         transition: 'background 120ms, box-shadow 120ms, border-color 120ms',
       }}
     >
-      <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', gap: T.gapXs, alignItems: 'flex-start' }}>
         <IncludeBox
           node={node}
           label={`Include raw clause ${groupPosition(path)}`}
@@ -983,7 +989,7 @@ function RawRow({
           onToggle={toggle}
           describedBy={excludedNoteId}
         />
-        <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start', flex: 1, minWidth: 0, opacity: dim }}>
+        <div style={{ display: 'flex', gap: T.gapXs, alignItems: 'flex-start', flex: 1, minWidth: 0, opacity: dim }}>
           <textarea
             value={node.json}
             disabled={readOnly}
@@ -996,7 +1002,7 @@ function RawRow({
             style={{
               flex: 1,
               fontFamily: '"JetBrains Mono", monospace',
-              fontSize: 11,
+              fontSize: T.fsXs,
               padding: '4px 6px',
               border: `1px solid ${problem ? T.warn : T.border}`,
               borderRadius: T.rx,
@@ -1037,7 +1043,7 @@ function RawRow({
           Try to parse
         </Button>
         {problem && (
-          <span role="alert" style={{ fontSize: 10, color: T.warn, lineHeight: 1.3 }}>
+          <span role="alert" style={{ fontSize: T.fsXs, color: T.warn, lineHeight: 1.3 }}>
             {problem}
           </span>
         )}
@@ -1271,7 +1277,7 @@ function GroupView({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
+          gap: themeVars.gapXs,
           padding: isRoot ? '6px 8px' : '0 0 6px',
           ...(isRoot ? { flexShrink: 0, minHeight: 40, boxSizing: 'border-box' } : {}),
         }}
@@ -1300,8 +1306,8 @@ function GroupView({
           }}
         >
           {isNegation ? (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.3, color: T.accent }}>NOT</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: themeVars.gapXs }}>
+              <span style={{ fontSize: T.fsXs, fontWeight: 700, letterSpacing: 0.3, color: T.accentInk }}>NOT</span>
               <Tooltip label={`Remove negation ${position}`} withArrow>
                 <ActionIcon
                   variant="subtle"
@@ -1378,7 +1384,7 @@ function GroupView({
                 onClick={negate}
                 aria-label={`Negate group ${position}`}
               >
-                <span aria-hidden style={{ fontSize: 13, lineHeight: 1 }}>¬</span>
+                <span aria-hidden style={{ fontSize: T.fsMd, lineHeight: 1 }}>¬</span>
               </ActionIcon>
             </Tooltip>
           )}
@@ -1429,16 +1435,16 @@ function GroupView({
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: 14,
+              gap: themeVars.gapMd,
               padding: 16,
               textAlign: 'center',
             }}
           >
-            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: T.text }}>No conditions yet</p>
-            <p style={{ margin: 0, maxWidth: 260, fontSize: 12, lineHeight: 1.5, color: T.textMuted }}>
-              Drag a field here from the results, or start from a common filter.
+            <p style={{ margin: 0, fontSize: T.fsMd, fontWeight: 600, color: T.text }}>No conditions yet</p>
+            <p style={{ margin: 0, maxWidth: 260, fontSize: T.fsSm, lineHeight: 1.5, color: T.textMuted }}>
+              This filter matches every document. Drag a field here from the results, or start from a common filter.
             </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 6, maxWidth: 290 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: themeVars.gapXs, maxWidth: 290 }}>
               {FILTER_TEMPLATES.map((tpl) => (
                 <Tooltip key={tpl.id} label={`Uses ${tpl.operator}`} withArrow>
                   <Button variant="light" size="compact-xs" onClick={() => addTemplate(tpl)}>
@@ -1531,13 +1537,13 @@ function GroupView({
             title={`Drop a field here to add a condition to this ${isRoot ? 'filter' : 'group'}`}
             style={{
               textAlign: 'center',
-              fontSize: 11,
+              fontSize: T.fsXs,
               lineHeight: '28px',
               height: 28,
               marginTop: node.children.length === 0 ? 0 : 4,
               borderRadius: T.rs,
               border: `1px dashed ${isActive ? T.accent : T.border}`,
-              color: isActive ? T.accent : T.textMuted,
+              color: isActive ? T.accentInk : T.textMuted,
               transition: 'border-color 120ms, color 120ms',
             }}
           >
@@ -1805,7 +1811,7 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
   // time (the toast after a save or delete), and two buttons both called
   // "Undo" would leave a screen-reader user guessing which is which.
   const historyButtons = (
-    <span style={{ display: 'inline-flex', gap: 4 }}>
+    <span style={{ display: 'inline-flex', gap: T.gapXs }}>
       <Tooltip label="Undo filter edit" withArrow>
         <ActionIcon
           ref={undoRef}
@@ -1840,58 +1846,60 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
         ? 'Counting…'
         : liveCount.state === 'unavailable'
           ? 'Match count unavailable'
-          : root.children.length === 0
-            ? 'Matches every document'
-            : '';
+          : '';
   const summary = rowsSummary(root);
 
+  const notApplied = problems.length > 0 ? problemLabels(root, problems).join(', ') : '';
+  const frozenText = frozenOnDraft
+    ? "Filter text isn't valid JSON — showing this filter as you last left it in the drawer. Fix the text in the bar to edit it."
+    : "Filter text isn't valid JSON — the tree below is the last valid version.";
+
   // Inside the root group's DOM, so a drop on it still lands on the root
-  // (ADR 0007: no drop lands outside every group). Always there, so the list
-  // below starts at the same place whatever the filter's state; only the one
-  // sentence too long to clip, the frozen-tree alert, may wrap past its height.
+  // (ADR 0007: no drop lands outside every group). One fixed line in every state,
+  // so the list below always starts at the same place; a state only swaps the
+  // text. The frozen-tree sentence is too long for it, so a short form shows and
+  // the full one stays in a tooltip and for a screen reader.
   const statusLine = (
     <div
+      data-testid="filter-status-line"
+      title={readOnly ? frozenText : notApplied || undefined}
       style={{
         flexShrink: 0,
-        minHeight: 28,
+        height: 24,
         boxSizing: 'border-box',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        gap: 2,
-        padding: '4px 10px',
-        fontSize: 11,
-        lineHeight: 1.35,
+        padding: '0 10px',
+        fontSize: T.fsXs,
+        lineHeight: '22px',
         color: T.textMuted,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
         borderTop: `1px solid ${T.border}`,
         borderBottom: `1px solid ${T.border}`,
       }}
     >
-      {problems.length > 0 && (
-        <div
-          role="status"
-          title={problemLabels(root, problems).join(', ')}
-          style={{ color: T.redText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-        >
-          ⚠ {problems.length} not applied: {problemLabels(root, problems).join(', ')}
-        </div>
+      {problems.length > 0 && !readOnly && (
+        <span role="status" style={{ color: T.redText }}>
+          ⚠ {problems.length} not applied: {notApplied}
+        </span>
       )}
       {readOnly && (
-        <div role="alert">
-          {frozenOnDraft
-            ? "Filter text isn't valid JSON — showing this filter as you last left it in the drawer. Fix the text in the bar to edit it."
-            : "Filter text isn't valid JSON — the tree below is the last valid version."}
-        </div>
+        <span role="alert" style={{ color: T.warnText }}>
+          <span aria-hidden="true">
+            {frozenOnDraft ? 'Invalid text. Fix it in the bar to edit.' : 'Invalid text. Showing last valid filter.'}
+          </span>
+          <VisuallyHidden>{frozenText}</VisuallyHidden>
+        </span>
       )}
       {problems.length === 0 && !readOnly && (
-        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {/* `aria-live` without `role="status"`: the banners above are the
-              drawer's status roles, and a count is not a problem report. Only
+        <>
+          {/* `aria-live` without `role="status"`: the banner above is the
+              drawer's status role, and a count is not a problem report. Only
               the count is live, so a keystroke in a row announces nothing. */}
-          {liveCountText && <span aria-live="polite">{liveCountText}</span>}
+          <span aria-live="polite">{liveCountText}</span>
           {liveCountText && summary && ' · '}
           {summary}
-        </div>
+        </>
       )}
     </div>
   );
@@ -1913,15 +1921,6 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
     />
   );
 }
-
-/** Tight enough that the longest label, "Open as pipeline", fits a third of the default pane. */
-const BOTTOM_ROW_BUTTON = {
-  variant: 'default',
-  h: 28,
-  px: 0,
-  fullWidth: true,
-  styles: { label: { fontSize: 11, fontWeight: 500 } },
-} as const;
 
 function BuilderPaneInner({
   savedRefreshKey,
@@ -2049,7 +2048,7 @@ function BuilderPaneInner({
     void confirmDestructive({
       title: 'Reset this query?',
       body: (
-        <span style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.5 }}>
+        <span style={{ fontSize: T.fsSm, color: T.textMuted, lineHeight: 1.5 }}>
           This clears the filter — every condition, group and raw clause — back
           to <code>{'{}'}</code>, along with the sort, limit and projection
           {setOptions.length > 0 && <>, and the {setOptions.join(', ')} you set</>}.
@@ -2197,7 +2196,7 @@ function BuilderPaneInner({
           style={{ flexShrink: 0, height: 42, borderBottom: `1px solid ${T.border}` }}
         >
           {(['Builder', 'Saved', 'Recent'] as BuilderTab[]).map((tab) => (
-            <Tabs.Tab key={tab} value={tab} styles={{ tab: { fontSize: 11 } }}>
+            <Tabs.Tab key={tab} value={tab} styles={{ tab: { fontSize: T.fsXs } }}>
               {/* W13 §6 — the first tab's label is "Filter"; `tab` (the
                   BuilderTab value 'Builder') is unchanged so persisted tab
                   state / other call sites keep working. */}
@@ -2219,35 +2218,31 @@ function BuilderPaneInner({
           />
 
           {/* Pinned bottom row: Reset / Copy code / Open as pipeline, three
-              actions on the whole query, so one even row rather than the
-              filter's own controls. Save lived here too until the QueryBar
-              toolbar Save (always visible, next to Run/History) made this one
-              a duplicate; `saved.create`'s hint anchor moved with it.
-              `SavedStrip` — a preview of the Saved tab one click away — is
-              gone for the same reason.
+              actions on the whole query. Save lived here too until the QueryBar
+              toolbar Save (always visible, next to Run/History) made this one a
+              duplicate; `saved.create`'s hint anchor moved with it. `SavedStrip`,
+              a preview of the Saved tab one click away, is gone for the same
+              reason.
 
-              `auto-fit` keeps three equal columns until a narrow pane can't
-              hold them, then wraps instead of clipping a label. */}
+              Each button keeps its natural width and the row wraps, so the
+              height depends on the pane's width alone and no label clips. */}
           <div
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))',
-              gap: 4,
-              alignItems: 'center',
-              alignContent: 'center',
-              minHeight: 48,
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: themeVars.gapXs,
               boxSizing: 'border-box',
-              padding: '6px 10px',
+              padding: '10px',
               borderTop: `1px solid ${T.border}`,
               flexShrink: 0,
             }}
           >
-            <Button {...BOTTOM_ROW_BUTTON} onClick={handleReset}>
+            <Button variant="default" size="compact-xs" onClick={handleReset}>
               Reset
             </Button>
             <Menu position="top-start" shadow="md">
               <Menu.Target>
-                <Button {...BOTTOM_ROW_BUTTON} rightSection={I.chevD}>
+                <Button variant="default" size="compact-xs" rightSection={I.chevD}>
                   Copy code
                 </Button>
               </Menu.Target>
@@ -2259,7 +2254,7 @@ function BuilderPaneInner({
                 ))}
               </Menu.Dropdown>
             </Menu>
-            <Button {...BOTTOM_ROW_BUTTON} onClick={handleOpenAsPipeline}>
+            <Button variant="default" size="compact-xs" onClick={handleOpenAsPipeline}>
               Open as pipeline
             </Button>
           </div>

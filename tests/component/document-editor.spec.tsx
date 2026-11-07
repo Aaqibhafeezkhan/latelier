@@ -221,6 +221,38 @@ describe('DocumentEditor — the surface', () => {
   });
 });
 
+describe('DocumentEditor — fixed size and docked footer', () => {
+  const surfaceEl = () => screen.getByTestId('document-editor-surface');
+
+  it.each([
+    ['a one-field document', { _id: { $oid: OID }, a: 1 }],
+    ['a long one', DOC],
+  ])('opens at the same height for %s', (_label, doc) => {
+    setup({ doc });
+    expect(surfaceEl().style.height).toBe('520px');
+  });
+
+  it('keeps the default height when the remembered size has only a width', async () => {
+    setup({ prefs: { get: (async (key: string) => (key === 'ui.workspace.documentEditorSize' ? { width: 900 } : null)) as IpcApi['prefs']['get'] } });
+    await waitFor(() => expect(surfaceEl().style.width).toBe('900px'));
+    expect(surfaceEl().style.height).toBe('520px');
+  });
+
+  it('keeps Cancel and Save outside the resizable surface, so its grip never sits on them', () => {
+    setup();
+    expect(surfaceEl().contains(save())).toBe(false);
+    expect(surfaceEl().contains(within(editor()).getByRole('button', { name: 'Cancel' }))).toBe(false);
+  });
+
+  it('still saves on ⌘↵ pressed from the footer', async () => {
+    const { updateOne } = setup();
+    fireEvent.change(field('name'), { target: { value: 'gadget' } });
+    fireEvent.keyDown(save(), { key: 'Enter', metaKey: true });
+    await settle();
+    expect(updateOne).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('DocumentEditor — Fields view', () => {
   it('gives each scalar its own input, and renders the rest read-only', () => {
     setup();
@@ -1198,11 +1230,19 @@ describe('DocumentEditor — focusPath (W18 §8)', () => {
     expect(document.activeElement).toBe(within(row('re')).getByRole('button', { name: 'Edit in JSON' }));
   });
 
-  it('leaves the default focus target alone when no focusPath is given', async () => {
+  it('opens on the first field a person can type in when no focusPath is given', async () => {
     setup();
     await settleFocusTrap();
-    // Mantine's trap still focuses *something* on open — the point is only
-    // that it isn't steered onto a specific row.
-    expect(document.activeElement?.hasAttribute('data-autofocus')).toBe(false);
+    // Not the dialog's Close button: the first value control in the Fields list.
+    const first = within(editor()).getByTestId('document-editor-fields-body').querySelector('input:not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])');
+    expect(first).not.toBeNull();
+    expect(document.activeElement).toBe(first);
+    expect(document.activeElement).not.toBe(within(editor()).getByRole('button', { name: 'Close' }));
+  });
+
+  it('opens an insert dialog on its new-field box', async () => {
+    setupInsert();
+    await settleFocusTrap();
+    expect(document.activeElement).toBe(within(insertEditor()).getByRole('textbox', { name: 'New field name' }));
   });
 });

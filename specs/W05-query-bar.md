@@ -14,7 +14,7 @@ The single-line editor above the result area that shows the compiled MQL, accept
 
 ## Scope
 
-- **In**: Query bar UI, bidirectional sync state machine, Run button, hydration on builder change, hand-edit detection, "Re-sync builder" action, error pill, duration pill, document-count pill.
+- **In**: Query bar UI, bidirectional sync state machine, Run button, hydration on builder change, hand-edit detection, "Re-sync builder" action, the notice beside Run, duration pill, document-count pill. A failed run replaces the results (W06 §5).
 - **Out**: The runner (W03), result rendering (W06), pagination (W07).
 
 ## Dependencies
@@ -66,7 +66,7 @@ Above the result area; matches mock.
 │           [Run]                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ┌─ Result bar ────────────────────────────────────────────────────────────┐
-│ [▲ N docs] · [▲ 42 ms] · [▲ error pill]       [pagination — W07]        │
+│ [▲ N docs] · [▲ 42 ms]                        [pagination — W07]        │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -93,7 +93,7 @@ Above the result area; matches mock.
 - Result bar shows, in order:
   - `N documents` (or `—` if not yet run).
   - Duration `Xms`.
-  - Optional error pill: when last run errored, shows `ERR: <code>` with hover for message; clicking opens a side drawer with the raw error JSON.
+  - When the last run failed and left no rows, "Query failed" in the count's place; the error itself fills the results pane (W06 §5).
   - Pagination controls (W07).
 
 ## 3. Run flow
@@ -104,8 +104,8 @@ Above the result area; matches mock.
    - `projection = buildProjection(state.builder.projection)` if any.
    - `limit = state.builder.limit ? Number(state.builder.limit) : pageSize`.
    - `skip = page * pageSize`.
-2. Validate `filter` is EJSON. If not, abort and show a red pill "Invalid MQL".
-3. `setPending(true); setLastError(null);`
+2. Validate `filter` is EJSON. If not, abort: the rows stay, dimmed, and the reason shows beside Run.
+3. `setPending(true);`
 4. `const res = await api.query.find(FindInput)`.
 5. Display: result bar updates with `documents.length` and `durationMs`. Pass `documents` to W06 result views via context.
 6. `await api.query.count({...})` in parallel for the `totalCount` — separate spinner inside the doc-count pill.
@@ -127,11 +127,9 @@ Each run generates a UUID `cancelToken`, stored in a ref. If a new Run starts, t
 
 | Error                         | UX |
 | ----------------------------- | -- |
-| Client-side invalid EJSON     | Red pill "Invalid MQL"; Run disabled until fixed. |
-| `MONGO_ERROR` with `AUTH`     | Banner: "Permission denied." |
-| `NETWORK`/`TIMEOUT`           | Pill red "Error — timed out", with retry via Run. |
-| `UNAUTHORIZED`                | Banner: "Your user lacks read access to this collection." |
-| `VALIDATION` (malformed op)   | Pill red with tooltip showing the Mongo error message. |
+| Client-side invalid EJSON     | The reason, in a line beside Run that moves nothing; Run disabled until fixed. Rows stay, dimmed. |
+| `NETWORK`/`UNAUTHORIZED`      | Results pane: the error, with Run again (W06 §5). |
+| Anything else the server refuses (`VALIDATION`, `MONGO_ERROR`, `TIMEOUT`) | Results pane: the whole error, with Revert to last valid query (W06 §5). |
 
 ## 7. Acceptance criteria
 
@@ -144,7 +142,7 @@ Each run generates a UUID `cancelToken`, stored in a ref. If a new Run starts, t
   untouched.
 - Run honors the current `queryRaw` regardless of sync state.
 - `⌘↵` runs; `Esc` cancels.
-- A failed run does not clobber a prior successful result (`documents` remain visible until the next success).
+- A run the client refuses keeps the rows, dimmed. A run the server refuses replaces them with the error (W06 §5).
 - The result bar reflects `documents.length`, count (when available), duration, and error state correctly.
 
 ## 8. Test cases
@@ -154,7 +152,7 @@ Each run generates a UUID `cancelToken`, stored in a ref. If a new Run starts, t
 - **dirty-parseable.spec.tsx**: hand-edit to `{ amount: { $gt: 10 } }` → DIRTY pill offers Re-sync. Click it → builder reflects the new condition; SYNCED again.
 - **dirty-freeform.spec.tsx**: hand-edit to `{ $expr: { … } }` → DIRTY (parseNo); builder pane is disabled.
 - **run-uses-queryRaw.spec.tsx**: set DIRTY, click Run → mock `api.query.find` receives the raw bar text, not the builder-compiled MQL.
-- **invalid-ejson.spec.tsx**: bar contains `{ not json` → Run disabled; pill red.
+- **invalid-ejson.spec.tsx**: bar contains `{ not json` → Run disabled; the reason shows beside Run.
 - **cancel-esc.spec.tsx**: start a run (mock resolves after 2s); press Esc → `api.query.cancel` called; no banner shown.
 
 ### Integration

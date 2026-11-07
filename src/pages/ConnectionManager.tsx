@@ -35,20 +35,20 @@ function TitleBar({ dark, toggle, onCmdK, connectionName }: {
   const navigate = useNavigate();
   return (
     <div style={{
-      height: 46, display: 'flex', alignItems: 'center', gap: 12,
+      height: 46, display: 'flex', alignItems: 'center', gap: T.gapMd,
       padding: '0 16px', borderBottom: `1px solid ${T.border}`,
       background: T.surface, flexShrink: 0,
       WebkitAppRegion: 'drag',
     } as React.CSSProperties}>
       <div style={{ width: 70, flexShrink: 0 }} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: themeVars.gapXs, WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <TitleBarBackLink label="Data View" onClick={() => navigate('/workspace')} />
         <span style={{ color: T.textGhost }}>/</span>
         {/* Sister fix to TabStrip's own: a Connection missing from
             the list is unresolved, not literally named "Connection". The
             parenthetical reads as a state so it can't be mistaken for a
             real Connection name. */}
-        <span style={{ fontSize: 13, color: T.textMuted }}>{connectionName ?? '(unresolved connection)'}</span>
+        <span style={{ fontSize: T.fsMd, color: T.textMuted }}>{connectionName ?? '(unresolved connection)'}</span>
       </div>
       <div style={{ flex: 1 }} />
       <Button
@@ -232,7 +232,7 @@ export default function ConnectionManager() {
           height: '100vh',
           background: T.bg,
           color: T.text,
-          fontSize: 13,
+          fontSize: T.fsMd,
         }}
       >
         <AppShell.Header withBorder={false} style={{ background: 'transparent' }}>

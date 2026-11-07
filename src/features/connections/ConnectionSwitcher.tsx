@@ -184,7 +184,7 @@ function ConnectionRow({
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
-        gap: 8,
+        gap: T.gapSm,
         padding: '7px 10px 7px 12px',
         cursor: 'pointer',
         background: isHighlighted
@@ -233,13 +233,13 @@ function ConnectionRow({
       <div style={{ flex: 1, minWidth: 0 }}>
         <Text
           truncate
-          style={{ fontSize: 12, fontWeight: 600, color: T.text }}
+          style={{ fontSize: T.fsSm, fontWeight: 600, color: T.text }}
         >
           {conn.name}
         </Text>
         <Text
           truncate
-          style={{ fontSize: 10, color: T.textMuted, fontFamily: 'ui-monospace, monospace' }}
+          style={{ fontSize: T.fsXs, color: T.textMuted, fontFamily: 'ui-monospace, monospace' }}
         >
           {conn.host}
         </Text>
@@ -249,7 +249,7 @@ function ConnectionRow({
       {conn.status === 'connected' && conn.serverVersion && (
         <span
           title={`MongoDB ${conn.serverVersion}`}
-          style={{ fontSize: 10, color: T.textMuted, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}
+          style={{ fontSize: T.fsXs, color: T.textMuted, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}
         >
           v{conn.serverVersion}
         </span>
@@ -700,7 +700,7 @@ export function ConnectionSwitcher({
               ) : undefined
             }
             rightSection={
-              <span aria-hidden style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span aria-hidden style={{ display: 'flex', alignItems: 'center', gap: T.gapXs }}>
                 {focusedConnection?.readOnly && (
                   <span title="Read-only connection" style={{ display: 'flex', color: T.textMuted }}>
                     {I.lock}
@@ -797,7 +797,7 @@ export function ConnectionSwitcher({
           style={{ maxHeight: 340, overflowY: 'auto' }}
         >
           {filtered.length === 0 ? (
-            <div style={{ padding: '18px 12px', fontSize: 12, color: T.textMuted, textAlign: 'center' }}>
+            <div style={{ padding: '18px 12px', fontSize: T.fsSm, color: T.textMuted, textAlign: 'center' }}>
               {/*
                 `filtered` is empty both when a search matched nothing and when
                 there is nothing to search. Only the first case should name the
@@ -841,7 +841,7 @@ export function ConnectionSwitcher({
         {/* Three entries, not six: the rest are taught by the row action
             tooltips and the expanded table, not by rote memorization here. */}
         <Group
-          gap={8}
+          gap={T.gapSm}
           px={10}
           py={7}
           role="note"

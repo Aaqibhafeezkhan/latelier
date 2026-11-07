@@ -119,6 +119,11 @@ export interface ConnectionRuntime {
   connectedAt?: string;
   serverVersion?: string;
   topology?: MongoTopology;
+  /**
+   * Why an open connection dropped by itself, until the next connect settles.
+   * Apart from `errorMessage`: a drop renders as Dormant, not as a failed connect.
+   */
+  lostReason?: string;
 }
 
 export type MongoTopology = 'Single' | 'ReplicaSet' | 'Sharded' | 'Unknown';
@@ -170,6 +175,8 @@ export interface ConnectionSummary {
   status: 'unknown' | 'connected' | 'disconnected' | 'connecting' | 'error';
   serverVersion?: string;
   readOnly: boolean;
+  /** See `ConnectionRuntime.lostReason`. */
+  lostReason?: string;
 }
 
 /**
@@ -838,6 +845,12 @@ export interface TableColumnConfig {
   computed?: ComputedColumn[];
 }
 
+/** A whole find query, as a tab holds it. */
+export interface LastQuery {
+  queryRaw: string;
+  builder: BuilderState;
+}
+
 /**
  * Per-tab state for a collection tab. Persisted as JSON via `workspace_tabs`,
  * except the result-bearing fields (`lastRun`, `aggregation.lastRun`), which
@@ -876,6 +889,8 @@ export interface CollectionTabState {
    * Run back to the first page (W07 §3). Absent until a tab's first run.
    */
   lastRunQueryKey?: string;
+  /** The last query the server answered in this tab: what "Revert to last valid query" loads. */
+  lastValidQuery?: LastQuery;
   /** Never persisted — see the interface doc. Absent on a restored tab. */
   lastRun?: LastRun;
   columns?: Record<string, { width: number }>;
@@ -1106,7 +1121,10 @@ export interface ReferenceResolveResult {
    * For scalar source values this is a 0- or 1-element array. For array
    * source values (e.g. `item_ids: [ObjectId, ObjectId, …]`) the resolver
    * runs `$in` against the target field and returns every match in the
-   * source array's order; unmatched ids are silently dropped.
+   * source array's order; source values that match nothing are silently
+   * dropped. A document the server matched that pairs with no source value
+   * (the server compares numbers across types, a key does not) follows the
+   * ordered ones, so a match is never lost.
    */
   documents: unknown[];
   durationMs: number;

@@ -276,6 +276,45 @@ describe('StructureView — statistics section', () => {
     expect(within(stats).getByText('— · —')).toBeTruthy();
   });
 
+  it('holds every section below the statistics until the details arrive, so none is pushed down', async () => {
+    let resolve!: (d: CollectionDetails) => void;
+    const sampleSchema = vi.fn(async () => ({ docs: [] }));
+    const list = vi.fn(async () => [ID_INDEX]);
+    installAtelierMock({
+      index: { list },
+      meta: {
+        collectionDetails: () => new Promise<CollectionDetails>((r) => (resolve = r)),
+        sampleSchema,
+      },
+    });
+
+    renderStructure();
+
+    await screen.findByRole('region', { name: 'Statistics' });
+    expect(screen.queryByRole('region', { name: 'Indexes' })).toBeNull();
+    expect(screen.queryByLabelText('Sample size')).toBeNull();
+    expect(sampleSchema).not.toHaveBeenCalled();
+
+    await act(async () => resolve(DETAILS));
+    expect(await screen.findByRole('region', { name: 'Indexes' })).toBeTruthy();
+    expect(screen.getByLabelText('Sample size')).toBeTruthy();
+  });
+
+  it('reserves the space of the reported indexes while their list loads', async () => {
+    installAtelierMock({
+      index: { list: () => new Promise<IndexInfo[]>(() => {}) },
+      meta: {
+        collectionDetails: async () => ({ ...DETAILS, stats: { ...DETAILS.stats, indexCount: 3 } }),
+        sampleSchema: async () => ({ docs: [] }),
+      },
+    });
+
+    renderStructure();
+
+    const loading = await screen.findByText('Loading indexes…');
+    expect(Number.parseInt(loading.style.minHeight, 10)).toBeGreaterThan(3 * 30);
+  });
+
   it('says Loading until the first reply arrives', async () => {
     let resolve!: (d: CollectionDetails) => void;
     installAtelierMock({

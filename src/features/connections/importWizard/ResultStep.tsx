@@ -5,7 +5,7 @@ import { REPICK_LABEL, plural } from '../transferCopy';
 /** C14 §7: what the commit actually did, as main reports it. */
 export function ResultStep({ result }: { result: ImportCommitResult }) {
   return (
-    <Stack gap="xs">
+    <Stack gap="xs" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
       <Text size="sm" role="status">
         {plural(result.created.length, 'Connection')} imported.
       </Text>

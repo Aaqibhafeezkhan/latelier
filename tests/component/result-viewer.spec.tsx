@@ -305,6 +305,7 @@ describe('ResultViewer compound', () => {
       state,
       { isLoading: true },
       <ResultViewer>
+        <ResultViewer.SelectionBar onDeleteSelected={noop} />
         <ResultViewer.Body
           onClearFilter={noop}
           onColumnResize={noop}
@@ -318,26 +319,26 @@ describe('ResultViewer compound', () => {
     const { container } = renderLoadingBody(makeState({ view: 'Tree' }));
     const status = screen.getByRole('status', { name: 'Loading results' });
     expect(status.querySelectorAll('.mantine-Skeleton-root')).toHaveLength(8);
-    // One live region at a time: no "Loading…" strip on top of the skeleton.
+    // One live region at a time: nothing in the band on top of the skeleton.
     expect(screen.getAllByRole('status')).toHaveLength(1);
-    expect(container.textContent).not.toContain('Loading…');
+    expect(container.textContent).not.toContain('Running…');
   });
 
   it.each([
     ['an empty result', { documents: [] as unknown[] }],
     ['an errored result', { documents: [] as unknown[], error: { code: 'MONGO_ERROR', message: 'boom' } }],
-  ])('a re-run after %s shows the Loading strip, not the first-load skeleton', (_label, run) => {
+  ])('a re-run after %s says Running in the band, not the first-load skeleton', (_label, run) => {
     renderLoadingBody(
       makeState({
         view: 'Tree',
         lastRun: { ...run, durationMs: 0, ranAt: new Date().toISOString() } as CollectionTabState['lastRun'],
       }),
     );
-    expect(screen.getByRole('status').textContent).toBe('Loading…');
+    expect(screen.getByRole('status').textContent).toBe('Running…');
     expect(screen.queryByRole('status', { name: 'Loading results' })).toBeNull();
   });
 
-  it('a re-run keeps the existing rows under the Loading strip, with no skeleton', () => {
+  it('a re-run keeps the existing rows under the band, with no skeleton', () => {
     const { container } = renderLoadingBody(
       makeState({
         view: 'JSON',
@@ -345,7 +346,7 @@ describe('ResultViewer compound', () => {
       }),
     );
     const status = screen.getByRole('status');
-    expect(status.textContent).toBe('Loading…');
+    expect(status.textContent).toBe('Running…');
     expect(screen.queryByRole('status', { name: 'Loading results' })).toBeNull();
     expect(container.textContent).toContain('alpha');
   });

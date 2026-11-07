@@ -66,6 +66,49 @@ export default defineConfig([
     },
   },
   {
+    // Type scale: a font size in src/ comes from themeVars (fsXs..fsLg, 11/12/13/16px),
+    // never a literal, and nothing is below 11px. The selectors match a number or a
+    // "<n>px/em/rem" string only, so `fontSize: 'inherit'`, `var(...)` strings, the
+    // editor-size preference and `fz="xs"` stay legal. Token definitions live in
+    // index.css and themeVars.ts (strings starting `var(`), which these never match.
+    files: ['src/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "Property[key.name='fontSize'][value.type='Literal'][value.raw=/^['\"]?\\d/], Property[key.value='fontSize'][value.type='Literal'][value.raw=/^['\"]?\\d/]",
+          message:
+            'Literal font size. Use a themeVars token: fsXs (11), fsSm (12), fsMd (13) or fsLg (16). Nothing below 11px.',
+        },
+        {
+          selector:
+            "JSXAttribute[name.name=/^(fz|fontSize)$/][value.type='JSXExpressionContainer'][value.expression.type='Literal'][value.expression.raw=/^['\"]?\\d/], JSXAttribute[name.name=/^(fz|fontSize)$/][value.type='Literal'][value.raw=/^['\"]?\\d/]",
+          message:
+            'Literal font size on fz/fontSize. Use a themeVars token: fsXs (11), fsSm (12), fsMd (13) or fsLg (16). Nothing below 11px.',
+        },
+        {
+          selector:
+            "JSXOpeningElement[name.name='Text'] > JSXAttribute[name.name='size'][value.type='Literal'][value.raw=/^['\"]?\\d/]",
+          message:
+            'Literal px size on Text. Use fz with a themeVars token (fsXs, fsSm, fsMd or fsLg). Nothing below 11px.',
+        },
+        // Gap scale, the same way: a gap is a themeVars token (gapXs..gapXl, 4/8/12/16/24px),
+        // never a literal. 0 stays legal, and so do Mantine's named sizes (`gap="xs"`).
+        {
+          selector:
+            "Property[key.name=/^(gap|rowGap|columnGap)$/][value.type='Literal'][value.raw=/^['\"]?(?!0['\"]?$)\\d/]",
+          message: 'Literal gap. Use a themeVars token: gapXs (4), gapSm (8), gapMd (12), gapLg (16) or gapXl (24).',
+        },
+        {
+          selector:
+            "JSXAttribute[name.name=/^(gap|rowGap|columnGap)$/][value.type='JSXExpressionContainer'][value.expression.type='Literal'][value.expression.raw=/^(?!0$)\\d/], JSXAttribute[name.name=/^(gap|rowGap|columnGap)$/][value.type='Literal'][value.raw=/^['\"]\\d/]",
+          message: 'Literal gap. Use a themeVars token: gapXs (4), gapSm (8), gapMd (12), gapLg (16) or gapXl (24).',
+        },
+      ],
+    },
+  },
+  {
     // filterTree.ts (W13) is a pure module — no React, no
     // CollectionTabState, no api — so it stays reusable as the aggregation
     // `$match` editor later without a rewrite (specs/W13-filter-tree-editor.md

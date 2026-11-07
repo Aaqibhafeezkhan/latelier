@@ -2254,15 +2254,21 @@ export const CLASS_COLOR: Record<OperatorClass, { bg: string; text: string }> = 
 
 /**
  * Brighten an `rgba(…, 0.15)` badge colour for dark mode. The 0.15 → 0.25
- * bump lifts the swatch against a dark surface. Shared by `classColor` and
- * stage-pill colouring in StageAccordion / PipelineOutline.
+ * bump lifts the swatch against a dark surface. The text colours are dark
+ * inks chosen for a light surface, so dark mode mixes each 40/60 with white:
+ * the worst badge on any dark surface goes from 1.1:1 to 6.1:1 and keeps its
+ * hue. Shared by `classColor` and stage-pill colouring in StageAccordion /
+ * PipelineOutline.
  */
 export function brightenBadgeForDark(
   base: { bg: string; text: string },
   dark: boolean,
 ): { bg: string; text: string } {
   if (!dark) return base;
-  return { bg: base.bg.replace('0.15', '0.25').replace('0.18', '0.28'), text: base.text };
+  return {
+    bg: base.bg.replace('0.15', '0.25').replace('0.18', '0.28'),
+    text: `color-mix(in srgb, ${base.text} 40%, white)`,
+  };
 }
 
 /** Dark-mode-aware class colour. */

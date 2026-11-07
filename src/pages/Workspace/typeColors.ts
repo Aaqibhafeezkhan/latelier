@@ -23,7 +23,7 @@ export const TYPE_HUES: Partial<Record<DisplayType, { bg: string; fg: string }>>
 // :root / [data-mantine-color-scheme="dark"].
 export const TYPE_THEMED: Partial<Record<DisplayType, { bg: string; fg: string }>> = {
   string: { bg: 'transparent', fg: 'var(--atelier-text-ghost)' },
-  number: { bg: 'var(--atelier-accent-soft)', fg: 'var(--atelier-accent)' },
+  number: { bg: 'var(--atelier-accent-soft)', fg: 'var(--atelier-accent-ink)' },
   boolean: { bg: 'var(--atelier-green-soft)', fg: 'var(--atelier-green-text)' },
   null: { bg: 'var(--atelier-surface-raised)', fg: 'var(--atelier-text-ghost)' },
   undefined: { bg: 'var(--atelier-surface-raised)', fg: 'var(--atelier-text-ghost)' },

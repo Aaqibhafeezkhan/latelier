@@ -237,6 +237,40 @@ test('table roving focus: a long ArrowDown run lands fully in the viewport, not 
   }));
 
 /**
+ * Keys pressed faster than the list can render used to crash the workspace
+ * into the error boundary with React's "Maximum update depth exceeded": each
+ * urgent key press left work pending on every commit, so React's nested-update
+ * count climbed across presses, about three per press once rows were mounting.
+ * One pass from a fresh grid can finish under the limit, so this keeps going,
+ * and it covers all three views because each has its own rows and row heights.
+ * Pressing without a pause is the point. It also proves no key press is lost.
+ * The sibling tests that press ArrowDown then Tab or Space prove the other half:
+ * a short run must not defer, or the second key acts on the previous row.
+ */
+test('every view survives repeated full-speed ArrowDown runs without losing a press', async () =>
+  withRovingFocusTable('Held Arrow Key', async ({ win }) => {
+    const ws = new WorkspacePage(win);
+    for (const { button, role, prefix } of [
+      { button: ws.viewTableButton, role: 'grid', prefix: 'table-row-' },
+      { button: ws.viewTreeButton, role: 'tree', prefix: 'tree-row-' },
+      { button: ws.viewJsonButton, role: 'tree', prefix: 'json-row-' },
+    ] as const) {
+      await button.click();
+      const list = win.getByRole(role, { name: 'Documents' });
+      await expect(win.locator(`#${prefix}0`)).toBeVisible({ timeout: 8000 });
+      await list.focus();
+      for (let pass = 0; pass < 3; pass++) {
+        await win.keyboard.press('Home');
+        for (let i = 0; i < DOC_COUNT - 1; i++) {
+          await win.keyboard.press('ArrowDown');
+        }
+        await expect(list).toHaveAttribute('aria-activedescendant', `${prefix}${DOC_COUNT - 1}`);
+        await expect(win.locator(`#${prefix}${DOC_COUNT - 1}`)).toBeInViewport({ ratio: 1 });
+      }
+    }
+  }));
+
+/**
  * #62 — `TreeView.tsx` wires the identical `useDynamicRowHeight` +
  * `scrollToRow({ align: 'auto' })` pattern through the same
  * `useRovingFocus` driver as `TableView`, so the fix belongs in the shared
@@ -318,6 +352,7 @@ test('table roving focus: a real click does not trap focus on the row — ArrowD
 async function withClickedTreeFixture(
   connectionName: string,
   body: (ctx: { win: Page; ws: WorkspacePage }) => Promise<void>,
+  docCount = 5,
 ): Promise<void> {
   const { host, port } = await startMemoryServer();
   await withApp(async (app) => {
@@ -330,7 +365,7 @@ async function withClickedTreeFixture(
         {
           dbName: 'shop',
           collection: 'orders',
-          docs: Array.from({ length: 5 }, (_, i) => ({ seq: i, sku: `sku-${i}` })),
+          docs: Array.from({ length: docCount }, (_, i) => ({ seq: i, sku: `sku-${i}` })),
         },
       );
       await expectStatusDot(win, connectionName, 'connected');
@@ -353,6 +388,154 @@ test('tree roving focus: a real click does not trap focus on the row — ArrowDo
     await win.keyboard.press('ArrowDown');
     await expect(tree).toBeFocused();
     await expect(tree).toHaveAttribute('aria-activedescendant', 'tree-row-2');
+  }));
+
+/**
+ * X19's "one tab stop per list". Each tree row used to add five (select,
+ * expand, edit, delete, more), about 250 across a 50-row page. Now Tab from
+ * the tree reaches only the active row's actions, then leaves the list.
+ */
+test('tree roving focus: Tab crosses a 50-row page in one stop for the tree plus the active row\'s five actions', async () =>
+  withClickedTreeFixture('Tree Tab Stops', async ({ win }) => {
+    const tree = win.getByRole('tree', { name: 'Documents' });
+    await expect(win.locator('#tree-row-0')).toBeVisible({ timeout: 8000 });
+    await tabUntilFocused(win, tree, 60);
+    await expect(tree).toBeFocused();
+
+    const insideTree = () =>
+      win.evaluate(() => {
+        const e = document.activeElement;
+        return {
+          inside: !!e?.closest('[role="tree"][aria-label="Documents"]'),
+          label: e?.getAttribute('aria-label') ?? e?.getAttribute('role') ?? '',
+          row: e?.closest('[id^="tree-row-"]')?.id ?? null,
+        };
+      });
+    const stops = [await insideTree()];
+    for (let i = 0; i < 60; i++) {
+      await win.keyboard.press('Tab');
+      const here = await insideTree();
+      if (!here.inside) break;
+      stops.push(here);
+    }
+
+    expect(stops).toHaveLength(6);
+    expect(stops.slice(1).map((s) => s.row)).toEqual(Array(5).fill('tree-row-0'));
+    expect(stops.slice(1).map((s) => s.label)).toEqual([
+      expect.stringMatching(/^Select document /),
+      'Expand document',
+      expect.stringMatching(/^Edit document /),
+      expect.stringMatching(/^Delete document /),
+      expect.stringMatching(/^More actions for document /),
+    ]);
+
+    // The stop follows the active row: arrow down, shift-tab back to the tree,
+    // and the next row's actions are the ones Tab reaches.
+    await tree.focus();
+    await win.keyboard.press('ArrowDown');
+    await win.keyboard.press('Tab');
+    expect((await insideTree()).row).toBe('tree-row-1');
+  }, 50));
+
+/**
+ * The Tree's rule for the other two views: Tab from the list reaches only the
+ * active row's controls (every other row's are `tabIndex={-1}`), then leaves
+ * the list, and the set follows the arrow keys. Before, each row added its own
+ * stops: 376+ across a Table page and 400+ across a JSON page.
+ */
+for (const { view, listRole, rowPrefix } of [
+  { view: 'Table', listRole: 'grid', rowPrefix: 'table-row-' },
+  { view: 'JSON', listRole: 'tree', rowPrefix: 'json-row-' },
+] as const) {
+  test(`${view.toLowerCase()} roving focus: Tab from the list stays inside the active row's stops, then leaves`, async () =>
+    withClickedTreeFixture(`${view} Tab Stops`, async ({ win, ws }) => {
+      await (view === 'Table' ? ws.viewTableButton : ws.viewJsonButton).click();
+      const list = win.getByRole(listRole, { name: 'Documents' });
+      await expect(win.locator(`#${rowPrefix}0`)).toBeVisible({ timeout: 8000 });
+      await tabUntilFocused(win, list, 60);
+      await expect(list).toBeFocused();
+
+      const rowOfFocus = () =>
+        win.evaluate(
+          ([role]) => {
+            const e = document.activeElement;
+            return {
+              inside: !!e?.closest(`[role="${role}"][aria-label="Documents"]`),
+              row: e?.closest('[id^="table-row-"], [id^="json-row-"]')?.id ?? null,
+            };
+          },
+          [listRole],
+        );
+      const stopsBeyondList: Array<string | null> = [];
+      for (let i = 0; i < 80; i++) {
+        await win.keyboard.press('Tab');
+        const here = await rowOfFocus();
+        if (!here.inside) break;
+        stopsBeyondList.push(here.row);
+      }
+
+      // The loop left the list, so the page is not a page of stops, and every
+      // one it passed was in the first row.
+      expect(stopsBeyondList.length).toBeGreaterThan(4);
+      expect(stopsBeyondList.length).toBeLessThan(40);
+      expect(new Set(stopsBeyondList)).toEqual(new Set([`${rowPrefix}0`]));
+
+      await list.focus();
+      await win.keyboard.press('ArrowDown');
+      await win.keyboard.press('Tab');
+      expect((await rowOfFocus()).row).toBe(`${rowPrefix}1`);
+    }, 50));
+}
+
+/**
+ * D deletes the active row through the same confirmation the row's Delete
+ * button opens. Focus has to survive the whole trip: the dialog opens on
+ * Cancel, closing it returns focus to the tree, and the tree still answers
+ * the arrow keys afterward (X19 §6: the focus-return target must survive the
+ * action).
+ */
+test('tree: D opens the delete confirmation on Cancel, and focus returns to the tree that still navigates', async () =>
+  withClickedTreeFixture('Tree Delete Key', async ({ win }) => {
+    const tree = win.getByRole('tree', { name: 'Documents' });
+    await expect(win.locator('#tree-row-0')).toBeVisible({ timeout: 8000 });
+    await tabUntilFocused(win, tree, 60);
+    await win.keyboard.press('ArrowDown');
+    await win.keyboard.press('ArrowDown');
+
+    await win.keyboard.press('d');
+    const dialog = win.getByRole('dialog', { name: 'Delete document?' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+
+    await win.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(tree).toBeFocused();
+    await win.keyboard.press('ArrowDown');
+    await expect(tree).toHaveAttribute('aria-activedescendant', 'tree-row-3');
+
+    // And through to a real delete: Tab from Cancel to Delete, Enter.
+    await win.keyboard.press('d');
+    await expect(dialog).toBeVisible();
+    await win.keyboard.press('Tab');
+    await win.keyboard.press('Enter');
+    await expect(dialog).toHaveCount(0);
+    await expect(win.locator('[id^="tree-row-"]')).toHaveCount(4, { timeout: 8000 });
+    await expect(tree).toBeFocused();
+    const before = await tree.getAttribute('aria-activedescendant');
+    await win.keyboard.press('ArrowDown');
+    await expect(tree).not.toHaveAttribute('aria-activedescendant', before ?? '');
+  }));
+
+test('tree: D typed into a text field types the letter and deletes nothing', async () =>
+  withClickedTreeFixture('Tree Delete Key Field', async ({ win }) => {
+    await expect(win.locator('#tree-row-0')).toBeVisible({ timeout: 8000 });
+    const field = win.getByTestId('query-bar-input');
+    await field.click();
+    await field.fill('');
+    await win.keyboard.press('d');
+
+    await expect(field).toHaveValue('d');
+    await expect(win.getByRole('dialog', { name: 'Delete document?' })).toHaveCount(0);
   }));
 
 test('field tree roving focus: a real click on a field row does not trap focus — ArrowDown still moves the field tree', async () =>

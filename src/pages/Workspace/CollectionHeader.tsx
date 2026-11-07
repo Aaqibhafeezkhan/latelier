@@ -70,7 +70,7 @@ export function CollectionHeader({
 
   return (
     <Group
-      gap={10}
+      gap={themeVars.gapSm}
       wrap="nowrap"
       style={{
         padding: '0 14px',
@@ -81,12 +81,12 @@ export function CollectionHeader({
       }}
     >
       {/* Breadcrumb + stats */}
-      <Group gap={8} align="baseline" wrap="nowrap" style={{ minWidth: 0 }}>
-        <span style={{ fontSize: 11, color: T.textMuted }}>{dbName} /</span>
+      <Group gap={T.gapSm} align="baseline" wrap="nowrap" style={{ minWidth: 0 }}>
+        <span style={{ fontSize: T.fsXs, color: T.textMuted }}>{dbName} /</span>
         <Tooltip label={collection} withArrow disabled={collection.length < 24}>
           <span
             style={{
-              fontSize: 14,
+              fontSize: T.fsMd,
               fontWeight: 600,
               letterSpacing: '-0.02em',
               color: T.text,
@@ -99,7 +99,7 @@ export function CollectionHeader({
           </span>
         </Tooltip>
         {(docCount !== null || indexCount !== null) && (
-          <span style={{ fontSize: 11, color: T.textMuted, marginLeft: 4 }}>
+          <span style={{ fontSize: T.fsXs, color: T.textMuted, marginLeft: 4 }}>
             {docCount !== null && (
               <>
                 <strong style={{ fontWeight: 500, color: T.text }}>

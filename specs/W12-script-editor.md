@@ -378,11 +378,16 @@ split survives relaunch).
     view is enabled.
   - **Single record** → reuse `JsonView` with a one-element array;
     no toggle.
-  - **Scalar / `null` / `undefined`** → small inline `<pre>` with
+  - **Scalar / `null`** → small inline `<pre>` with
     EJSON pretty-print.
+  - **`undefined` with nothing printed** → the W06 pane state "The
+    script returned nothing", with Run again.
+  - **Error** → the W06 error pane state, "The script failed", with
+    `code: message` and Run again.
   Before the first run the panel collapses to a one-line hint bar so
   the editor gets the full viewport; once a result or error is
-  present it expands to the persisted height.
+  present it expands to the persisted height. The hint bar stays a
+  line rather than a pane state: a pane state does not fit in it.
   The print buffer renders below the value as a collapsed `<pre>`
   (auto-expanded when non-empty).
 - **Completions**: collection names and field suggestions come from

@@ -146,9 +146,8 @@ describe('The status line says what the rows add up to', () => {
 
   it('counts one blank row as waiting, not as applied', async () => {
     mountWith(makeState());
-    await screen.findByText('Matches every document');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add condition' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add condition' }));
 
     await waitFor(() => expect(line().textContent).toBe('1 condition · 1 not filled in'));
   });
@@ -356,5 +355,44 @@ describe('W15 §13.7 — the "N not applied" banner names the offending rows', (
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toContain('raw clause');
     });
+  });
+});
+
+describe('The status line is one fixed line in every state', () => {
+  const statusLine = () => screen.getByTestId('filter-status-line');
+
+  it('is there, and blank, on an empty filter', async () => {
+    mountWith(makeState({ queryRaw: '{}' }));
+    await screen.findByText('No conditions yet');
+    expect(statusLine().style.height).toBe('24px');
+    expect(statusLine().textContent).toBe('');
+  });
+
+  it('shortens invalid text to one line and keeps the sentence in a tooltip', async () => {
+    mountWith(makeState({ queryRaw: '{"a":1}' }));
+    await screen.findByText(/1 condition/);
+    const before = statusLine();
+
+    fireEvent.change(await screen.findByTestId('query-bar-input'), { target: { value: '{ bad:' } });
+    await screen.findByText('Invalid text. Showing last valid filter.');
+
+    // The same element: a state swaps its text and cannot move what is below it.
+    expect(statusLine()).toBe(before);
+    expect(statusLine().style.height).toBe('24px');
+    expect(statusLine().style.whiteSpace).toBe('nowrap');
+    expect(statusLine().title).toMatch(/isn't valid JSON — the tree below is the last valid version/);
+    expect(screen.getByRole('alert').textContent).toMatch(/isn't valid JSON/);
+  });
+});
+
+describe('The bottom actions wrap instead of clipping', () => {
+  it('keep their natural widths in a wrapping row', async () => {
+    mountWith(makeState());
+    const reset = await screen.findByRole('button', { name: 'Reset' });
+    const row = reset.parentElement!;
+    expect(row.style.flexWrap).toBe('wrap');
+    for (const name of ['Reset', 'Copy code', 'Open as pipeline']) {
+      expect(screen.getByRole('button', { name }).getAttribute('data-size')).toBe('compact-xs');
+    }
   });
 });

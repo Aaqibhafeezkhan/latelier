@@ -31,11 +31,11 @@ export function CollectionStatsSection({ details, error, loading, onRefresh }: P
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: themeVars.gapSm,
           padding: '10px 16px',
           borderBottom: `1px solid ${T.border}`,
           background: T.surface,
-          fontSize: 12,
+          fontSize: T.fsSm,
         }}
       >
         <div style={{ flex: 1, fontWeight: 600, color: T.text }}>Statistics</div>
@@ -56,7 +56,7 @@ export function CollectionStatsSection({ details, error, loading, onRefresh }: P
           role="alert"
           style={{
             padding: '6px 16px',
-            fontSize: 12,
+            fontSize: T.fsSm,
             color: T.warn,
             background: T.surface,
             borderBottom: `1px solid ${T.border}`,
@@ -67,11 +67,11 @@ export function CollectionStatsSection({ details, error, loading, onRefresh }: P
       )}
 
       {loading && !details && !error && (
-        <div style={{ padding: '10px 16px', fontSize: 12, color: T.textMuted }}>Loading…</div>
+        <div style={{ padding: '10px 16px', fontSize: T.fsSm, color: T.textMuted }}>Loading…</div>
       )}
 
       {details?.type === 'view' && (
-        <div style={{ padding: '10px 16px', fontSize: 12, color: T.textMuted }}>
+        <div style={{ padding: '10px 16px', fontSize: T.fsSm, color: T.textMuted }}>
           View on {details.options.viewOn}
         </div>
       )}
@@ -81,10 +81,10 @@ export function CollectionStatsSection({ details, error, loading, onRefresh }: P
           style={{
             display: 'flex',
             flexWrap: 'wrap',
-            gap: '10px 28px',
+            gap: `${themeVars.gapSm} ${themeVars.gapXl}`,
             padding: '10px 16px',
             borderBottom: `1px solid ${T.border}`,
-            fontSize: 12,
+            fontSize: T.fsSm,
           }}
         >
           <Figure label="Documents" value={stats.documentCount?.toLocaleString() ?? '—'} />
@@ -102,8 +102,8 @@ export function CollectionStatsSection({ details, error, loading, onRefresh }: P
 function Figure({ label, value }: { label: string; value: string }) {
   const T = themeVars;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <span style={{ color: T.textMuted, fontSize: 11 }}>{label}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: themeVars.gapXs }}>
+      <span style={{ color: T.textMuted, fontSize: T.fsXs }}>{label}</span>
       <span style={{ color: T.text, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
     </div>
   );

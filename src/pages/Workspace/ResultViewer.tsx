@@ -5,7 +5,7 @@
 // addressed as top-level exports, only via the namespace.
 import { useState, type ReactNode } from 'react';
 import { Button, Skeleton, Stack } from '@mantine/core';
-import { themeVars } from '../../theme/themeVars';
+import { PaneState } from '../../components/PaneState';
 import { TreeView } from './views/TreeView';
 import { JsonView } from './views/JsonView';
 import { TableView } from './views/TableView';
@@ -16,7 +16,8 @@ import { ImportDialog } from './ImportDialog';
 import { useCollectionWorkspace } from './context';
 import { EMPTY_DOCUMENTS } from './resultSelection';
 import { findProblem, isUnfilteredFirstPage } from './builder';
-import type { ReferenceRule } from '@shared/types';
+import { resultPaneKind, revertTarget, type ResultPaneKind } from './resultPaneState';
+import type { CollectionTabState, ReferenceRule } from '@shared/types';
 
 /**
  * Compound result view (X11 phase 5). Replaces the old ResultArea monolith
@@ -62,6 +63,8 @@ interface BodyProps {
   onRefHover?: (rule: ReferenceRule, value: unknown, rect: DOMRect) => void;
   onRefHoverLeave?: () => void;
   onRefOpen?: (rule: ReferenceRule, field: string, value: unknown) => void;
+  /** Called after the pane has replaced the whole query, as any wholesale load must report. */
+  onQueryReplaced?: () => void;
 }
 
 function Body({
@@ -73,27 +76,24 @@ function Body({
   onRefHover,
   onRefHoverLeave,
   onRefOpen,
+  onQueryReplaced,
 }: BodyProps) {
   const { state, meta, actions } = useCollectionWorkspace();
   // Owned here, not by `EmptyState`: the import's own refresh fills
   // `documents`, which unmounts `EmptyState`, and the dialog has to outlive
   // that to keep showing its report.
   const [importOpen, setImportOpen] = useState(false);
-  const isLoading = meta.isLoading;
-  const documents = state.lastRun?.documents ?? EMPTY_DOCUMENTS;
-  const hasError = !!state.lastRun?.error;
-  const isEmpty = documents.length === 0 && !isLoading && !hasError;
+  const kind = resultPaneKind(state);
   // Only a first load (no run has ever landed in this tab's state) gets
-  // placeholder rows in place of the body. Any re-run, including one after an
-  // empty or errored result, keeps the body under the "Loading…" strip, so
-  // the layout doesn't jump. One live region at a time.
-  const showSkeleton = isLoading && !state.lastRun;
+  // placeholder rows in place of the body. Any re-run keeps the body as it is,
+  // with the band above saying so, and the result replaces it when it lands.
+  const showSkeleton = meta.isLoading && !state.lastRun;
   // X14 §5 — dimmed, not hidden or inert, while the query above cannot
   // run: these rows still describe a real earlier query, and a user editing a
   // filter is often reading them to decide what to type next. Same rule as the
   // count marker in `ResultBar`, so the two never disagree. Opacity only — no
   // `pointer-events: none`, which would take selection and row expansion away.
-  const isStale = findProblem(state) !== null;
+  const isStale = kind === 'rows' && findProblem(state) !== null;
 
   return (
     <div
@@ -107,35 +107,19 @@ function Body({
         opacity: isStale ? 0.45 : undefined,
       }}
     >
-      {isLoading && !showSkeleton && (
-        <div
-          role="status"
-          style={{
-            position: 'absolute',
-            top: 32,
-            left: 0,
-            right: 0,
-            zIndex: 10,
-            padding: '4px 12px',
-            background: 'var(--atelier-surface)',
-            borderBottom: '1px solid var(--atelier-border)',
-            fontSize: 11,
-            color: 'var(--atelier-text-muted)',
-            textAlign: 'center',
-          }}
-        >
-          Loading…
-        </div>
-      )}
-
       {showSkeleton ? (
-        <Stack role="status" aria-label="Loading results" gap={6} p="8px 12px">
+        <Stack role="status" aria-label="Loading results" gap="var(--atelier-gap-xs)" p="8px 12px">
           {Array.from({ length: 8 }, (_, i) => (
             <Skeleton key={i} height={22} />
           ))}
         </Stack>
-      ) : isEmpty ? (
-        <EmptyState onClearFilter={onClearFilter} onImport={() => setImportOpen(true)} />
+      ) : kind !== 'rows' ? (
+        <EmptyState
+          kind={kind}
+          onClearFilter={onClearFilter}
+          onImport={() => setImportOpen(true)}
+          onQueryReplaced={onQueryReplaced}
+        />
       ) : (
         <>
           {state.view === 'Tree' && (
@@ -175,49 +159,104 @@ function Body({
   );
 }
 
-function EmptyState({ onClearFilter, onImport }: { onClearFilter: () => void; onImport: () => void }) {
-  const { state, meta } = useCollectionWorkspace();
-  // No filter, first page, no error: the collection itself is empty, not
-  // just this query's match — a different message and CTA than "no match".
-  const isEmptyCollection = isUnfilteredFirstPage(state);
-  // Results are never persisted, so a restored tab with a custom query has not
-  // run yet: say so instead of claiming the query matched nothing.
-  const neverRun = state.lastRun === undefined;
-
-  return (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: 'var(--atelier-text-ghost)',
-        fontSize: 13,
-        gap: 8,
-      }}
-    >
-      {neverRun ? (
-        <span>Run the query to see results</span>
-      ) : isEmptyCollection ? (
-        <>
-          <span>This collection is empty</span>
-          {!meta.isReadOnly && !meta.isView && (
-            <Button variant="subtle" size="compact-xs" fz={12} td="underline" c={themeVars.accent} onClick={onImport}>
-              Import documents…
-            </Button>
-          )}
-        </>
-      ) : (
-        <>
-          <span>No matching documents</span>
-          <Button variant="subtle" size="compact-xs" fz={12} td="underline" c={themeVars.accent} onClick={onClearFilter}>
-            Clear filter
-          </Button>
-        </>
-      )}
-    </div>
+function EmptyState({
+  kind,
+  onClearFilter,
+  onImport,
+  onQueryReplaced,
+}: {
+  kind: Exclude<ResultPaneKind, 'rows'>;
+  onClearFilter: () => void;
+  onImport: () => void;
+  onQueryReplaced?: () => void;
+}) {
+  const { state, meta, actions } = useCollectionWorkspace();
+  const clearFilter = (
+    <Button variant="default" size="xs" onClick={onClearFilter}>
+      Clear filter
+    </Button>
   );
+  const runAgain = (label: string) => (
+    <Button
+      variant="default"
+      size="xs"
+      disabled={meta.isLoading || findProblem(state) !== null}
+      onClick={() => actions.run()}
+    >
+      {label}
+    </Button>
+  );
+
+  switch (kind) {
+    case 'never-run':
+      // Results are never persisted, so a restored tab with a custom query has
+      // not run yet: say so instead of claiming the query matched nothing.
+      return <PaneState title="Run the query to see results" actions={meta.isReadOnly ? undefined : runAgain('Run')} />;
+    case 'empty-collection':
+      return (
+        <PaneState
+          title="This collection is empty"
+          actions={
+            meta.isReadOnly || meta.isView ? (
+              runAgain('Run again')
+            ) : (
+              <Button variant="default" size="xs" onClick={onImport}>
+                Import documents…
+              </Button>
+            )
+          }
+        />
+      );
+    case 'no-match':
+      return <PaneState title="No matching documents" detail="The filter matched nothing in this collection." actions={clearFilter} />;
+    case 'failed':
+      return (
+        <PaneState
+          tone="error"
+          title="The query could not finish"
+          detail={errorText(state)}
+          actions={runAgain('Run again')}
+        />
+      );
+    case 'query-error': {
+      const revert = revertTarget(state);
+      return (
+        <PaneState
+          tone="error"
+          title="This query failed"
+          detail={errorText(state)}
+          actions={
+            revert ? (
+              <Button
+                variant="filled"
+                size="xs"
+                disabled={meta.isLoading}
+                onClick={() => {
+                  // Patch and run with the same values, so the run can't read
+                  // the state from before the patch.
+                  const patch = { ...revert, filterDraft: undefined };
+                  actions.patch(patch);
+                  actions.run(patch);
+                  onQueryReplaced?.();
+                }}
+              >
+                Revert to last valid query
+              </Button>
+            ) : isUnfilteredFirstPage({ ...state, lastRun: undefined }) ? (
+              runAgain('Run again')
+            ) : (
+              clearFilter
+            )
+          }
+        />
+      );
+    }
+  }
+}
+
+function errorText(state: CollectionTabState): string {
+  const error = state.lastRun?.error;
+  return error ? `${error.code}: ${error.message}` : '';
 }
 
 interface TreeSlotProps {

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Button, Group, Modal, SegmentedControl, Select, Stack, Switch, Text } from '@mantine/core';
+import { Button, Group, Modal, SegmentedControl, Select, Stack, Switch, Tabs, Text } from '@mantine/core';
+import { fixedModalStyles } from '../components/fixedModal';
 import { useHints } from '../hints/HintsContext';
 import { api, getErrorMessage } from '../api/atelier';
 import { invalidateRecentValuesCache } from '../features/fieldSuggestions/sources';
@@ -36,13 +37,39 @@ const FONT_SIZE_SELECT_DATA = Array.from(
   (_, i) => String(EDITOR_FONT_SIZE_MIN + i),
 );
 
+// Preferences are things the user chooses; maintenance is things the user does.
+const SECTION_GROUPS = [
+  {
+    label: 'Preferences',
+    sections: [
+      { value: 'appearance', label: 'Appearance' },
+      { value: 'results', label: 'Results' },
+      { value: 'editor', label: 'Editor and startup' },
+    ],
+  },
+  { label: 'Maintenance', sections: [{ value: 'maintenance', label: 'Data and support' }] },
+];
+
+function Section({ value, children }: { value: string; children: React.ReactNode }) {
+  return (
+    <Tabs.Panel value={value}>
+      <Stack gap="lg">{children}</Stack>
+    </Tabs.Panel>
+  );
+}
+
+export type SettingsSection = 'appearance' | 'results' | 'editor' | 'maintenance';
+
 interface SettingsModalProps {
+  /** A link about one setting opens on the section that holds it. */
+  initialSection?: SettingsSection;
   onClose: () => void;
 }
 
-export function SettingsModal({ onClose }: SettingsModalProps) {
+export function SettingsModal({ initialSection = 'appearance', onClose }: SettingsModalProps) {
   const { reset } = useHints();
   const close = useDialogFocusReturn(onClose);
+  const [section, setSection] = React.useState<string>(initialSection);
   const [resetting, setResetting] = React.useState(false);
   const [exporting, setExporting] = React.useState(false);
   const [clearingValues, setClearingValues] = React.useState(false);
@@ -204,179 +231,212 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   };
 
   return (
-    <Modal opened onClose={close} title="Settings" centered size="md">
-      <Stack gap="lg">
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Stack gap={2} style={{ flex: 1 }}>
-            <Text size="sm" fw={600}>
-              Theme
-            </Text>
-            <Text size="xs" c="dimmed">
-              System follows the operating system's appearance.
-            </Text>
-          </Stack>
-          <SegmentedControl
-            size="xs"
-            aria-label="Theme"
-            data={THEME_OPTIONS}
-            value={themeMode}
-            onChange={(v) => setThemeMode(v as ThemeMode)}
-          />
-        </Group>
+    <Modal opened onClose={close} title="Settings" centered size={680} styles={fixedModalStyles(460)}>
+      <Tabs
+        value={section}
+        onChange={(v) => v && setSection(v)}
+        orientation="vertical"
+        style={{ flex: 1, minHeight: 0 }}
+        styles={{ tabLabel: { flex: 1, textAlign: 'left' } }}
+      >
+        <Tabs.List aria-label="Settings sections" style={{ width: 160, flexShrink: 0, marginRight: 16 }}>
+          {SECTION_GROUPS.map((group) => (
+            <React.Fragment key={group.label}>
+              <Text role="presentation" size="xs" fw={600} tt="uppercase" mt={group.label === 'Preferences' ? 0 : 'md'} mb={4}>
+                {group.label}
+              </Text>
+              {group.sections.map((s) => (
+                // The open section's rail tab takes focus on open, not Close:
+                // arrows then change section and Tab enters its controls.
+                <Tabs.Tab key={s.value} value={s.value} data-autofocus={s.value === section ? true : undefined}>
+                  {s.label}
+                </Tabs.Tab>
+              ))}
+            </React.Fragment>
+          ))}
+        </Tabs.List>
 
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Stack gap={2} style={{ flex: 1 }}>
-            <Text size="sm" fw={600}>
-              Default page size
-            </Text>
-            <Text size="xs" c="dimmed">
-              Rows per page in a collection tab opened from now on.
-            </Text>
-          </Stack>
-          <Select
-            size="xs"
-            w={90}
-            aria-label="Default page size"
-            allowDeselect={false}
-            data={PAGE_SIZE_SELECT_DATA}
-            value={String(pageSize)}
-            onChange={handlePageSize}
-          />
-        </Group>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
+          <Section value="appearance">
+            <Group justify="space-between" align="flex-start" wrap="nowrap">
+              <Stack gap="var(--atelier-gap-xs)" style={{ flex: 1 }}>
+                <Text size="sm" fw={600}>
+                  Theme
+                </Text>
+                <Text size="xs" c="dimmed">
+                  System follows the operating system's appearance.
+                </Text>
+              </Stack>
+              <SegmentedControl
+                size="xs"
+                aria-label="Theme"
+                data={THEME_OPTIONS}
+                value={themeMode}
+                onChange={(v) => setThemeMode(v as ThemeMode)}
+              />
+            </Group>
+          </Section>
 
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Stack gap={2} style={{ flex: 1 }}>
-            <Text size="sm" fw={600}>
-              Default result view
-            </Text>
-            <Text size="xs" c="dimmed">
-              How a collection tab opened from now on shows its documents.
-            </Text>
-          </Stack>
-          <SegmentedControl
-            size="xs"
-            aria-label="Default result view"
-            data={[...RESULT_VIEW_OPTIONS]}
-            value={view}
-            onChange={handleView}
-          />
-        </Group>
+          <Section value="results">
+            <Group justify="space-between" align="flex-start" wrap="nowrap">
+              <Stack gap="var(--atelier-gap-xs)" style={{ flex: 1 }}>
+                <Text size="sm" fw={600}>
+                  Default page size
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Rows per page in a collection tab opened from now on.
+                </Text>
+              </Stack>
+              <Select
+                size="xs"
+                w={90}
+                aria-label="Default page size"
+                allowDeselect={false}
+                data={PAGE_SIZE_SELECT_DATA}
+                value={String(pageSize)}
+                onChange={handlePageSize}
+              />
+            </Group>
 
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Stack gap={2} style={{ flex: 1 }}>
-            <Text size="sm" fw={600}>
-              Editor font size
-            </Text>
-            <Text size="xs" c="dimmed">
-              Script tab, aggregation stage bodies and the document editor, in pixels.
-            </Text>
-          </Stack>
-          <Select
-            size="xs"
-            w={90}
-            aria-label="Editor font size"
-            allowDeselect={false}
-            data={FONT_SIZE_SELECT_DATA}
-            value={String(fontSize)}
-            onChange={handleFontSize}
-          />
-        </Group>
+            <Group justify="space-between" align="flex-start" wrap="nowrap">
+              <Stack gap="var(--atelier-gap-xs)" style={{ flex: 1 }}>
+                <Text size="sm" fw={600}>
+                  Default result view
+                </Text>
+                <Text size="xs" c="dimmed">
+                  How a collection tab opened from now on shows its documents.
+                </Text>
+              </Stack>
+              <SegmentedControl
+                size="xs"
+                aria-label="Default result view"
+                data={[...RESULT_VIEW_OPTIONS]}
+                value={view}
+                onChange={handleView}
+              />
+            </Group>
+          </Section>
 
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Stack gap={2} style={{ flex: 1 }}>
-            <Text size="sm" fw={600}>
-              Reopen tabs on launch
-            </Text>
-            <Text id="restore-tabs-description" size="xs" c="dimmed">
-              When off, the app starts with no tabs open, pinned ones included, and pipeline
-              changes that were never saved are lost with them.
-            </Text>
-          </Stack>
-          <Switch
-            aria-label="Reopen tabs on launch"
-            aria-describedby="restore-tabs-description"
-            checked={restoreTabs}
-            onChange={(e) => void handleRestoreTabs(e.currentTarget.checked)}
-          />
-        </Group>
+          <Section value="editor">
+            <Group justify="space-between" align="flex-start" wrap="nowrap">
+              <Stack gap="var(--atelier-gap-xs)" style={{ flex: 1 }}>
+                <Text size="sm" fw={600}>
+                  Editor font size
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Script tab, aggregation stage bodies and the document editor, in pixels.
+                </Text>
+              </Stack>
+              <Select
+                size="xs"
+                w={90}
+                aria-label="Editor font size"
+                allowDeselect={false}
+                data={FONT_SIZE_SELECT_DATA}
+                value={String(fontSize)}
+                onChange={handleFontSize}
+              />
+            </Group>
 
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Stack gap={2} style={{ flex: 1 }}>
-            <Text size="sm" fw={600}>
-              Hints
-            </Text>
-            <Text size="xs" c="dimmed">
-              Re-enable contextual tips you've dismissed.
-            </Text>
-          </Stack>
-          <Button
-            variant="default"
-            size="compact-xs"
-            onClick={handleResetHints}
-            disabled={resetting}
-          >
-            {resetting ? 'Resetting…' : 'Reset hints'}
-          </Button>
-        </Group>
+            <Group justify="space-between" align="flex-start" wrap="nowrap">
+              <Stack gap="var(--atelier-gap-xs)" style={{ flex: 1 }}>
+                <Text size="sm" fw={600}>
+                  Reopen tabs on launch
+                </Text>
+                <Text id="restore-tabs-description" size="xs" c="dimmed">
+                  When off, the app starts with no tabs open, pinned ones included, and pipeline
+                  changes that were never saved are lost with them.
+                </Text>
+              </Stack>
+              <Switch
+                aria-label="Reopen tabs on launch"
+                aria-describedby="restore-tabs-description"
+                checked={restoreTabs}
+                onChange={(e) => void handleRestoreTabs(e.currentTarget.checked)}
+              />
+            </Group>
+          </Section>
 
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Stack gap={2} style={{ flex: 1 }}>
-            <Text size="sm" fw={600}>
-              Diagnostic bundle
-            </Text>
-            <Text size="xs" c="dimmed">
-              Export recent logs and redacted connection metadata for support.
-            </Text>
-          </Stack>
-          <Button
-            variant="default"
-            size="compact-xs"
-            onClick={handleExportDiagnostic}
-            disabled={exporting}
-          >
-            {exporting ? 'Exporting…' : 'Export bundle'}
-          </Button>
-        </Group>
+          <Section value="maintenance">
+            <Group justify="space-between" align="flex-start" wrap="nowrap">
+              <Stack gap="var(--atelier-gap-xs)" style={{ flex: 1 }}>
+                <Text size="sm" fw={600}>
+                  Hints
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Re-enable contextual tips you've dismissed.
+                </Text>
+              </Stack>
+              <Button
+                variant="default"
+                size="compact-xs"
+                onClick={handleResetHints}
+                disabled={resetting}
+              >
+                {resetting ? 'Resetting…' : 'Reset hints'}
+              </Button>
+            </Group>
 
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Stack gap={2} style={{ flex: 1 }}>
-            <Text size="sm" fw={600}>
-              Value suggestions
-            </Text>
-            <Text size="xs" c="dimmed">
-              Forget values typed into the builder's condition rows.
-            </Text>
-          </Stack>
-          <Button
-            variant="default"
-            size="compact-xs"
-            onClick={handleClearValueHistory}
-            disabled={clearingValues}
-          >
-            {clearingValues ? 'Clearing…' : 'Clear value history'}
-          </Button>
-        </Group>
+            <Group justify="space-between" align="flex-start" wrap="nowrap">
+              <Stack gap="var(--atelier-gap-xs)" style={{ flex: 1 }}>
+                <Text size="sm" fw={600}>
+                  Diagnostic bundle
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Export recent logs and redacted connection metadata for support.
+                </Text>
+              </Stack>
+              <Button
+                variant="default"
+                size="compact-xs"
+                onClick={handleExportDiagnostic}
+                disabled={exporting}
+              >
+                {exporting ? 'Exporting…' : 'Export bundle'}
+              </Button>
+            </Group>
 
-        {columnKeyProtected !== null && (
-          <Stack gap={2}>
-            <Text size="sm" fw={600}>
-              Local data protection
-            </Text>
-            {/* Never calls the data encrypted when the key sits beside it: that would oversell it. */}
-            <Text size="xs" c="dimmed" data-testid="local-data-protection">
-              {columnKeyProtected
-                ? 'Saved queries, query history, value suggestions, the audit log and open tabs are encrypted on disk with a key held by the OS keychain.'
-                : 'No OS keychain is available, so the key for saved queries, query history, value suggestions, the audit log and open tabs is stored unprotected next to them. Anyone who can read your user data folder can read them.'}
-            </Text>
-          </Stack>
-        )}
+            <Group justify="space-between" align="flex-start" wrap="nowrap">
+              <Stack gap="var(--atelier-gap-xs)" style={{ flex: 1 }}>
+                <Text size="sm" fw={600}>
+                  Value suggestions
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Forget values typed into the builder's condition rows.
+                </Text>
+              </Stack>
+              <Button
+                variant="default"
+                size="compact-xs"
+                onClick={handleClearValueHistory}
+                disabled={clearingValues}
+              >
+                {clearingValues ? 'Clearing…' : 'Clear value history'}
+              </Button>
+            </Group>
 
-        <Group justify="flex-end">
-          <Button variant="subtle" size="compact-xs" onClick={close}>
-            Close
-          </Button>
-        </Group>
-      </Stack>
+            {columnKeyProtected !== null && (
+              <Stack gap="var(--atelier-gap-xs)">
+                <Text size="sm" fw={600}>
+                  Local data protection
+                </Text>
+                {/* Never calls the data encrypted when the key sits beside it: that would oversell it. */}
+                <Text size="xs" c="dimmed" data-testid="local-data-protection">
+                  {columnKeyProtected
+                    ? 'Saved queries, query history, value suggestions, the audit log and open tabs are encrypted on disk with a key held by the OS keychain.'
+                    : 'No OS keychain is available, so the key for saved queries, query history, value suggestions, the audit log and open tabs is stored unprotected next to them. Anyone who can read your user data folder can read them.'}
+                </Text>
+              </Stack>
+            )}
+          </Section>
+        </div>
+      </Tabs>
+
+      <Group justify="flex-end" mt="md">
+        <Button variant="subtle" size="compact-xs" onClick={close}>
+          Close
+        </Button>
+      </Group>
     </Modal>
   );
 }

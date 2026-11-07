@@ -473,7 +473,8 @@ describe('the shared cache follows connection status while the navigator is coll
     const { listCollections } = mount();
     await settled(listCollections);
     emit({ id: 'c1', status: 'error', errorMessage: 'connection refused' });
-    expect(await screen.findByText('connection refused')).toBeTruthy();
+    // Both the navigator and the results pane say so.
+    expect((await screen.findAllByText('connection refused')).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse navigator' }));
     await waitFor(() => expect(screen.queryByRole('tree')).toBeNull());

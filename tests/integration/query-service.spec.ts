@@ -738,9 +738,12 @@ describe('QueryService', () => {
             details: { mongoMessage: 'Server selection timed out after 30000 ms' },
           });
         }
-        // With no read preference chosen, the driver's own words stand.
+        // With no read preference chosen, the driver's own words stand, and the
+        // query is not at fault: the cluster is out of reach.
         const plain = await svc.count({ ...target, filter: '{}' }).catch((e: unknown) => e);
-        expect(plain).toMatchObject({ code: 'MONGO_ERROR', message: 'Server selection timed out after 30000 ms' });
+        expect(plain).toMatchObject({ code: 'NETWORK', message: 'Server selection timed out after 30000 ms' });
+        const plainFind = await svc.find({ ...target, filter: '{}', limit: 50, skip: 0 }).catch((e: unknown) => e);
+        expect(plainFind).toMatchObject({ code: 'NETWORK', message: 'Server selection timed out after 30000 ms' });
       } finally {
         await fs.rm(dir, { recursive: true, force: true });
       }

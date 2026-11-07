@@ -943,3 +943,41 @@ describe('StageAccordion — focus after adding or deleting a stage (N5.23)', ()
     expect(document.activeElement).toBe(screen.getByText('elsewhere'));
   });
 });
+
+describe('StageAccordion body height', () => {
+  // The height itself is a `.stage-body` rule in index.css, which jsdom never
+  // loads; the aggregation e2e measures it.
+  const fixedBody = (container: HTMLElement) =>
+    container.querySelector<HTMLElement>('[data-testid="stage-row-7"] .stage-body')!;
+
+  it('is fixed however many preview documents arrive, and the preview scrolls inside', () => {
+    const docs = Array.from({ length: 5 }, (_, i) => ({ _id: i, note: 'x'.repeat(200) }));
+    const { container } = renderAccordion([stage({ id: 7 })], { activeId: 7, stageSamples: { 7: docs } });
+    const body = fixedBody(container);
+    expect(body).not.toBeNull();
+    // Without `minHeight: 0` the flex row ignores the limit and the documents set the height.
+    const preview = [...body.querySelectorAll<HTMLElement>('div')].find((d) => d.style.overflowY === 'auto');
+    expect(preview!.style.minHeight).toBe('0px');
+    expect(preview!.textContent).toContain('note');
+  });
+
+  it('reserves the error line, so an error cannot move the buttons below it', () => {
+    const { container } = renderAccordion([stage({ id: 7 })], { activeId: 7 });
+    const line = [...fixedBody(container).querySelectorAll<HTMLElement>('div')].find((d) => d.style.height === '16px');
+    expect(line).toBeTruthy();
+    expect(line!.textContent).toBe('');
+    expect(line!.style.whiteSpace).toBe('nowrap');
+    expect(line!.getAttribute('role')).toBeNull();
+  });
+
+  it('truncates a stage error to that line, with the full text on hover', () => {
+    renderAccordion([stage({ id: 7 })], { activeId: 7 });
+    const editor = screen.getByTestId('stage-body-editor-7');
+    fireEvent.change(editor, { target: { value: '{ bad' } });
+    fireEvent.blur(editor);
+    const alert = screen.getByRole('alert');
+    expect(alert.style.height).toBe('16px');
+    expect(alert.title).toBe(alert.textContent);
+    expect(alert.title.length).toBeGreaterThan(0);
+  });
+});

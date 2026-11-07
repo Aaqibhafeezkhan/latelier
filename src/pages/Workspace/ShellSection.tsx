@@ -156,7 +156,7 @@ export function ShellSection({
           toggle={toggle}
           connectionName={focusedConnection?.name ?? null}
           connectionSlot={<ConnectionSwitcher {...switcherProps} />}
-          onOpenSettings={settings.open}
+          onOpenSettings={() => settings.open()}
           onOpenPalette={palette.toggle}
           shellOpen={shellOpen}
           shellAvailable={!!focusedConnection}

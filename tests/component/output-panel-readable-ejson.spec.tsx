@@ -48,6 +48,8 @@ function renderPanel(rows: unknown[], view: ResultViewMode = 'JSON') {
       onViewChange={vi.fn()}
       onSaveAsCollection={vi.fn()}
       onSaveAsView={vi.fn()}
+      onRun={vi.fn()}
+      canRun
     />,
   );
 }
@@ -121,7 +123,7 @@ describe('OutputPanel — readable EJSON', () => {
     installAtelierMock({ app: { saveFile } as never });
     renderPanel(rows);
 
-    fireEvent.click(screen.getByText('⇩').closest('button')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Download output as JSON' }));
 
     await vi.waitFor(() => expect(saveFile).toHaveBeenCalled());
     const { content } = saveFile.mock.calls[0]![0];
@@ -139,7 +141,7 @@ describe('OutputPanel — readable EJSON', () => {
     installAtelierMock({ app: { saveFile } as never });
     renderPanel(rows);
 
-    fireEvent.click(screen.getByText('⇩').closest('button')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Download output as JSON' }));
 
     await vi.waitFor(() => expect(saveFile).toHaveBeenCalled());
     const reread = ejsonParse<Array<{ long: unknown; double: unknown }>>(saveFile.mock.calls[0]![0].content);

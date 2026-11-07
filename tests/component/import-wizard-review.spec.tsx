@@ -405,3 +405,28 @@ describe('Import Wizard: commit', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Import Wizard: one size', () => {
+  it('holds one dialog height from the source through the review to the result, so Cancel, Back and Import keep their place', async () => {
+    setup();
+    const height = () => screen.getByRole('dialog', { name: 'Import Connections' }).style.height;
+    const source = height();
+    expect(source).toContain('540px');
+    await chooseFile();
+    await reviewTable();
+    expect(height()).toBe(source);
+    await userEvent.type(screen.getByLabelText('Export Passphrase'), 'pp');
+    await userEvent.click(importButton());
+    await screen.findByText('2 Connections imported.');
+    expect(height()).toBe(source);
+  });
+
+  it('holds it on the Field Mapping step too', async () => {
+    setup({ open: { token: 'tok', source: 'unknown', collections: COLLECTIONS } });
+    const source = screen.getByRole('dialog', { name: 'Import Connections' }).style.height;
+    await chooseFile();
+    await screen.findByRole('table', { name: 'Fields in the file' });
+    expect(source).toContain('540px');
+    expect(screen.getByRole('dialog', { name: 'Import Connections' }).style.height).toBe(source);
+  });
+});

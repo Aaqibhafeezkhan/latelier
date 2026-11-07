@@ -134,12 +134,12 @@ export function RecentTab({ connectionId, dbName, collection, onRunHere }: Recen
           This view used to early-return a bare centered message, so anyone
           switching here while it loaded got an unlabelled blank panel. */}
       <Group
-        gap={6}
+        gap={themeVars.gapXs}
         wrap="nowrap"
         px={10}
         pt={10}
         pb={6}
-        fz={10}
+        fz={T.fsXs}
         fw={700}
         c={T.textMuted}
         style={{ letterSpacing: 0.6, textTransform: 'uppercase' }}
@@ -150,7 +150,7 @@ export function RecentTab({ connectionId, dbName, collection, onRunHere }: Recen
           size="compact-xs"
           h={18}
           px={6}
-          fz={10}
+          fz={T.fsXs}
           c={loading ? undefined : T.textMuted}
           onClick={() => void load()}
           submitting={loading}
@@ -167,7 +167,7 @@ export function RecentTab({ connectionId, dbName, collection, onRunHere }: Recen
             size="compact-xs"
             h={18}
             px={6}
-            fz={10}
+            fz={T.fsXs}
             c={loading || deleting || items.length === 0 ? undefined : T.red}
             onClick={() => void requestClear()}
             disabled={loading || deleting || items.length === 0}
@@ -179,19 +179,19 @@ export function RecentTab({ connectionId, dbName, collection, onRunHere }: Recen
       </Group>
 
       {loading && (
-        <Text fz={12} c={T.textMuted} px={10} pt={4} pb={10}>
+        <Text fz={T.fsSm} c={T.textMuted} px={10} pt={4} pb={10}>
           Loading…
         </Text>
       )}
 
       {!loading && err && (
-        <Text fz={12} c={T.warn} px={10} pt={4} pb={10}>
+        <Text fz={T.fsSm} c={T.warn} px={10} pt={4} pb={10}>
           {err}
         </Text>
       )}
 
       {!loading && !err && items.length === 0 && (
-        <Text fz={12} c={T.textMuted} px={10} pt={4} pb={10}>
+        <Text fz={T.fsSm} c={T.textMuted} px={10} pt={4} pb={10}>
           No recent queries yet. Anything you run in this collection shows up here.
         </Text>
       )}
@@ -201,25 +201,25 @@ export function RecentTab({ connectionId, dbName, collection, onRunHere }: Recen
         return (
           <Group
             key={item.id}
-            gap={6}
+            gap={themeVars.gapXs}
             wrap="nowrap"
             px={10}
             py={7}
-            fz={12}
+            fz={T.fsSm}
             style={{ borderBottom: `1px solid ${T.border}` }}
           >
             <Box style={{ flex: 1, overflow: 'hidden' }}>
               {/* The row's identity: what was queried, not just when. */}
               <Text
                 title={preview ?? undefined}
-                fz={11}
+                fz={T.fsXs}
                 c={preview ? T.text : T.textGhost}
                 truncate="end"
                 style={{ fontFamily: '"JetBrains Mono", monospace' }}
               >
                 {preview ?? 'no stored query'}
               </Text>
-              <Text fz={10} c={T.textGhost} mt={1}>
+              <Text fz={T.fsXs} c={T.textGhost} mt={1}>
                 {/* `toLocaleTimeString` alone made a run from last Tuesday read
                     `14:32`, indistinguishable from one an hour ago. */}
                 {relativeTime(item.ranAt, item.ranAt)} — {item.durationMs}ms
@@ -243,7 +243,7 @@ export function RecentTab({ connectionId, dbName, collection, onRunHere }: Recen
                 size="compact-xs"
                 h={20}
                 px={7}
-                fz={10}
+                fz={T.fsXs}
                 leftSection={I.play}
                 onClick={() => onRunHere(item)}
                 aria-label={`Run ${preview ?? 'this recent query'} in this tab`}

@@ -32,7 +32,7 @@ function TypeBadge({ type }: { type: DisplayType }) {
   return (
     <span
       style={{
-        fontSize: 9,
+        fontSize: 'var(--atelier-fs-xs)',
         padding: '1px 5px',
         borderRadius: 'var(--atelier-radius-xs)',
         background: colors.bg,
@@ -85,10 +85,10 @@ function JsonNodeImpl({ name, value, depth, path, expandedPaths, onToggle, highl
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
+          gap: 'var(--atelier-gap-xs)',
           padding: '2px 0',
           paddingLeft: depth * 16,
-          fontSize: 11,
+          fontSize: 'var(--atelier-fs-xs)',
         }}
       >
         {isExpandable ? (
@@ -213,7 +213,7 @@ export function JsonTree({ value, highlightKeys }: JsonTreeProps) {
   if (rootEntries.length === 0) {
     const dv = toDisplayValue(value);
     return (
-      <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 11, color: 'var(--atelier-text)' }}>
+      <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 'var(--atelier-fs-xs)', color: 'var(--atelier-text)' }}>
         {formatLeaf(dv)}
       </div>
     );

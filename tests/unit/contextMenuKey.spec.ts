@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isContextMenuKey, isEditKey, anchorFromRect, anchorForRow } from '../../src/utils/contextMenuKey';
+import { isContextMenuKey, isDeleteKey, isEditKey, anchorFromRect, anchorForRow } from '../../src/utils/contextMenuKey';
 
 // X19/#55 — the platform-conventional keys for "open the context menu for the
 // focused thing": the dedicated ContextMenu key, and Shift+F10. Every caller
@@ -67,5 +67,21 @@ describe('isEditKey', () => {
 
   it('is false for another key', () => {
     expect(isEditKey({ key: 'r', ...none })).toBe(false);
+  });
+});
+
+describe('isDeleteKey', () => {
+  const none = { metaKey: false, ctrlKey: false, altKey: false };
+  it('is true for d and D with no modifier', () => {
+    expect(isDeleteKey({ key: 'd', ...none })).toBe(true);
+    expect(isDeleteKey({ key: 'D', ...none })).toBe(true);
+  });
+
+  it.each(['metaKey', 'ctrlKey', 'altKey'] as const)('is false with %s held', (mod) => {
+    expect(isDeleteKey({ key: 'd', ...none, [mod]: true })).toBe(false);
+  });
+
+  it('is false for another key, the edit key included', () => {
+    expect(isDeleteKey({ key: 'e', ...none })).toBe(false);
   });
 });

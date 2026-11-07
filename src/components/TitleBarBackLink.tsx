@@ -16,8 +16,8 @@ export function TitleBarBackLink({ label, onClick }: TitleBarBackLinkProps) {
     <UnstyledButton
       onClick={onClick}
       style={{
-        display: 'inline-flex', alignItems: 'center', gap: 5,
-        color: T.textMuted, fontSize: 13, fontFamily: 'inherit',
+        display: 'inline-flex', alignItems: 'center', gap: themeVars.gapXs,
+        color: T.textMuted, fontSize: T.fsMd, fontFamily: 'inherit',
       }}
     >
       <span style={{ display: 'flex' }}>{I.chevL}</span>

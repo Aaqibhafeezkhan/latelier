@@ -63,12 +63,12 @@ export function PipelineOutline({
           justifyContent: 'space-between',
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: T.text }}>Pipeline</span>
-        <div style={{ display: 'flex', gap: 5 }}>
+        <span style={{ fontSize: T.fsSm, fontWeight: 600, color: T.text }}>Pipeline</span>
+        <div style={{ display: 'flex', gap: themeVars.gapXs }}>
           <span
             style={{
-              fontSize: 10,
-              color: T.accent,
+              fontSize: T.fsXs,
+              color: T.accentInk,
               background: T.accentSoft,
               borderRadius: T.rx,
               padding: '1px 5px',
@@ -79,7 +79,7 @@ export function PipelineOutline({
           {outputCount !== null && (
             <span
               style={{
-                fontSize: 10,
+                fontSize: T.fsXs,
                 color: T.textGhost,
                 background: T.surfaceRaised,
                 borderRadius: T.rx,
@@ -98,9 +98,9 @@ export function PipelineOutline({
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 7,
+            gap: themeVars.gapSm,
             padding: '5px 12px',
-            fontSize: 12,
+            fontSize: T.fsSm,
             color: T.textMuted,
           }}
         >
@@ -133,7 +133,7 @@ export function PipelineOutline({
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 7,
+                  gap: themeVars.gapSm,
                   width: '100%',
                   padding: '5px 12px',
                   font: 'inherit',
@@ -145,7 +145,7 @@ export function PipelineOutline({
               >
                 <span
                   style={{
-                    fontSize: 10,
+                    fontSize: T.fsXs,
                     color: T.textGhost,
                     width: 14,
                     textAlign: 'center',
@@ -157,7 +157,7 @@ export function PipelineOutline({
                 <span
                   style={{
                     fontFamily: 'JetBrains Mono, monospace',
-                    fontSize: 11,
+                    fontSize: T.fsXs,
                     fontWeight: 600,
                     color: c.text,
                     flex: 1,
@@ -172,7 +172,7 @@ export function PipelineOutline({
                       title="Unknown op"
                       style={{
                         marginLeft: 4,
-                        fontSize: 9,
+                        fontSize: T.fsXs,
                         color: T.warn,
                       }}
                     >
@@ -184,7 +184,7 @@ export function PipelineOutline({
                   <span
                     title={stale ? 'Stage edited after last run — counts are stale' : undefined}
                     style={{
-                      fontSize: 10,
+                      fontSize: T.fsXs,
                       color: T.textGhost,
                       flexShrink: 0,
                       textDecoration: stage.enabled ? 'none' : 'line-through',
@@ -207,16 +207,16 @@ export function PipelineOutline({
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 7,
+            gap: themeVars.gapSm,
             padding: '5px 12px',
-            fontSize: 12,
-            color: T.accent,
+            fontSize: T.fsSm,
+            color: T.accentInk,
           }}
         >
-          <span style={{ display: 'flex', color: T.accent }}>{I.arrowR}</span>
+          <span style={{ display: 'flex', color: T.accentInk }}>{I.arrowR}</span>
           <span style={{ flex: 1 }}>Output</span>
           {outputCount !== null && (
-            <span style={{ fontSize: 10 }}>
+            <span style={{ fontSize: T.fsXs }}>
               {fmt(outputCount)}
               {outputStale ? ' ⚠' : ''}
             </span>
@@ -224,7 +224,7 @@ export function PipelineOutline({
         </div>
 
         <div style={{ padding: '8px 12px', borderTop: `1px solid ${T.border}`, marginTop: 8 }}>
-          <div style={{ fontSize: 10, color: T.textMuted, lineHeight: 1.6 }}>
+          <div style={{ fontSize: T.fsXs, color: T.textMuted, lineHeight: 1.6 }}>
             <div>Source: {collection}</div>
             <div>Stages: {stages.length}</div>
             <div>Output: {outputCount === null ? '—' : fmt(outputCount)}</div>

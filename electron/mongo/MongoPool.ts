@@ -45,12 +45,15 @@ export interface ServerInfo {
   serverStatsAvailable: boolean;
 }
 
+const LOST_WITHOUT_A_REASON = 'The server stopped answering.';
+
 interface Entry {
   status: ConnectionStatus;
   client?: MongoClient;
   connectPromise?: Promise<MongoClient>;
   errorCode?: ProbeErrorCode;
   errorMessage?: string;
+  lostReason?: string;
   connectedAt?: string;
   serverVersion?: string;
   topology?: MongoTopology;
@@ -191,17 +194,22 @@ export class MongoPool extends EventEmitter {
    */
   private attachLossDetection(client: MongoClient, connectionId: string): void {
     let lossTimer: NodeJS.Timeout | undefined;
+    let reason = LOST_WITHOUT_A_REASON;
     client.on('topologyDescriptionChanged', (evt: TopologyDescriptionChangedEvent) => {
       if (evt.newDescription.hasKnownServers) {
         clearTimeout(lossTimer);
         lossTimer = undefined;
         return;
       }
+      // Each server that stopped answering carries the driver's reason for it.
+      for (const server of evt.newDescription.servers.values()) {
+        if (server.error) reason = server.error.message;
+      }
       if (lossTimer) return;
       // unref'd — a pending loss timer must never hold the process open at quit.
       lossTimer = setTimeout(() => {
         lossTimer = undefined;
-        this.markConnectionLost(connectionId, client);
+        this.markConnectionLost(connectionId, client, reason);
       }, this.connectionLossGraceMs).unref();
     });
   }
@@ -223,12 +231,13 @@ export class MongoPool extends EventEmitter {
    * self-heal. Keeping the client costs nothing: `connect()` closes it when the
    * user wakes the Connection, `disconnectAll()` closes it at quit. errorCode /
    * errorMessage stay clear (connect() already cleared them) so the UI renders
-   * Dormant rather than a failure the user never caused.
+   * Dormant rather than a failure the user never caused; `lostReason` says why.
    */
-  private markConnectionLost(id: string, client: MongoClient): void {
+  private markConnectionLost(id: string, client: MongoClient, reason: string): void {
     const entry = this.entries.get(id);
     if (!entry || entry.client !== client || entry.status !== 'connected') return;
     entry.status = 'disconnected';
+    entry.lostReason = reason;
     entry.connectedAt = undefined;
     clearServerFacts(entry);
     this.log?.warn('mongo', 'connection lost — deployment unreachable', { connectionId: id });
@@ -295,6 +304,7 @@ export class MongoPool extends EventEmitter {
       connectedAt: e.connectedAt,
       serverVersion: e.serverVersion,
       topology: e.topology,
+      lostReason: e.lostReason,
     };
   }
 
@@ -545,6 +555,7 @@ export class MongoPool extends EventEmitter {
       entry!.connectedAt = new Date().toISOString();
       entry!.errorCode = undefined;
       entry!.errorMessage = undefined;
+      entry!.lostReason = undefined;
       entry!.client = client;
       // Cache defaultDb only after a successful connect so a failed attempt
       // doesn't leave a stale value on a disconnected entry.
@@ -572,6 +583,7 @@ export class MongoPool extends EventEmitter {
             entry!.status = 'error';
             entry!.errorCode = cls.code;
             entry!.errorMessage = cls.message;
+            entry!.lostReason = undefined;
             this.emit('status', this.status(id));
           }
         }
@@ -606,6 +618,7 @@ export class MongoPool extends EventEmitter {
     entry.defaultDb = undefined;
     entry.errorCode = undefined;
     entry.errorMessage = undefined;
+    entry.lostReason = undefined;
     this.emit('status', this.status(id));
     try {
       await client.close();

@@ -14,6 +14,7 @@ import { ejsonParse, isPlainDocument } from '../utils/ejson';
 import { buildUpdateRequest, setAtSegments } from './Workspace/documentDiff';
 import { copyToClipboard } from '../utils/clipboard';
 import { BUILDER_MIN_PCT } from './Workspace/panelSizes';
+import { ONE_PANEL_BUILDER_PX } from './Workspace/sidePanels';
 import type { CollectionView } from '@shared/types';
 import { DEFAULT_AGGREGATION_TAB_STATE, DEFAULT_SCHEMA_TAB_STATE } from '@shared/defaults';
 import { useReferenceRules } from '../features/references/useReferenceRules';
@@ -95,6 +96,7 @@ function WorkspaceInner() {
     prefsReady,
     leftWidth,
     innerHSplit,
+    onePanelOnly,
     sidebarCollapsed,
     builderCollapsed, commitBuilderCollapsed,
   } = panelPrefs;
@@ -113,10 +115,14 @@ function WorkspaceInner() {
     const handle = builderPanelRef.current;
     if (!handle) return;
     handle.expand();
+    if (onePanelOnly) {
+      handle.resize(ONE_PANEL_BUILDER_PX);
+      return;
+    }
     // Floor at BUILDER_MIN_PCT in case a stored split is narrower than draggable.
     const pct = Math.max(innerHSplitRef.current, BUILDER_MIN_PCT);
     handle.resize(`${pct}%`);
-  }, [innerHSplitRef]);
+  }, [innerHSplitRef, onePanelOnly]);
 
   const toggleBuilder = React.useCallback(() => {
     const next = !builderCollapsed;
@@ -124,6 +130,24 @@ function WorkspaceInner() {
     if (next) builderPanelRef.current?.collapse();
     else restoreBuilderWidth();
   }, [builderCollapsed, commitBuilderCollapsed, restoreBuilderWidth]);
+
+  // A window crossing the one-panel width, or the navigator opening while it is
+  // narrow, changes the drawer without going through the toggle above. Crossing
+  // back also has to put the stored width back, not just the open state. On the
+  // next frame: the navigator changes width in this same commit, and a size set
+  // before the panel group has measured that would be taken against its old width.
+  const builderSyncedOnce = React.useRef(false);
+  React.useEffect(() => {
+    if (!builderSyncedOnce.current) {
+      builderSyncedOnce.current = true;
+      return undefined;
+    }
+    const frame = requestAnimationFrame(() => {
+      if (builderCollapsed) builderPanelRef.current?.collapse();
+      else restoreBuilderWidth();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [builderCollapsed, restoreBuilderWidth]);
 
   // Expands the pane first — when collapsed, BuilderPane isn't mounted, so a
   // patch targeting it would silently land in persisted state only.
@@ -1185,7 +1209,6 @@ function WorkspaceInner() {
         overflow: 'hidden',
         background: T.bg,
         color: T.text,
-        fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
     >
       <ShellSection
@@ -1241,13 +1264,14 @@ function WorkspaceInner() {
           createIndexRequest?.tabId === activeCollection?.id ? createIndexRequest : null
         }
         onStructureInitialCreateConsumed={onCreateIndexConsumed}
+        connectErrors={navigatorTree.connectErrors}
       />
 
       <FeatureHint
         id="startup.restore"
         visible={startupRestoreHint.visible}
         onDismiss={startupRestoreHint.dismiss}
-        onCta={settings.open}
+        onCta={() => settings.open('editor')}
       />
 
       <DialogStack

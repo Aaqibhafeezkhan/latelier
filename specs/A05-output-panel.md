@@ -53,10 +53,12 @@ The bottom panel of the aggregation tab. Shows the pipeline's final output in Tr
 
 ## 4. States
 
-- **No run yet**: centered placeholder "Run the pipeline to see output".
+The empty, not-run and failed states are the W06 pane states (`PaneState`), each with a next action.
+
+- **No run yet**: "Run the pipeline to see output", with a Run pipeline button.
 - **Running**: subtle overlay with spinner; keeps previous output visible.
-- **Empty result**: "Pipeline returned no documents".
-- **Error**: error card with code + message; "Show details" expands to raw error JSON.
+- **Empty result**: "The pipeline returned no documents", pointing at the stage previews, with Run again.
+- **Error**: "The pipeline failed", with `code: message` and the server's details (when present) in one scrollable block, and Run again. The run buttons are disabled while a run is in flight or a stage body does not parse, like the toolbar's Run.
 
 ## 5. Acceptance criteria
 
@@ -66,7 +68,7 @@ The bottom panel of the aggregation tab. Shows the pipeline's final output in Tr
 - Copy produces EJSON canonical output.
 - Download writes a valid file to the chosen path.
 - Save as collection opens the A06 modal with target collection pre-filled.
-- Error state shows code and message; "Show details" reveals the raw error.
+- Error state shows code, message and details, and offers Run again.
 
 ## 6. Test cases
 
@@ -76,4 +78,4 @@ The bottom panel of the aggregation tab. Shows the pipeline's final output in Tr
 - **copy.spec.tsx**: click Copy → clipboard receives expected EJSON.
 - **download.spec.tsx**: click ⇩ → mocked `api.app.saveFile` called; file write channel receives payload.
 - **empty.spec.tsx**: `rows=[]` → empty placeholder.
-- **error.spec.tsx**: mock error → card with code; "Show details" reveals JSON.
+- **error.spec.tsx**: mock error → pane state with code, message and details; Run again calls the run.

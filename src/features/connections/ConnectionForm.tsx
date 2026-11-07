@@ -160,7 +160,7 @@ function Label({ children, required, htmlFor, id }: {
 }) {
   const T = themeVars;
   const style: React.CSSProperties = {
-    fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 5, display: 'flex', gap: 3,
+    fontSize: T.fsXs, fontWeight: 600, color: T.textMuted, marginBottom: 5, display: 'flex', gap: themeVars.gapXs,
   };
   const content = (
     <>
@@ -194,16 +194,16 @@ function Field({ label, required, error, group, children }: {
         )}
         {children}
         {error && (
-          <div id={errorId} style={{ marginTop: 4, fontSize: 11, color: T.warn }}>{error}</div>
+          <div id={errorId} style={{ marginTop: 4, fontSize: T.fsXs, color: T.warn }}>{error}</div>
         )}
       </div>
     </FieldControlContext.Provider>
   );
 }
 
-function Input({ value, onChange, placeholder, type = 'text', style: sx, readOnly }: {
+function Input({ value, onChange, placeholder, type = 'text', style: sx, readOnly, autoFocus }: {
   value: string; onChange: (v: string) => void; placeholder?: string;
-  type?: string; style?: React.CSSProperties; readOnly?: boolean;
+  type?: string; style?: React.CSSProperties; readOnly?: boolean; autoFocus?: boolean;
 }) {
   const T = themeVars;
   const fieldProps = useFieldControlProps();
@@ -217,11 +217,14 @@ function Input({ value, onChange, placeholder, type = 'text', style: sx, readOnl
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       readOnly={readOnly}
+      // `data-autofocus` is what Mantine's Modal focus trap looks for; plain autoFocus alone loses to it.
+      data-autofocus={autoFocus ? true : undefined}
+      autoFocus={autoFocus}
       style={{
         width: '100%', boxSizing: 'border-box',
         padding: '6px 10px', border: `1px solid ${T.border}`,
         borderRadius: T.rs, background: T.surfaceRaised,
-        color: T.text, fontSize: 12, fontFamily: 'inherit', outline: 'none',
+        color: T.text, fontSize: T.fsSm, fontFamily: 'inherit', outline: 'none',
         ...sx,
       }}
     />
@@ -241,7 +244,7 @@ function Select({ value, onChange, children }: {
       style={{
         width: '100%', padding: '6px 10px', border: `1px solid ${T.border}`,
         borderRadius: T.rs, background: T.surfaceRaised,
-        color: T.text, fontSize: 12, fontFamily: 'inherit', outline: 'none',
+        color: T.text, fontSize: T.fsSm, fontFamily: 'inherit', outline: 'none',
         cursor: 'pointer',
       }}
     >
@@ -271,7 +274,7 @@ function Toggle({ checked, onChange, label, disabled }: {
       onClick={() => onChange(!checked)}
       className="focus-ring"
       style={{
-        display: 'flex', alignItems: 'center', gap: 9,
+        display: 'flex', alignItems: 'center', gap: themeVars.gapSm,
         cursor: disabled ? 'not-allowed' : 'pointer', userSelect: 'none',
         opacity: disabled ? 0.5 : 1,
         // Strip the UA button chrome; every visual below is unchanged.
@@ -296,7 +299,7 @@ function Toggle({ checked, onChange, label, disabled }: {
           display: 'block',
         }} />
       </span>
-      <span style={{ fontSize: 12, color: T.text }}>{label}</span>
+      <span style={{ fontSize: T.fsSm, color: T.text }}>{label}</span>
     </button>
   );
 }
@@ -305,7 +308,7 @@ function SectionDivider({ children }: { children: React.ReactNode }) {
   const T = themeVars;
   return (
     <div style={{
-      fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+      fontSize: T.fsXs, fontWeight: 700, textTransform: 'uppercase',
       letterSpacing: '0.08em', color: T.textMuted,
       padding: '0 0 8px', marginBottom: 2,
       borderBottom: `1px solid ${T.border}`,
@@ -338,7 +341,7 @@ function PasswordInput({ value, onChange, placeholder, autoFocus }: {
           width: '100%', boxSizing: 'border-box',
           padding: '6px 34px 6px 10px', border: `1px solid ${T.border}`,
           borderRadius: T.rs, background: T.surfaceRaised,
-          color: T.text, fontSize: 12, fontFamily: 'inherit', outline: 'none',
+          color: T.text, fontSize: T.fsSm, fontFamily: 'inherit', outline: 'none',
         }}
       />
       <Tooltip label={showPwd ? 'Hide password' : 'Show password'} withArrow openDelay={400}>
@@ -382,7 +385,7 @@ function FilePathRow({ purpose, label, value, onChange, placeholder }: {
     }
   };
   return (
-    <div style={{ display: 'flex', gap: 6 }}>
+    <div style={{ display: 'flex', gap: themeVars.gapXs }}>
       <Input value={value} onChange={onChange} placeholder={placeholder} readOnly />
       <Tooltip label="Browse" withArrow openDelay={400}>
         <Button
@@ -412,12 +415,13 @@ function FilePathRow({ purpose, label, value, onChange, placeholder }: {
 
 
 function GeneralTab({
-  form, set, fieldErrors, onPasteUri,
+  form, set, fieldErrors, onPasteUri, focusName,
 }: {
   form: FormState;
   set: <K extends keyof FormState>(k: K, v: FormState[K]) => void;
   fieldErrors: Record<string, string>;
   onPasteUri: (uri: string) => void;
+  focusName: boolean;
 }) {
   const T = themeVars;
   const [showUri, setShowUri] = React.useState(false);
@@ -430,15 +434,15 @@ function GeneralTab({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: themeVars.gapLg }}>
       <div>
         <SectionDivider>Identity</SectionDivider>
-        <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
+        <div style={{ display: 'grid', gap: T.gapMd, marginTop: 10 }}>
           <Field label="Name" required error={fieldErrors['name']}>
-            <Input value={form.name} onChange={(v) => set('name', v)} placeholder="My MongoDB Server" />
+            <Input value={form.name} onChange={(v) => set('name', v)} placeholder="My MongoDB Server" autoFocus={focusName} />
           </Field>
           <Field label="Color" group>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: T.gapSm }}>
               {COLORS.map((c) => (
                 <ColorSwatch
                   key={c}
@@ -471,7 +475,7 @@ function GeneralTab({
             onClick={() => setShowUri((v) => !v)}
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
-              fontSize: 11, color: T.accent, fontFamily: 'inherit', padding: 0,
+              fontSize: T.fsXs, color: T.accentInk, fontFamily: 'inherit', padding: 0,
               fontWeight: 600,
             }}
           >
@@ -481,7 +485,7 @@ function GeneralTab({
 
         {showUri ? (
           <Field label="Connection URI">
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ display: 'flex', gap: themeVars.gapXs }}>
               <Input
                 value={uriDraft}
                 onChange={setUriDraft}
@@ -491,12 +495,12 @@ function GeneralTab({
             </div>
           </Field>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: themeVars.gapSm }}>
             <div
               style={{
                 display: 'grid',
                 gridTemplateColumns: form.type === 'srv' ? '1fr' : '2fr 1fr',
-                gap: 10,
+                gap: themeVars.gapSm,
               }}
             >
               <Field label="Hostname" required error={fieldErrors['host']}>
@@ -512,7 +516,7 @@ function GeneralTab({
                 </Field>
               )}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: themeVars.gapSm }}>
               <Field label="Default database">
                 <Input
                   value={form.defaultDb}
@@ -556,7 +560,7 @@ function GeneralTab({
             onChange={(v) => set('readOnly', v)}
             label="Read-only connection"
           />
-          <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>
+          <div style={{ fontSize: T.fsXs, color: T.textMuted, marginTop: 4 }}>
             Blocks every write through this connection — document edits, drops,
             and shell/script writes — enforced outside the UI, not just hidden.
           </div>
@@ -597,7 +601,7 @@ function AuthTab({ form, set, fieldErrors, isEdit, focusPassword }: {
             onClick={() => set('clearPassword', true)}
             style={{
               background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-              color: T.warn, fontSize: 11, fontFamily: 'inherit',
+              color: T.warn, fontSize: T.fsXs, fontFamily: 'inherit',
             }}
           >
             Remove stored password
@@ -605,12 +609,12 @@ function AuthTab({ form, set, fieldErrors, isEdit, focusPassword }: {
         </div>
       )}
       {form.clearPassword && (
-        <div style={{ marginTop: 6, fontSize: 11, color: T.warn }}>
+        <div style={{ marginTop: 6, fontSize: T.fsXs, color: T.warn }}>
           Will be removed on save.{' '}
           <button
             type="button"
             onClick={() => set('clearPassword', false)}
-            style={{ background: 'none', border: 'none', color: T.accent, cursor: 'pointer', fontSize: 11 }}
+            style={{ background: 'none', border: 'none', color: T.accentInk, cursor: 'pointer', fontSize: T.fsXs }}
           >
             Undo
           </button>
@@ -620,7 +624,7 @@ function AuthTab({ form, set, fieldErrors, isEdit, focusPassword }: {
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: themeVars.gapMd }}>
       <Field label="Authentication mechanism">
         <Select value={form.authMech} onChange={(v) => set('authMech', v as FormState['authMech'])}>
           <option value="default">Default (negotiate)</option>
@@ -635,7 +639,7 @@ function AuthTab({ form, set, fieldErrors, isEdit, focusPassword }: {
         form.authMech === 'scram256' ||
         form.authMech === 'scram1') && (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: themeVars.gapSm }}>
             <Field label="Username" required error={fieldErrors['authUsername']}>
               <Input value={form.authUsername} onChange={(v) => set('authUsername', v)} placeholder="admin" />
             </Field>
@@ -655,13 +659,13 @@ function AuthTab({ form, set, fieldErrors, isEdit, focusPassword }: {
         </>
       )}
       {form.authMech === 'x509' && (
-        <div style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.5 }}>
+        <div style={{ fontSize: T.fsSm, color: T.textMuted, lineHeight: 1.5 }}>
           X.509 authentication uses the client certificate from the <strong>TLS</strong> tab.
           Make sure TLS is enabled and the certificate path is set.
         </div>
       )}
       {form.authMech === 'none' && (
-        <div style={{ fontSize: 12, color: T.textMuted }}>
+        <div style={{ fontSize: T.fsSm, color: T.textMuted }}>
           No authentication — credentials will be ignored.
         </div>
       )}
@@ -682,9 +686,9 @@ function TLSTab({ form, set, fieldErrors }: {
     viaSshTunnel: form.sshEnabled,
   });
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: T.gapLg }}>
       <Toggle checked={form.tlsEnabled} onChange={(v) => set('tlsEnabled', v)} label="Enable TLS / SSL" />
-      <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.5 }}>
+      <div style={{ fontSize: T.fsXs, color: T.textMuted, lineHeight: 1.5 }}>
         {TLS_INLINE_EXPLAINER}
       </div>
       {warning && (
@@ -694,7 +698,7 @@ function TLSTab({ form, set, fieldErrors }: {
           style={{
             padding: '8px 10px', background: T.redSoft, color: T.redText,
             border: `1px solid ${T.redBorder}`, borderRadius: T.rs,
-            fontSize: 12, lineHeight: 1.5,
+            fontSize: T.fsSm, lineHeight: 1.5,
           }}
         >
           <strong>Warning:</strong> {warning}
@@ -703,7 +707,7 @@ function TLSTab({ form, set, fieldErrors }: {
       {form.tlsEnabled && (
         <>
           <div style={{ height: 1, background: T.border }} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: T.gapMd }}>
             <Field label="CA Certificate" error={fieldErrors['tls.caPath']}>
               <FilePathRow
                 purpose="tls-ca"
@@ -740,20 +744,20 @@ function SSHTab({ form, set }: {
 }) {
   const T = themeVars;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: T.gapLg }}>
       <Toggle
         checked={form.sshEnabled}
         onChange={(v) => set('sshEnabled', v)}
         label="SSH tunnel (coming soon)"
         disabled
       />
-      <div style={{ fontSize: 11, color: T.textMuted }}>
+      <div style={{ fontSize: T.fsXs, color: T.textMuted }}>
         SSH tunneling is not supported in this iteration. Fields below are retained for future use.
       </div>
       {form.sshEnabled && (
         <>
           <div style={{ height: 1, background: T.border }} />
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: themeVars.gapSm }}>
             <Field label="SSH Host">
               <Input value={form.sshHost} onChange={(v) => set('sshHost', v)} placeholder="bastion.example.com" />
             </Field>
@@ -774,10 +778,10 @@ function AdvancedTab({ form, set, fieldErrors }: {
 }) {
   const T = themeVars;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: themeVars.gapLg }}>
       <div>
         <SectionDivider>Timeouts (ms)</SectionDivider>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: themeVars.gapSm, marginTop: 10 }}>
           <Field label="Connect timeout" error={fieldErrors['advanced.connectTimeoutMs']}>
             <Input value={form.connectTimeoutMs} onChange={(v) => set('connectTimeoutMs', v)} placeholder="10000" />
           </Field>
@@ -793,7 +797,7 @@ function AdvancedTab({ form, set, fieldErrors }: {
           </Field>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: themeVars.gapSm }}>
         <Field label="Read preference">
           <Select
             value={form.readPreference}
@@ -815,7 +819,7 @@ function AdvancedTab({ form, set, fieldErrors }: {
         onChange={(v) => set('directConnection', v)}
         label="Direct connection"
       />
-      <div style={{ fontSize: 11, color: T.textMuted, lineHeight: 1.5 }}>
+      <div style={{ fontSize: T.fsXs, color: T.textMuted, lineHeight: 1.5 }}>
         {DIRECT_CONNECTION_INLINE_EXPLAINER}
       </div>
       <Field label="App name">
@@ -843,10 +847,10 @@ function TestStatus({ state, errorMsg }: { state: TestState; errorMsg: string | 
   const c = palette[state];
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 7,
+      display: 'flex', alignItems: 'center', gap: themeVars.gapSm,
       padding: '6px 12px', borderRadius: T.rs,
       background: c.bg, border: `1px solid ${c.border}`,
-      color: c.color, fontSize: 11, maxWidth: 480,
+      color: c.color, fontSize: T.fsXs, maxWidth: 480,
     }}>
       {state === 'testing' && (
         <span style={{
@@ -975,6 +979,10 @@ function ConnectionFormImpl({
   );
   const fieldErrors = formApi.errors as Record<string, string>;
   const [loading, setLoading] = React.useState<boolean>(isEdit);
+  // A dialog opens on its Name field rather than its Close button. Cleared by
+  // the first tab change, so coming back to General never pulls focus off the
+  // tab strip. The page form is not a dialog and keeps its focus where it is.
+  const [focusName, setFocusName] = React.useState(embedded && initialFocus !== 'password');
   const [saving, setSaving] = React.useState(false);
   // The ⌘S listener closes over a stale `saving`; this ref gives it a live read.
   const savingRef = React.useRef(false);
@@ -1234,8 +1242,8 @@ function ConnectionFormImpl({
           data-testid="plaintext-fallback-banner"
           style={{
             padding: '8px 20px', background: 'rgba(184,76,20,0.08)',
-            color: T.warn, borderBottom: `1px solid ${T.border}`, fontSize: 12,
-            display: 'flex', alignItems: 'center', gap: 12,
+            color: T.warn, borderBottom: `1px solid ${T.border}`, fontSize: T.fsSm,
+            display: 'flex', alignItems: 'center', gap: T.gapMd,
           }}
         >
           <span>
@@ -1250,7 +1258,10 @@ function ConnectionFormImpl({
       )}
 
       <div style={{
-        flex: 1, overflowY: 'auto',
+        flex: 1, minHeight: 0,
+        // Embedded in a fixed-size dialog only the tab panel scrolls, so the
+        // footer stays docked; the page form scrolls as a whole.
+        overflowY: embedded ? 'hidden' : 'auto',
         display: 'flex', justifyContent: 'center',
         padding: embedded ? 0 : '28px 16px 40px',
       }}>
@@ -1276,13 +1287,13 @@ function ConnectionFormImpl({
               expect to find alone in the document. */}
           <Tabs
             value={tab}
-            onChange={(v) => { if (v) setTab(v as NCTab); }}
+            onChange={(v) => { if (v) { setFocusName(false); setTab(v as NCTab); } }}
             keepMounted={false}
             style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
           >
             <Tabs.List aria-label="Connection settings" style={{ padding: '0 20px' }}>
               {TABS_NC.map((t) => (
-                <Tabs.Tab key={t} value={t} styles={{ tab: { fontSize: 12 } }}>
+                <Tabs.Tab key={t} value={t} styles={{ tab: { fontSize: T.fsSm } }}>
                   {t}
                 </Tabs.Tab>
               ))}
@@ -1290,7 +1301,7 @@ function ConnectionFormImpl({
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '22px 24px' }}>
               {loading ? (
-                <div style={{ color: T.textMuted, fontSize: 13, padding: '32px 0' }}>Loading…</div>
+                <div style={{ color: T.textMuted, fontSize: T.fsMd, padding: '32px 0' }}>Loading…</div>
               ) : (
                 <>
                   <Tabs.Panel value="General">
@@ -1299,6 +1310,7 @@ function ConnectionFormImpl({
                       set={set}
                       fieldErrors={fieldErrors}
                       onPasteUri={(uri) => void handlePasteUri(uri)}
+                      focusName={focusName}
                     />
                   </Tabs.Panel>
                   <Tabs.Panel value="Auth">
@@ -1326,7 +1338,7 @@ function ConnectionFormImpl({
 
           {toast && (
             <div role="status" style={{
-              padding: '8px 24px', fontSize: 11, color: T.textMuted,
+              padding: '8px 24px', fontSize: T.fsXs, color: T.textMuted,
               borderTop: `1px solid ${T.border}`, background: T.surfaceRaised,
             }}>
               {toast}
@@ -1334,7 +1346,7 @@ function ConnectionFormImpl({
           )}
 
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
+            display: 'flex', alignItems: 'center', gap: themeVars.gapSm,
             padding: '12px 24px', borderTop: `1px solid ${T.border}`,
             background: T.surfaceRaised,
             ...(embedded ? {} : { borderRadius: `0 0 ${T.r} ${T.r}` }),
@@ -1344,7 +1356,7 @@ function ConnectionFormImpl({
               <Button
                 variant="subtle"
                 size="compact-xs"
-                c={T.accent}
+                c={T.accentInk}
                 onClick={() =>
                   help.open(testFailure, {
                     retryWithoutTls: async () => {
@@ -1414,11 +1426,11 @@ function PlaintextFallbackModal({
         title="Keychain access blocked"
         size={460}
         centered
-        styles={{ title: { fontSize: 15, fontWeight: 600, color: T.warn } }}
+        styles={{ title: { fontSize: T.fsLg, fontWeight: 600, color: T.warn } }}
         attributes={{ content: { 'data-testid': 'keychain-blocked-modal' } }}
       >
         <div style={{ color: T.text }}>
-          <p style={{ marginTop: 0, marginBottom: 16, fontSize: 13, lineHeight: 1.5 }}>
+          <p style={{ marginTop: 0, marginBottom: 16, fontSize: T.fsMd, lineHeight: 1.5 }}>
             macOS blocked access to the keychain. Quit and reopen L'Atelier, then click
             {' '}"Always Allow" when macOS asks.
           </p>
@@ -1440,18 +1452,18 @@ function PlaintextFallbackModal({
       title="OS keychain unavailable"
       size={460}
       centered
-      styles={{ title: { fontSize: 15, fontWeight: 600, color: T.warn } }}
+      styles={{ title: { fontSize: T.fsLg, fontWeight: 600, color: T.warn } }}
       attributes={{ content: { 'data-testid': 'plaintext-fallback-modal' } }}
     >
       <div style={{ color: T.text }}>
-        <p style={{ marginTop: 0, marginBottom: 8, fontSize: 13, lineHeight: 1.5 }}>
+        <p style={{ marginTop: 0, marginBottom: 8, fontSize: T.fsMd, lineHeight: 1.5 }}>
           L'Atelier couldn't reach your OS keychain to encrypt this password. On Linux this
           usually means <code>libsecret</code> isn't installed or no session keyring is running.
         </p>
-        <p style={{ marginTop: 0, marginBottom: 12, fontSize: 13, lineHeight: 1.5 }}>
+        <p style={{ marginTop: 0, marginBottom: 12, fontSize: T.fsMd, lineHeight: 1.5 }}>
           You can:
         </p>
-        <ul style={{ marginTop: 0, marginBottom: 12, paddingLeft: 20, fontSize: 13, lineHeight: 1.55 }}>
+        <ul style={{ marginTop: 0, marginBottom: 12, paddingLeft: 20, fontSize: T.fsMd, lineHeight: 1.55 }}>
           <li>Switch this connection to <strong>X.509</strong> or <strong>None</strong> auth, which doesn't store a password.</li>
           <li>Or, store passwords as <strong>plaintext</strong> in the local database.</li>
         </ul>
@@ -1459,13 +1471,13 @@ function PlaintextFallbackModal({
           style={{
             background: 'rgba(184,76,20,0.1)', color: T.warn,
             border: `1px solid ${T.warn}33`, borderRadius: T.rs,
-            padding: '8px 10px', fontSize: 12, lineHeight: 1.5, marginBottom: 16,
+            padding: '8px 10px', fontSize: T.fsSm, lineHeight: 1.5, marginBottom: 16,
           }}
         >
           <strong>Not recommended.</strong> Anyone with read access to the local database
           {' '}file will be able to recover the password. Use this only on machines you control.
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: themeVars.gapSm }}>
           <Button type="button" variant="subtle" color="gray" size="compact-xs" onClick={close}>
             Cancel
           </Button>

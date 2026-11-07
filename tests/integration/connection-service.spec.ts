@@ -189,6 +189,20 @@ describe('ConnectionService', () => {
     expect(byName.get('Without')!.defaultDb).toBeUndefined();
   });
 
+  it('list says why a connection was lost, and nothing for one that was not', async () => {
+    const lost = await svc.create(validInput({ name: 'Lost' }));
+    await svc.create(validInput({ name: 'Idle' }));
+    const status = pool.status.bind(pool);
+    vi.spyOn(pool, 'status').mockImplementation((id) =>
+      id === lost.id ? { ...status(id), lostReason: 'The server stopped answering.' } : status(id),
+    );
+
+    const byName = new Map(svc.list().map((s) => [s.name, s]));
+    expect(byName.get('Lost')!.lostReason).toBe('The server stopped answering.');
+    expect(byName.get('Lost')!.status).toBe('unknown');
+    expect(byName.get('Idle')!.lostReason).toBeUndefined();
+  });
+
   it('touchUsed updates last_used_at', async () => {
     const c = await svc.create(validInput());
     expect(repo.findById(c.id)!.last_used_at).toBeNull();

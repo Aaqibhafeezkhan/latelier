@@ -306,7 +306,7 @@ test('filter tab: the add controls, status line and bottom row stay put as condi
       const add = win.getByRole('button', { name: 'Add condition', exact: true });
       const reset = win.getByRole('button', { name: 'Reset', exact: true });
       const list = win.locator('[data-group-path="root"] > div').last();
-      await expect(win.getByText('Matches every document')).toBeVisible();
+      await expect(win.getByText('No conditions yet')).toBeVisible();
 
       const before = {
         add: await add.boundingBox(),

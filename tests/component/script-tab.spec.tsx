@@ -168,8 +168,31 @@ describe('ScriptTab', () => {
         onPatch={() => {}}
       />,
     );
-    expect(screen.getByText('TIMEOUT')).toBeTruthy();
-    expect(screen.getByText(/script exceeded 200ms/)).toBeTruthy();
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('The script failed');
+    expect(alert.textContent).toContain('TIMEOUT: script exceeded 200ms');
+    expect(screen.getByRole('button', { name: 'Run again' })).toBeTruthy();
+  });
+
+  it('says so when a run returns no value and prints nothing, and offers to run again', () => {
+    const run = vi.fn<IpcApi['script']['run']>(async () => ({ valueJson: null, printBuffer: '', durationMs: 4 }));
+    installAtelierMock({ script: { run, cancel: async () => undefined } });
+    render(
+      <ScriptTab
+        tab={tab({
+          state: {
+            title: 'My script',
+            source: 'db.orders.drop()',
+            resultPanelHeight: 240,
+            lastResult: { valueJson: null, printBuffer: '', durationMs: 4 },
+          },
+        })}
+        onPatch={() => {}}
+      />,
+    );
+    expect(screen.getByText('The script returned nothing')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Run again' }));
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   it('Cancel button posts script.cancel with the in-flight token', async () => {

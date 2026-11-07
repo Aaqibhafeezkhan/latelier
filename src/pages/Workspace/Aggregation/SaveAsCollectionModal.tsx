@@ -147,9 +147,9 @@ export function SaveAsCollectionModal({
           e.preventDefault();
           void submit();
         }}
-        style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+        style={{ display: 'flex', flexDirection: 'column', gap: T.gapMd }}
       >
-        <label style={{ fontSize: 12, color: T.textMuted }}>
+        <label style={{ fontSize: T.fsSm, color: T.textMuted }}>
           Target database
           <input
             value={targetDb}
@@ -164,7 +164,7 @@ export function SaveAsCollectionModal({
           />
         </label>
 
-        <label style={{ fontSize: 12, color: T.textMuted }}>
+        <label style={{ fontSize: T.fsSm, color: T.textMuted }}>
           Target collection *
           <input
             value={targetColl}
@@ -179,7 +179,7 @@ export function SaveAsCollectionModal({
           />
         </label>
 
-        <label style={{ fontSize: 12, color: T.textMuted }}>
+        <label style={{ fontSize: T.fsSm, color: T.textMuted }}>
           Mode
           <select
             value={mode}
@@ -199,8 +199,8 @@ export function SaveAsCollectionModal({
         </label>
 
         {mode === '$merge' && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <label style={{ fontSize: 12, color: T.textMuted, flex: 1 }}>
+          <div style={{ display: 'flex', gap: T.gapSm }}>
+            <label style={{ fontSize: T.fsSm, color: T.textMuted, flex: 1 }}>
               whenMatched
               <select
                 value={whenMatched}
@@ -217,7 +217,7 @@ export function SaveAsCollectionModal({
                 <option value="fail">fail</option>
               </select>
             </label>
-            <label style={{ fontSize: 12, color: T.textMuted, flex: 1 }}>
+            <label style={{ fontSize: T.fsSm, color: T.textMuted, flex: 1 }}>
               whenNotMatched
               <select
                 value={whenNotMatched}
@@ -239,7 +239,7 @@ export function SaveAsCollectionModal({
         <div
           role="alert"
           style={{
-            fontSize: 11,
+            fontSize: T.fsXs,
             color: T.warn,
             padding: '6px 8px',
             background: 'rgba(200,160,0,0.08)',
@@ -252,7 +252,7 @@ export function SaveAsCollectionModal({
             : 'Existing documents with matching _id will be modified per whenMatched; non-matching documents will be handled per whenNotMatched.'}
         </div>
 
-        <label style={{ fontSize: 12, color: T.textMuted }}>
+        <label style={{ fontSize: T.fsSm, color: T.textMuted }}>
           Type <span style={{ fontFamily: 'monospace', color: T.text }}>{targetColl || '…'}</span>{' '}
           to confirm
           <input
@@ -263,12 +263,12 @@ export function SaveAsCollectionModal({
         </label>
 
         {err && (
-          <div role="alert" style={{ fontSize: 12, color: T.red, whiteSpace: 'pre-wrap' }}>
+          <div role="alert" style={{ fontSize: T.fsSm, color: T.red, whiteSpace: 'pre-wrap' }}>
             {err}
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: T.gapSm }}>
           {/* Explicit `type="button"` for intent: an untyped button inside a
               form defaults to submit, and this one is first in tree order.
               Stated plainly because it was measured rather than assumed —
@@ -301,7 +301,7 @@ function inputStyle(T: typeof themeVars): React.CSSProperties {
     borderRadius: T.rs,
     background: T.surfaceRaised,
     color: T.text,
-    fontSize: 12,
+    fontSize: T.fsSm,
     boxSizing: 'border-box',
   };
 }

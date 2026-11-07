@@ -92,7 +92,7 @@ test('a sort and a limit set in the advanced row reach the header and the pager,
       await expect(win.getByText('ccc-3')).toBeVisible();
 
       // The pager agrees with the limit that ran — 2 of 3 documents.
-      await expect(win.getByText(/showing 1–2/)).toBeVisible({ timeout: 8000 });
+      await expect(win.getByText(/^1–2 of/)).toBeVisible({ timeout: 8000 });
 
       // ── Reload and confirm the composition restored. ──
       // `patchCollectionState` writes through a 250ms debounce, so a reload
@@ -115,7 +115,7 @@ test('a sort and a limit set in the advanced row reach the header and the pager,
       // still produces the same header and pager.
       await ws.queryBarRunButton.click();
       await expect(ws.tableHeader('sku')).toContainText('↓', { timeout: 8000 });
-      await expect(win.getByText(/showing 1–2/)).toBeVisible({ timeout: 8000 });
+      await expect(win.getByText(/^1–2 of/)).toBeVisible({ timeout: 8000 });
       await expect(win.getByText('ccc-3')).toBeVisible();
     });
   });

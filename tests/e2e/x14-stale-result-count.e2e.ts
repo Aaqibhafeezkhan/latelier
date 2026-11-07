@@ -63,7 +63,7 @@ test('a refused filter marks the result count not current, and clears on repair'
       await ws.queryBarTextarea.fill('{status: /^pa/gi}');
       await ws.queryBarTextarea.blur();
 
-      // The reason, inline, under the box the user typed in …
+      // The reason, beside the Run button it disables …
       const notice = win.locator('#query-bar-filter-error');
       await expect(notice).toBeVisible();
       await expect(notice).toContainText('"g"');

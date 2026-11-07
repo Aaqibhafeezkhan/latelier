@@ -28,6 +28,7 @@ describe('SettingsModal — clear value history', () => {
       </HintsProvider>,
     );
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'Data and support' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Clear value history' }));
 
     await waitFor(() => expect(clearFieldValues).toHaveBeenCalledTimes(1));

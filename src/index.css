@@ -7,6 +7,28 @@
   --atelier-navy:   #0d1f2d;
 }
 
+/* Type and gap scales (theme-independent). Four type sizes with an 11px floor and
+   five gaps replace the ad-hoc literals; src/ lint (no-restricted-syntax) fails a
+   new literal font size or non-zero gap, so both come from here. Exposed to TS by
+   themeVars.ts. Mantine's named spacing (`gap="xs"` is 10px) is its own scale and
+   stays legal. */
+:root {
+  --atelier-fs-xs: 11px;
+  --atelier-fs-sm: 12px;
+  --atelier-fs-md: 13px;
+  --atelier-fs-lg: 16px;
+  --atelier-gap-xs: 4px;
+  --atelier-gap-sm: 8px;
+  --atelier-gap-md: 12px;
+  --atelier-gap-lg: 16px;
+  --atelier-gap-xl: 24px;
+}
+
+/* A plain <input> outside Mantine keeps Chromium's #757575, under 4.5:1 on these surfaces. */
+::placeholder {
+  color: var(--atelier-text-ghost);
+}
+
 /* X12 — semantic theme tokens (the renderer's single design-token layer).
    MantineProvider sets data-mantine-color-scheme on <html> from useTheme();
    the matching block below applies, so light/dark switches automatically in
@@ -25,12 +47,16 @@
   --atelier-border-med:     rgba(26,26,46,0.16);
   /* Text */
   --atelier-text:           #1a1a2e;
-  --atelier-text-muted:     rgba(26,26,46,0.63);
-  --atelier-text-ghost:     rgba(26,26,46,0.50);
+  --atelier-text-muted:     rgba(26,26,46,0.72);
+  --atelier-text-ghost:     rgba(26,26,46,0.66);
   --mantine-color-dimmed:   var(--atelier-text-muted);
   /* Accent (violet primary) */
   --atelier-accent:         #7c6af7;
   --atelier-accent-text:    #ffffff;
+  /* Accent as text (ids, selected names, links): #7c6af7 is ~3.6:1 on the page, so
+     text takes this darker violet (violet[6]), held to 4.5:1 on every surface and on
+     accent-soft by tests/unit/theme-contrast.spec.ts. */
+  --atelier-accent-ink:     #5743c4;
   --atelier-accent-soft:    rgba(124,106,247,0.09);
   --atelier-accent-border:  rgba(124,106,247,0.30);
   /* Status — dot + scalar */
@@ -54,8 +80,10 @@
   /* Shadows */
   --atelier-shadow:         0 1px 3px rgba(0,0,0,0.06),0 4px 12px rgba(0,0,0,0.04);
   --atelier-shadow-lg:      0 8px 32px rgba(0,0,0,0.10);
-  /* Number syntax color (static, same in both modes) */
+  /* JSON value colors, held to 4.5:1 on every surface by tests/unit/theme-contrast.spec.ts */
   --atelier-color-number:   #1565c0;
+  --atelier-color-string:   #1b6e20;
+  --atelier-color-boolean:  #a8380a;
 }
 
 [data-mantine-color-scheme="dark"] {
@@ -69,12 +97,13 @@
   --atelier-border-med:     rgba(200,210,220,0.14);
   /* Text */
   --atelier-text:           #cdd5de;
-  --atelier-text-muted:     rgba(200,210,220,0.62);
-  --atelier-text-ghost:     rgba(200,210,220,0.45);
+  --atelier-text-muted:     rgba(200,210,220,0.70);
+  --atelier-text-ghost:     rgba(200,210,220,0.62);
   --mantine-color-dimmed:   var(--atelier-text-muted);
   /* Accent */
   --atelier-accent:         #7c6af7;
   --atelier-accent-text:    #ffffff;
+  --atelier-accent-ink:     #b7abf7;
   --atelier-accent-soft:    rgba(124,106,247,0.14);
   --atelier-accent-border:  rgba(124,106,247,0.38);
   /* Status — dot + scalar */
@@ -98,8 +127,10 @@
   /* Shadows */
   --atelier-shadow:         0 2px 8px rgba(0,0,0,0.35);
   --atelier-shadow-lg:      0 8px 32px rgba(0,0,0,0.55);
-  /* Number syntax color */
+  /* JSON value colors */
   --atelier-color-number:   #90caf9;
+  --atelier-color-string:   #8fd5a0;
+  --atelier-color-boolean:  #fb923c;
   /* Editor syntax (editorTheme.ts). Each is held to 4.5:1 on --atelier-surface by
      tests/unit/editor-theme-contrast.spec.ts; comments only need 3:1. */
   --atelier-syn-keyword:    #c4a7ff;
@@ -191,6 +222,18 @@ a { text-decoration: none; }
    hence `!important`. */
 .resize-separator:focus-visible {
   background: var(--atelier-accent) !important;
+}
+
+/* An open stage puts its editor beside its preview, and stacks them once the stage
+   list is too narrow for the editor to hold a typical stage. A container query, not
+   the window width: the navigator and outline decide how much room the list has.
+   Both layouts have a fixed height, so a run's documents never move the page. */
+.stage-list { container-type: inline-size; }
+.stage-body { display: flex; height: 316px; }
+.stage-preview { width: 280px; flex-shrink: 0; border-left: 1px solid var(--atelier-border); }
+@container (width < 640px) {
+  .stage-body { flex-direction: column; height: auto; }
+  .stage-preview { width: auto; height: 200px; border-left: none; border-top: 1px solid var(--atelier-border); }
 }
 
 /* 0.01ms, not 0: animationend / transitionend listeners still fire. !important

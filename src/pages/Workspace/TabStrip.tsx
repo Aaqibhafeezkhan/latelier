@@ -35,7 +35,7 @@ function ReadOnlyBadge() {
       <span
         aria-label="Read-only"
         style={{
-          fontSize: 9,
+          fontSize: themeVars.fsXs,
           color: themeVars.warnText,
           border: `1px solid ${themeVars.warnBorder}`,
           background: themeVars.warnSoft,
@@ -247,9 +247,9 @@ export function TabStrip({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
+                gap: themeVars.gapXs,
                 padding: '0 10px',
-                fontSize: 11,
+                fontSize: T.fsXs,
                 fontWeight: 600,
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
@@ -265,7 +265,7 @@ export function TabStrip({
                 aria-hidden
                 style={{
                   display: 'inline-flex',
-                  fontSize: 10,
+                  fontSize: T.fsXs,
                   transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
                   transition: 'transform 120ms',
                 }}
@@ -356,9 +356,9 @@ export function TabStrip({
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 5,
+                    gap: themeVars.gapXs,
                     padding: '0 12px',
-                    fontSize: 12,
+                    fontSize: T.fsSm,
                     cursor: 'pointer',
                     whiteSpace: 'nowrap',
                     background: active ? T.surfaceRaised : 'transparent',
@@ -382,14 +382,14 @@ export function TabStrip({
                   {tab.pinned && (
                     <Tooltip label="Pinned" withArrow>
                       <span
-                        style={{ fontSize: 9, color: T.accent, lineHeight: 1 }}
+                        style={{ fontSize: T.fsXs, color: T.accentInk, lineHeight: 1 }}
                         aria-label="Pinned"
                       >
                         ●
                       </span>
                     </Tooltip>
                   )}
-                  {tab.kind === 'script' && <span style={{ fontSize: 11 }}>⌥</span>}
+                  {tab.kind === 'script' && <span style={{ fontSize: T.fsXs }}>⌥</span>}
                   <span>{label}</span>
                   {readOnly && <ReadOnlyBadge />}
                   <ActionIcon
@@ -425,10 +425,10 @@ export function TabStrip({
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 3,
+            gap: themeVars.gapXs,
             padding: '0 10px',
             color: T.textMuted,
-            fontSize: 11,
+            fontSize: T.fsXs,
           }}
         >
           + Script

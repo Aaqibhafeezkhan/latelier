@@ -59,7 +59,7 @@ export function ReferenceHoverPopover({
         boxShadow: T.shadow,
         padding: '10px 12px',
         zIndex: 1500,
-        fontSize: 11,
+        fontSize: T.fsXs,
         pointerEvents: 'none',
       }}
     >
@@ -67,10 +67,10 @@ export function ReferenceHoverPopover({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
+          gap: themeVars.gapXs,
           marginBottom: 8,
           color: T.textMuted,
-          fontSize: 10,
+          fontSize: T.fsXs,
           textTransform: 'uppercase',
           letterSpacing: '0.06em',
         }}
@@ -83,8 +83,8 @@ export function ReferenceHoverPopover({
               borderRadius: 8,
               background: T.accentSoft,
               border: `1px solid ${T.accentBorder}`,
-              color: T.accent,
-              fontSize: 9,
+              color: T.accentInk,
+              fontSize: T.fsXs,
               letterSpacing: 0,
             }}
           >
@@ -93,7 +93,7 @@ export function ReferenceHoverPopover({
         )}
       </div>
       {loading && <div style={{ color: T.textMuted }}>Loading…</div>}
-      {error && <div style={{ color: T.warn, fontSize: 11 }}>{error}</div>}
+      {error && <div style={{ color: T.warn, fontSize: T.fsXs }}>{error}</div>}
       {!loading && !error && result && !result.found && (
         <div style={{ color: T.textMuted }}>No matching document.</div>
       )}
@@ -103,7 +103,7 @@ export function ReferenceHoverPopover({
             <div
               style={{
                 color: T.text,
-                fontSize: 12,
+                fontSize: T.fsSm,
                 fontWeight: 600,
                 marginBottom: 6,
                 overflow: 'hidden',
@@ -124,7 +124,7 @@ export function ReferenceHoverPopover({
                 key={field}
                 style={{
                   display: 'flex',
-                  gap: 6,
+                  gap: themeVars.gapXs,
                   padding: '2px 0',
                   overflow: 'hidden',
                 }}
@@ -150,7 +150,7 @@ export function ReferenceHoverPopover({
             style={{
               marginTop: 8,
               color: T.textGhost,
-              fontSize: 10,
+              fontSize: T.fsXs,
               fontStyle: 'italic',
             }}
           >

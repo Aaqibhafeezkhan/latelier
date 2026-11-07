@@ -80,6 +80,41 @@ describe('ConnectionFormModal', () => {
     expect(within(dialog).queryByPlaceholderText(/stored — enter new to replace/)).toBeNull();
   });
 
+  it('opens on the Name field, not on Close, in create mode and after an edit-mode load', async () => {
+    installAtelierMock({ conn: { get: async () => CANNED_CONNECTION } });
+    const created = render(<ConnectionFormModal onSaved={vi.fn()} onClose={vi.fn()} />);
+    let dialog = await screen.findByRole('dialog', { name: 'New Connection' });
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByPlaceholderText(/My MongoDB Server/i)));
+    created.unmount();
+
+    render(<ConnectionFormModal connectionId="c1" onSaved={vi.fn()} onClose={vi.fn()} />);
+    dialog = await screen.findByRole('dialog', { name: 'Edit Connection' });
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByPlaceholderText(/My MongoDB Server/i)));
+  });
+
+  it('coming back to General never pulls focus off the tab strip', async () => {
+    installAtelierMock({});
+    render(<ConnectionFormModal onSaved={vi.fn()} onClose={vi.fn()} />);
+    const dialog = await screen.findByRole('dialog', { name: 'New Connection' });
+    await userEvent.click(within(dialog).getByRole('tab', { name: 'Auth' }));
+    const general = within(dialog).getByRole('tab', { name: 'General' });
+    await userEvent.click(general);
+    expect(document.activeElement).toBe(general);
+  });
+
+  it('holds one dialog height on every tab, so Save does not move', async () => {
+    installAtelierMock({});
+    render(<ConnectionFormModal onSaved={vi.fn()} onClose={vi.fn()} />);
+    const dialog = await screen.findByRole('dialog', { name: 'New Connection' });
+    const heights = new Set<string>();
+    for (const name of ['General', 'Auth', 'TLS', 'SSH', 'Advanced']) {
+      await userEvent.click(within(dialog).getByRole('tab', { name }));
+      heights.add(dialog.style.height);
+    }
+    expect([...heights]).toHaveLength(1);
+    expect([...heights][0]).toContain('654px');
+  });
+
   it('create mode: saving calls conn.create and onSaved with the new id — does not call onClose itself', async () => {
     const createSpy = vi.fn(async () => ({ id: 'new-id' }) as never);
     installAtelierMock({ conn: { create: createSpy as never } });

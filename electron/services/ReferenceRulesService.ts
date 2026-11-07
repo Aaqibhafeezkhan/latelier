@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { deserialize, serialize } from 'bson';
 import type {
   ReferenceAutodetectCandidate,
   ReferenceAutodetectInput,
@@ -13,6 +12,7 @@ import { NotFoundError } from '../errors.ts';
 import { classifyMongoOpError } from '../mongo/errors.ts';
 import { ejsonEncode, parseEjsonField } from '../mongo/ejson.ts';
 import type { MongoPool } from '../mongo/MongoPool.ts';
+import { matchKey, pairInSourceOrder, valuesAtPath } from './referencePairing.ts';
 import { EXACT_BSON } from '../mongo/undo.ts';
 import { ownSet } from '../ownProperty.ts';
 import type {
@@ -24,41 +24,9 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-/**
- * The string a source value and a found document's field are paired by. EJSON
- * collapses ObjectId, Date and the like to something comparable; promoting first
- * makes Int32(5), Long(5) and Double(5) one key, because `$in` matched them as
- * one value and each side still spells it in its own type.
- */
-function matchKey(v: unknown): string {
-  // ponytail: a Decimal128, a -0, and a Long against a Double past 2^53 do not promote to the same value, so such a match loses its source position. Compare numerically if a reference ever keys on those.
-  return JSON.stringify(ejsonEncode(deserialize(serialize({ v }), { bsonRegExp: true }).v, false));
-}
-
-/** A dotted field's value, read through own properties only. */
-function readPath(doc: unknown, path: string): unknown {
-  let cur = doc;
-  for (const seg of path.split('.')) {
-    if (cur === null || typeof cur !== 'object' || !Object.hasOwn(cur, seg)) return undefined;
-    cur = (cur as Record<string, unknown>)[seg];
-  }
-  return cur;
-}
-
-/**
- * The projection plus `field`, so a found document can be paired by it. Left
- * as is when a projected path already covers the field or sits under it: the
- * server refuses a projection that names both `n` and `n.k`.
- */
-function withField(projection: Record<string, 1> | undefined, field: string): Record<string, 1> | undefined {
-  if (!projection) return undefined;
-  const overlaps = Object.keys(projection).some(
-    (p) => p === field || p.startsWith(`${field}.`) || field.startsWith(`${p}.`),
-  );
-  if (overlaps) return projection;
-  const out = { ...projection };
-  ownSet(out, field, 1);
-  return out;
+/** True when a projection already carries `path`, whole or through a parent. */
+function projectionCovers(fields: string[], path: string): boolean {
+  return fields.some((f) => f === path || path.startsWith(`${f}.`));
 }
 
 function normalizeProjection(projection: string[] | undefined): string[] {
@@ -197,33 +165,32 @@ export class ReferenceRulesService {
     const projection = projectionToMongo(rule.projection);
     const t0 = Date.now();
     try {
-      // Array source value → match any element via $in, then reorder results
-      // to match the source array so the renderer can show "first ref".
+      // Array source value → match any element via $in, then order results to
+      // follow the source array so the renderer can show "first ref". A match
+      // that pairs with no source value is kept, after the ordered ones.
       if (Array.isArray(value)) {
         if (value.length === 0) {
           return { ruleId: rule.id, found: false, documents: [], durationMs: Date.now() - t0 };
         }
-        const docs = await coll
-          .find(
-            { [rule.targetField]: { $in: value } } as Record<string, unknown>,
-            { ...EXACT_BSON, projection: withField(projection, rule.targetField) },
-          )
-          .toArray();
-        const ordered: unknown[] = [];
-        const docByKey = new Map<string, unknown>();
-        for (const d of docs) {
-          const k = matchKey(readPath(d, rule.targetField));
-          if (!docByKey.has(k)) docByKey.set(k, d);
+        const filter = { [rule.targetField]: { $in: value } } as Record<string, unknown>;
+        const docs = await coll.find(filter, { ...EXACT_BSON, projection }).toArray();
+        // The pairing reads each document's targetField. When the user's
+        // projection leaves it out, read it in a second query that only pairs
+        // and is never shown, so a projection that overlaps the path cannot
+        // collide and the field cannot leak into what the user sees.
+        let keyDocs: unknown[] = docs;
+        if (projection && !projectionCovers(rule.projection, rule.targetField)) {
+          const keyed = await coll
+            .find(filter, { ...EXACT_BSON, projection: { [rule.targetField]: 1 } })
+            .toArray();
+          const keyedById = new Map(keyed.map((k) => [matchKey(k._id), k]));
+          keyDocs = docs.map((d) => keyedById.get(matchKey(d._id)));
         }
-        for (const v of value) {
-          const hit = docByKey.get(matchKey(v));
-          if (hit !== undefined) ordered.push(hit);
-        }
-        // The server matched every document here. One the key cannot pair (a
-        // shared value, a Decimal128 against an Int32, -0 against 0) follows in
-        // server order rather than being dropped.
-        const paired = new Set(ordered);
-        for (const d of docs) if (!paired.has(d)) ordered.push(d);
+        const ordered = pairInSourceOrder(
+          value,
+          docs,
+          keyDocs.map((k) => valuesAtPath(k, rule.targetField)),
+        );
         return {
           ruleId: rule.id,
           found: ordered.length > 0,

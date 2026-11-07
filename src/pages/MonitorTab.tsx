@@ -22,9 +22,9 @@ const MIN_SECS_DEBOUNCE_MS = 300;
 const PROFILE_ROWS = 50;
 
 const tableStyles = {
-  table: { fontSize: 12 },
+  table: { fontSize: themeVars.fsSm },
   th: {
-    fontSize: 10,
+    fontSize: themeVars.fsXs,
     textTransform: 'uppercase' as const,
     letterSpacing: '0.06em',
     fontWeight: 600,
@@ -35,7 +35,7 @@ const tableStyles = {
 };
 
 const sectionTitle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: themeVars.fsXs,
   fontWeight: 600,
   color: themeVars.textMuted,
   textTransform: 'uppercase',
@@ -47,7 +47,7 @@ const inputStyle: React.CSSProperties = {
   borderRadius: themeVars.rs,
   background: themeVars.surfaceRaised,
   padding: '3px 6px',
-  fontSize: 12,
+  fontSize: themeVars.fsSm,
   color: themeVars.text,
 };
 
@@ -254,14 +254,14 @@ export function MonitorTab({ conn, runtime }: { conn: ConnectionSummary; runtime
   if (dbName && !dbNames.includes(dbName)) dbNames.unshift(dbName);
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: themeVars.gapLg }}>
       {conn.readOnly && (
-        <div id={readOnlyNoteId} style={{ fontSize: 12, color: T.textMuted }}>
+        <div id={readOnlyNoteId} style={{ fontSize: T.fsSm, color: T.textMuted }}>
           Read-only connection: killing operations and changing the profiler are disabled.
         </div>
       )}
-      <section aria-label="Current operations" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <section aria-label="Current operations" style={{ display: 'flex', flexDirection: 'column', gap: T.gapSm }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: T.gapMd, flexWrap: 'wrap' }}>
           <span style={sectionTitle}>Current operations</span>
           <Checkbox
             size="xs"
@@ -269,7 +269,7 @@ export function MonitorTab({ conn, runtime }: { conn: ConnectionSummary; runtime
             checked={activeOnly}
             onChange={(e) => setActiveOnly(e.currentTarget.checked)}
           />
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.textMuted }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: themeVars.gapXs, fontSize: T.fsSm, color: T.textMuted }}>
             Running ≥
             <input
               type="number"
@@ -282,7 +282,7 @@ export function MonitorTab({ conn, runtime }: { conn: ConnectionSummary; runtime
             s
           </label>
           <div style={{ flex: 1 }} />
-          <span style={{ fontSize: 11, color: T.textMuted }}>
+          <span style={{ fontSize: T.fsXs, color: T.textMuted }}>
             {paused
               ? 'Paused'
               : updatedAt
@@ -301,9 +301,9 @@ export function MonitorTab({ conn, runtime }: { conn: ConnectionSummary; runtime
             Refresh
           </Button>
         </div>
-        {opsError && <div role="alert" style={{ color: T.warn, fontSize: 12 }}>{opsError}</div>}
+        {opsError && <div role="alert" style={{ color: T.warn, fontSize: T.fsSm }}>{opsError}</div>}
         {ops && ops.length === 0 && (
-          <div style={{ color: T.textMuted, fontSize: 12, padding: '8px 0' }}>No operations match.</div>
+          <div style={{ color: T.textMuted, fontSize: T.fsSm, padding: '8px 0' }}>No operations match.</div>
         )}
         {ops && ops.length > 0 && (
           <Table striped highlightOnHover withTableBorder styles={tableStyles} aria-label="Running operations">
@@ -360,7 +360,7 @@ export function MonitorTab({ conn, runtime }: { conn: ConnectionSummary; runtime
                       <Table.Tr>
                         <Table.Td colSpan={7}>
                           {/* Shown as text, never parsed: the command may be cut off mid-token. */}
-                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 11 }}>
+                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: T.fsXs }}>
                             {o.command}
                           </pre>
                         </Table.Td>
@@ -374,10 +374,10 @@ export function MonitorTab({ conn, runtime }: { conn: ConnectionSummary; runtime
         )}
       </section>
 
-      <section aria-label="Profiler" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <section aria-label="Profiler" style={{ display: 'flex', flexDirection: 'column', gap: T.gapSm }}>
         {/* Anchored on the toolbar, not the section: the profile table below can run
             past the viewport and the hint would land off-screen. */}
-        <div data-hint-anchor="monitor.profiler" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div data-hint-anchor="monitor.profiler" style={{ display: 'flex', alignItems: 'center', gap: T.gapMd, flexWrap: 'wrap' }}>
           <span style={sectionTitle}>Profiler</span>
           <select
             aria-label="Profiler database"
@@ -389,7 +389,7 @@ export function MonitorTab({ conn, runtime }: { conn: ConnectionSummary; runtime
               <option key={n} value={n}>{n}</option>
             ))}
           </select>
-          <span style={{ fontSize: 12, color: T.textMuted }}>
+          <span style={{ fontSize: T.fsSm, color: T.textMuted }}>
             {status ? `Current: ${['Off', 'Slow', 'All'][status.level]}, slowms ${status.slowms}` : ''}
           </span>
           <SegmentedControl
@@ -404,7 +404,7 @@ export function MonitorTab({ conn, runtime }: { conn: ConnectionSummary; runtime
               { value: '2', label: 'All' },
             ]}
           />
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.textMuted }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: themeVars.gapXs, fontSize: T.fsSm, color: T.textMuted }}>
             slowms
             <input
               type="number"
@@ -415,7 +415,7 @@ export function MonitorTab({ conn, runtime }: { conn: ConnectionSummary; runtime
               aria-label="slowms"
               style={{ ...inputStyle, width: 70 }}
             />
-            <span style={{ fontSize: 11 }}>(server-wide, not just this database)</span>
+            <span style={{ fontSize: T.fsXs }}>(server-wide, not just this database)</span>
           </label>
           <Button
             size="compact-xs"
@@ -431,9 +431,9 @@ export function MonitorTab({ conn, runtime }: { conn: ConnectionSummary; runtime
             Refresh
           </Button>
         </div>
-        {profError && <div role="alert" style={{ color: T.warn, fontSize: 12 }}>{profError}</div>}
+        {profError && <div role="alert" style={{ color: T.warn, fontSize: T.fsSm }}>{profError}</div>}
         {profile && profile.length === 0 && (
-          <div style={{ color: T.textMuted, fontSize: 12, padding: '8px 0' }}>
+          <div style={{ color: T.textMuted, fontSize: T.fsSm, padding: '8px 0' }}>
             No profiled operations on {dbName}.
           </div>
         )}

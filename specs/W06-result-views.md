@@ -92,16 +92,21 @@ Row layout (matches existing mock):
 - Nested objects/arrays show as `{N}` / `[N]` badges that expand into a small popover showing the nested JSON.
 - Any cell with a value has a hover/focus-revealed `⤢` that opens the full, untruncated value in a popover (`FullValuePopover`, shared with Tree leaves).
 - Double-click copies a cell's value. The cell's native title says so next to the drag hint ("Drag to add … to builder · double-click to copy"); no per-cell tooltip component, which would mount one floating instance per cell of a virtualized grid.
-- Right-click on a row → context menu: `Edit`, `Delete`, `Copy`, `Copy as JSON`.
+- Right-click on a row → context menu: `Edit`, `Delete`, `Copy`, `Copy as JSON`. On a view, Edit becomes View document and Delete is gone.
 
 ## 5. Common
 
 ### Loading & empty
 - Loading (between Run click and response):
   - first load (no run has landed in the tab yet): eight skeleton rows stand in for the body, inside a `role="status"` region labelled "Loading results";
-  - any re-run, including one after an empty or errored result: keep the body (previous docs, if any) visible ("stale but readable") under a "Loading…" strip, itself `role="status"`, so the layout does not jump. Only one of the two status regions shows at a time.
-- Empty (`documents.length === 0`): centered placeholder "No matching documents" with a helpful link "Clear filter" (resets builder).
-- Errored: the error pill in W05 conveys the state; the result area keeps the previous docs visible with a small amber "stale" badge.
+  - any re-run, including one after an empty or errored result: keep the body as it is, with "Running…" and Cancel in the fixed band above the rows, itself `role="status"`, so nothing moves or is covered. Only one of the two status regions shows at a time.
+- One pane state stands in for rows whenever there are none, each with a next action:
+  - not run yet: "Run the query to see results", with Run;
+  - empty collection: "This collection is empty", with Import documents (Run again on a view);
+  - no match: "No matching documents", with Clear filter, which also runs;
+  - query error: pressing Run on a query the server refuses replaces the results with the whole error and offers "Revert to last valid query", which restores the last query that succeeded in this tab and runs it. With no such query it offers Clear filter, or Run again;
+  - failed (the network, not the query): the error, with Run again.
+- A query that cannot parse never runs: the rows stay, dimmed, the count says "not current", and the reason sits beside Run.
 
 ### Keyboard
 Each view is one tab stop (`role="tree"` for Tree and JSON, the grid for Table) with `aria-activedescendant` naming the active row, outlined while the view has focus. Keys act on the active row and only when the view itself has focus (a key typed on a button inside the row is that button's).
@@ -109,7 +114,7 @@ Each view is one tab stop (`role="tree"` for Tree and JSON, the grid for Table) 
 - `Enter` or `Space`: in Tree, expands or collapses the active row; in Table, selects only the active row (or clears it if it was already the sole selection); in JSON, only keeps the card active (a card has nothing to expand). `Cmd/Ctrl+Enter` is Run, never a row action.
 - `E` edits the active document in all three views (unmodified key only).
 - `Shift+F10` or the ContextMenu key opens the document menu for the active row in Table and JSON.
-- Not implemented: a `d` shortcut to delete the selected document(s). Deleting is through the row's Delete button or the document menu (W08).
+- `D` deletes the active document in all three views, through the same confirmation as the row's Delete button (unmodified key only). On a view or a read-only snapshot, which offer no delete, the key does nothing. On a read-only connection it opens the confirmation with Delete disabled and the reason, as the row's button does.
 
 ### Performance
 - Table, Tree and JSON rows are always virtualized with `react-window` (no row-count threshold).

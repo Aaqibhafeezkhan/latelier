@@ -139,6 +139,7 @@ type TreeRow =
   | { kind: 'coll-empty'; id: string; dbName: string }
   | { kind: 'db-skeleton'; id: string; index: number }
   | { kind: 'db-empty'; id: string; text: string }
+  | { kind: 'filter-empty'; id: string; text: string }
   // Per-root, not a panel above the tree — with several Connections open, a
   // shared error banner can't say which root is down.
   | {
@@ -162,7 +163,7 @@ function navigatorRowDomId(id: string): string {
 }
 
 // #66 — the only three kinds a keyboard/AT user can land on. Everything else
-// (skeleton/db-skeleton/coll-empty/db-empty/conn-error) is inert content: it
+// (skeleton/db-skeleton/coll-empty/db-empty/filter-empty/conn-error) is inert content: it
 // has no `id`, no focus treatment, and nothing to act on. Used everywhere
 // "navigable" is decided, so there's exactly one place that list can drift.
 function isNavigableRow(row: TreeRow): boolean {
@@ -665,6 +666,11 @@ export function DbCollectionNavigator({
           });
         }
       }
+      // Said only once every list is in: a database still loading may yet match.
+      const lists = cache.dbs.map((db) => ownGet(cache.colls, db.name));
+      if (filterActive && lists.every((colls) => colls?.every((c) => !matches(c.name)))) {
+        out.push({ kind: 'filter-empty', id: `nomatch:${conn.id}`, text: `No collections match “${filterLower}”.` });
+      }
     }
     return out;
   }, [
@@ -1161,6 +1167,7 @@ export function DbCollectionNavigator({
       spineFor,
       T,
       setFocusedId,
+      clearFilter: () => setFilter(''),
       toggleConnection,
       toggleDb,
       refreshDb,
@@ -1216,7 +1223,7 @@ export function DbCollectionNavigator({
           padding: '8px 10px',
           borderBottom: `1px solid ${T.border}`,
           display: 'flex',
-          gap: 6,
+          gap: themeVars.gapXs,
           alignItems: 'center',
           flexShrink: 0,
         }}
@@ -1224,9 +1231,11 @@ export function DbCollectionNavigator({
         <div
           style={{
             flex: 1,
+            // Without this the input's intrinsic width pushes Refresh out of the panel.
+            minWidth: 0,
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
+            gap: themeVars.gapXs,
             padding: '4px 8px',
             background: T.surfaceRaised,
             border: `1px solid ${T.border}`,
@@ -1245,7 +1254,7 @@ export function DbCollectionNavigator({
               background: 'transparent',
               border: 'none',
               outline: 'none',
-              fontSize: 12,
+              fontSize: T.fsSm,
               color: T.text,
               minWidth: 0,
             }}
@@ -1255,6 +1264,7 @@ export function DbCollectionNavigator({
           <ActionIcon
             variant="default"
             size={24}
+            style={{ flexShrink: 0 }}
             c={connectionId && isConnected ? T.textMuted : undefined}
             onClick={() => {
               if (connectionId) void refreshAll(connectionId);
@@ -1299,6 +1309,8 @@ export function DbCollectionNavigator({
             style={{
               flex: 1,
               minHeight: 0,
+              // Rows keep their place when the tree starts or stops fitting.
+              scrollbarGutter: 'stable',
             }}
           />
         )}
@@ -1406,6 +1418,7 @@ interface NavRowProps {
   toggleConnection: (id: string) => void;
   toggleDb: (db: string) => void;
   refreshDb: (connectionId: string, db: string) => void;
+  clearFilter: () => void;
   /** Cancels an in-flight connect — this is `mongo:disconnect`. */
   cancelConnection: (connectionId: string) => void;
   retryConnection: (connectionId: string) => void;
@@ -1432,6 +1445,7 @@ function NavRowImpl({
   toggleConnection,
   toggleDb,
   refreshDb,
+  clearFilter,
   cancelConnection,
   retryConnection,
   reenterPassword,
@@ -1505,8 +1519,17 @@ function NavRowImpl({
     content = <DbSkeletonRow T={T} index={row.index} />;
   } else if (row.kind === 'db-empty') {
     content = (
-      <div style={{ padding: '6px 10px 6px 32px', color: T.textMuted, fontSize: 12 }}>
+      <div style={{ padding: '6px 10px 6px 32px', color: T.textMuted, fontSize: T.fsSm }}>
         {row.text}
+      </div>
+    );
+  } else if (row.kind === 'filter-empty') {
+    content = (
+      <div data-testid="nav-filter-empty" style={{ padding: '6px 10px 6px 32px', color: T.textMuted, fontSize: T.fsSm }}>
+        <div style={{ marginBottom: 6, overflowWrap: 'anywhere' }}>{row.text}</div>
+        <Button type="button" variant="default" size="compact-xs" fz={T.fsXs} c={T.text} onClick={clearFilter}>
+          Clear filter
+        </Button>
       </div>
     );
   } else if (row.kind === 'coll-empty') {
@@ -1514,7 +1537,7 @@ function NavRowImpl({
       <div
         style={{
           padding: '4px 10px 4px 46px',
-          fontSize: 11,
+          fontSize: T.fsXs,
           color: T.textMuted,
           fontStyle: 'italic',
         }}
@@ -1631,7 +1654,7 @@ function ConnErrorRow({
         border: `1px solid ${T.borderMed}`,
         borderRadius: T.rs,
         background: T.surfaceRaised,
-        fontSize: 12,
+        fontSize: T.fsSm,
       }}
     >
       <div style={{ color: T.warnText, marginBottom: 4, fontWeight: 600 }}>
@@ -1646,7 +1669,7 @@ function ConnErrorRow({
           type="button"
           variant="default"
           size="compact-xs"
-          fz={11}
+          fz={T.fsXs}
           c={T.text}
           aria-label={row.retryLabel}
           onClick={(e) => {
@@ -1662,7 +1685,7 @@ function ConnErrorRow({
           type="button"
           variant="default"
           size="compact-xs"
-          fz={11}
+          fz={T.fsXs}
           c={T.text}
           ml={6}
           aria-label={`Re-enter password for ${row.conn.name}`}
@@ -1738,8 +1761,8 @@ function ConnectionRow({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
-        fontSize: 12,
+        gap: themeVars.gapXs,
+        fontSize: T.fsSm,
         cursor: 'pointer',
         userSelect: 'none',
         padding: '5px 10px',
@@ -1774,7 +1797,7 @@ function ConnectionRow({
       {conn.readOnly && (
         <span
           style={{
-            fontSize: 9,
+            fontSize: T.fsXs,
             letterSpacing: 0.5,
             padding: '0 4px',
             borderRadius: T.rx,
@@ -1787,7 +1810,7 @@ function ConnectionRow({
         </span>
       )}
       {!isConnected && (
-        <span style={{ fontSize: 10, color: T.textGhost }}>
+        <span style={{ fontSize: T.fsXs, color: T.textGhost }}>
           {conn.status === 'connecting'
             ? 'connecting'
             : conn.status === 'error'
@@ -1807,7 +1830,7 @@ function ConnectionRow({
           size="compact-xs"
           h={18}
           px={6}
-          fz={10}
+          fz={T.fsXs}
           c={T.text}
           aria-label={`Cancel connecting to ${conn.name}`}
           onClick={(e) => {
@@ -1820,7 +1843,7 @@ function ConnectionRow({
         </Button>
       )}
       {dbCount !== null && (
-        <span style={{ fontSize: 10, color: T.textGhost }}>{dbCount}</span>
+        <span style={{ fontSize: T.fsXs, color: T.textGhost }}>{dbCount}</span>
       )}
     </div>
   );
@@ -1865,8 +1888,8 @@ function DbRow({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
-        fontSize: 12,
+        gap: themeVars.gapXs,
+        fontSize: T.fsSm,
         cursor: 'pointer',
         userSelect: 'none',
         padding: '4px 6px 4px 18px',
@@ -1909,7 +1932,7 @@ function DbRow({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 2,
+          gap: themeVars.gapXs,
           visibility: barVisible ? 'visible' : 'hidden',
           opacity: barVisible ? 1 : 0,
           transition: 'opacity 80ms',
@@ -1935,7 +1958,7 @@ function DbRow({
         />
       </div>
       {row.count !== null && !barVisible && !row.refreshing && (
-        <span style={{ fontSize: 10, color: T.textGhost }}>{row.count}</span>
+        <span style={{ fontSize: T.fsXs, color: T.textGhost }}>{row.count}</span>
       )}
       {row.refreshing && (
         <span
@@ -2033,12 +2056,12 @@ function CollRow({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
-        fontSize: 12,
+        gap: themeVars.gapXs,
+        fontSize: T.fsSm,
         cursor: 'pointer',
         userSelect: 'none',
         padding: '3px 10px 3px 46px',
-        color: !dimmed && isActive ? T.accent : T.textMuted,
+        color: !dimmed && isActive ? T.accentInk : T.textMuted,
         background: isActive
           ? T.accentSoft
           : isFocused
@@ -2052,7 +2075,7 @@ function CollRow({
       <span
         style={{
           display: 'inline-flex',
-          color: isActive ? T.accent : T.textGhost,
+          color: isActive ? T.accentInk : T.textGhost,
           flexShrink: 0,
         }}
       >
@@ -2071,7 +2094,7 @@ function CollRow({
       {(coll.type !== 'collection' || coll.capped) && (
         <span
           style={{
-            fontSize: 9,
+            fontSize: T.fsXs,
             textTransform: 'uppercase',
             letterSpacing: 0.5,
             padding: '0 4px',

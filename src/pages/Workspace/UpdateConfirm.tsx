@@ -243,7 +243,7 @@ export function UpdateConfirm({
           </Alert>
         )}
 
-        <Stack gap={4}>
+        <Stack gap={T.gapXs}>
           <Text size="xs" c="dimmed">
             Filter
           </Text>
@@ -255,7 +255,7 @@ export function UpdateConfirm({
           </Text>
         </Stack>
 
-        <Stack gap={4}>
+        <Stack gap={T.gapXs}>
           <Text size="xs" c="dimmed">
             Update ($set, $unset, $inc, …)
           </Text>
@@ -276,7 +276,7 @@ export function UpdateConfirm({
             rows={6}
             style={{
               fontFamily: 'monospace',
-              fontSize: 12,
+              fontSize: T.fsSm,
               padding: '8px 10px',
               border: `1px solid ${!isValid ? T.warn : T.border}`,
               borderRadius: T.rs,
@@ -288,7 +288,7 @@ export function UpdateConfirm({
             }}
           />
           {refusal && (
-            <div id="update-all-syntax-error" role="alert" style={{ fontSize: 11, color: T.warn }}>
+            <div id="update-all-syntax-error" role="alert" style={{ fontSize: T.fsXs, color: T.warn }}>
               {refusal}
             </div>
           )}
@@ -307,7 +307,7 @@ export function UpdateConfirm({
             </SubmitButton>
           </Group>
         ) : (
-          <Stack gap={6}>
+          <Stack gap={themeVars.gapXs}>
             <Text size="xs" fw={600}>
               {reviewed.count.toLocaleString()} matching document{reviewed.count === 1 ? '' : 's'}
             </Text>

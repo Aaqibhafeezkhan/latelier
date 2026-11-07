@@ -46,7 +46,7 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
                 {s.rows.map((r) => (
                   <li
                     key={r.id}
-                    style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '3px 0' }}
+                    style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--atelier-gap-md)', padding: '3px 0' }}
                   >
                     <Text size="sm">{r.title}</Text>
                     <Kbd>{formatShortcut(r.keys, mac)}</Kbd>

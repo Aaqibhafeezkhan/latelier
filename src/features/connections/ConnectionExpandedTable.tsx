@@ -150,7 +150,7 @@ function ConnectionDetailRow({
       viaSshTunnel: Boolean(detail.ssh?.enabled),
     }) !== null;
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 24, rowGap: 6 }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: themeVars.gapXl, rowGap: themeVars.gapXs }}>
       <DetailField label="Default DB" value={detail.defaultDb || '—'} />
       <DetailField
         label="Auth"
@@ -364,7 +364,7 @@ export function ConnectionExpandedTable({
             />
           </Table.Td>
           <Table.Td>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: T.gapSm }}>
               <span style={{ color: T.textGhost, display: 'flex', flexShrink: 0 }}>
                 {open ? I.chevD : I.chevR}
               </span>
@@ -395,7 +395,7 @@ export function ConnectionExpandedTable({
               {c.status === 'connected' && c.serverVersion && (
                 <span
                   title={`MongoDB ${c.serverVersion}`}
-                  style={{ fontSize: 10, color: T.textMuted, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}
+                  style={{ fontSize: T.fsXs, color: T.textMuted, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}
                 >
                   v{c.serverVersion}
                 </span>
@@ -411,7 +411,7 @@ export function ConnectionExpandedTable({
             <Text span size="xs" c="dimmed"> · {formatConnectionType(c.connectionType)}</Text>
           </Table.Td>
           <Table.Td>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: themeVars.gapXs }}>
               <span
                 aria-hidden
                 style={{
@@ -442,7 +442,7 @@ export function ConnectionExpandedTable({
               other column shifting with it — the moment a row is selected. */}
           <Table.Td style={{ width: ACTIONS_COLUMN_WIDTH, whiteSpace: 'nowrap' }}>
             {open && (
-              <Group gap={4} justify="flex-end" wrap="nowrap">
+              <Group gap={T.gapXs} justify="flex-end" wrap="nowrap">
                 <Button
                   size="compact-xs"
                   variant="filled"
@@ -506,8 +506,8 @@ export function ConnectionExpandedTable({
       // stacked on this one would take the table down with it.
       closeOnEscape={stacked === null && !transfer.isOpen}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: T.gapMd }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: themeVars.gapSm }}>
           <TextInput
             // Not `autoFocus`: this Modal wraps its body in Mantine's
             // `FocusTrap`, which looks for `[data-autofocus]` first and only
@@ -600,9 +600,9 @@ export function ConnectionExpandedTable({
             // fold unlabeled.
             stickyHeader
             styles={{
-              table: { fontSize: 12 },
+              table: { fontSize: T.fsSm },
               th: {
-                fontSize: 10,
+                fontSize: T.fsXs,
                 textTransform: 'uppercase',
                 letterSpacing: '0.06em',
                 fontWeight: 600,

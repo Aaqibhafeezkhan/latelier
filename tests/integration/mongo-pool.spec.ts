@@ -1380,6 +1380,9 @@ describe('MongoPool', () => {
         expect(pool.status('lost').serverVersion).toBeUndefined();
         // No errorCode: an involuntary drop renders Dormant, not failed.
         expect(pool.status('lost').errorCode).toBeUndefined();
+        // It does say why, in the driver's words about the server that went away.
+        expect(pool.status('lost').lostReason).toBeTruthy();
+        expect(pool.status('lost').lostReason).not.toBe('The server stopped answering.');
         // The renderer's existing mongo.onStatus subscription rides this emit,
         // so no new IPC channel is involved.
         expect(seen).toContain('disconnected');
@@ -1417,7 +1420,9 @@ describe('MongoPool', () => {
       });
       const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
       const unreachable = () =>
-        emitter.emit('topologyDescriptionChanged', { newDescription: { hasKnownServers: false } });
+        emitter.emit('topologyDescriptionChanged', {
+          newDescription: { hasKnownServers: false, servers: new Map() },
+        });
       const reachable = () =>
         emitter.emit('topologyDescriptionChanged', { newDescription: { hasKnownServers: true } });
 
@@ -1435,6 +1440,12 @@ describe('MongoPool', () => {
       unreachable();
       await sleep(500);
       expect(pool.status('c1').status).toBe('disconnected');
+      // No server said why, so the reason says only what is known.
+      expect(pool.status('c1').lostReason).toBe('The server stopped answering.');
+
+      // A user's own disconnect is not a loss to report.
+      await pool.disconnect('c1');
+      expect(pool.status('c1').lostReason).toBeUndefined();
 
       await pool.disconnectAll();
     });

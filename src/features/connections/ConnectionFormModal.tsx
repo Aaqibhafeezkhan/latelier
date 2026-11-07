@@ -1,5 +1,6 @@
 import React from 'react';
 import { Modal } from '@mantine/core';
+import { fixedModalStyles } from '../../components/fixedModal';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
 import { confirmDestructive } from '../../utils/confirm';
 import { ConnectionForm } from './ConnectionForm';
@@ -60,6 +61,9 @@ export function ConnectionFormModal({
       size="xl"
       centered
       closeOnClickOutside={false}
+      // The tallest tab (General) sets the height, so Save stays where it is
+      // across tabs; shorter tabs leave empty space rather than shrinking it.
+      styles={fixedModalStyles(654)}
     >
       {connectionId
         ? <ConnectionForm mode="edit" connectionId={connectionId} {...sharedFormProps} />

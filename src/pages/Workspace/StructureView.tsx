@@ -44,35 +44,40 @@ export function StructureView({
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
       <CollectionStatsSection details={details} error={error} loading={loading} onRefresh={() => void reload()} />
-      {/* Held until the details settle: a view must never be asked for its indexes. */}
+      {/* Held until the details settle: a view must never be asked for its
+          indexes, and everything below appears in place at once rather than
+          being pushed down by the sections above it as they arrive. */}
       {(details || error) && (
-        <IndexesTab
-          connectionId={connectionId}
-          dbName={dbName}
-          collection={collection}
-          viewOn={details?.type === 'view' ? details.options.viewOn : undefined}
-          initialCreate={initialCreate}
-          onInitialCreateConsumed={onInitialCreateConsumed}
-          onChanged={() => void reload()}
-        />
+        <>
+          <IndexesTab
+            connectionId={connectionId}
+            dbName={dbName}
+            collection={collection}
+            viewOn={details?.type === 'view' ? details.options.viewOn : undefined}
+            expectedCount={details?.stats?.indexCount}
+            initialCreate={initialCreate}
+            onInitialCreateConsumed={onInitialCreateConsumed}
+            onChanged={() => void reload()}
+          />
+          {/* The server refuses collMod rules on a view and on a time-series collection. */}
+          {details?.type === 'collection' && (
+            <ValidationSection
+              connectionId={connectionId}
+              dbName={dbName}
+              collection={collection}
+              details={details}
+              onSaved={reload}
+            />
+          )}
+          <SchemaView
+            connectionId={connectionId}
+            dbName={dbName}
+            collection={collection}
+            state={state}
+            onPatch={onPatch}
+          />
+        </>
       )}
-      {/* The server refuses collMod rules on a view and on a time-series collection. */}
-      {details?.type === 'collection' && (
-        <ValidationSection
-          connectionId={connectionId}
-          dbName={dbName}
-          collection={collection}
-          details={details}
-          onSaved={reload}
-        />
-      )}
-      <SchemaView
-        connectionId={connectionId}
-        dbName={dbName}
-        collection={collection}
-        state={state}
-        onPatch={onPatch}
-      />
     </div>
   );
 }

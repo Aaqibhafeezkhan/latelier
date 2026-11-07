@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Button, Checkbox, Group, List, Modal, NativeSelect, Progress, ScrollArea, Stack, Table, Text } from '@mantine/core';
+import { Alert, Button, Checkbox, Group, List, Modal, NativeSelect, Progress, Stack, Table, Text } from '@mantine/core';
 import type {
   CsvColumnMapping,
   CsvColumnType,
@@ -9,6 +9,8 @@ import type {
   ImportReport,
 } from '@shared/types';
 import { api, getErrorMessage } from '../../api/atelier';
+import { fixedModalStyles } from '../../components/fixedModal';
+import { themeVars } from '../../theme/themeVars';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
 import { SubmitButton } from '../../components/SubmitButton';
 import { invalidateSampleSchemaCache } from '../../features/fieldSuggestions/sources/sampleSchemaSource';
@@ -53,6 +55,12 @@ interface CsvStep {
   preview: CsvPreview;
   columns: CsvColumnMapping[];
 }
+
+const FORMATS = [
+  { name: 'JSON array', detail: 'Extended JSON documents, canonical or relaxed.' },
+  { name: 'JSONL', detail: 'One Extended JSON document on each line, canonical or relaxed.' },
+  { name: 'CSV', detail: 'A header row, then one document on each row. You check each column before anything is imported.' },
+];
 
 const columnName = (header: string) => header || '(no name)';
 
@@ -203,40 +211,42 @@ export function ImportDialog({
       withCloseButton={!running}
       title={`Import into "${collection}"`}
       centered
-      size={csv ? 'xl' : 'md'}
+      // One size in every state, CSV mapping included, so the title, the close
+      // button and the footer never move. Lists and tables scroll inside the
+      // body; notices take their room from the body, never from the dialog.
+      size={780}
+      styles={fixedModalStyles(440)}
     >
-      <Stack gap="sm">
-        {report === null ? (
-          running ? (
-            <Stack gap={4}>
-              <Progress
-                value={progress && progress.totalBytes > 0 ? Math.min(100, (progress.bytesRead / progress.totalBytes) * 100) : 0}
-                size="sm"
-                aria-label="Import progress"
-              />
-              <Group justify="space-between" gap="xs">
+      <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          {report === null ? (
+            running ? (
+              <Stack gap={themeVars.gapXs}>
+                <Text size="sm">
+                  Importing {csv?.preview.fileName ?? 'the file'} into {dbName}.{collection}.
+                </Text>
+                <Progress
+                  value={progress && progress.totalBytes > 0 ? Math.min(100, (progress.bytesRead / progress.totalBytes) * 100) : 0}
+                  size="sm"
+                  aria-label="Import progress"
+                />
                 <Text size="xs" c="dimmed">
                   {progress ? `${plural(progress.inserted, 'document')} imported` : 'Starting…'}
                 </Text>
-                <Button variant="subtle" size="compact-xs" onClick={cancelImport}>
-                  Cancel import
-                </Button>
-              </Group>
-            </Stack>
-          ) : csv ? (
-            <Stack gap={6}>
-              <Text size="xs" c="dimmed">
-                The first {plural(csv.preview.rows.length, 'row')} of {csv.preview.fileName}. Each column&apos;s type
-                was inferred from the whole file; change any before importing. A dotted header nests, and an empty cell
-                leaves its field out unless Empty → null is ticked.
-              </Text>
-              <ScrollArea.Autosize mah={360} type="auto">
+              </Stack>
+            ) : csv ? (
+              <Stack gap={themeVars.gapXs}>
+                <Text size="xs" c="dimmed">
+                  The first {plural(csv.preview.rows.length, 'row')} of {csv.preview.fileName}. Each column&apos;s type
+                  was inferred from the whole file; change any before importing. A dotted header nests, and an empty cell
+                  leaves its field out unless Empty → null is ticked.
+                </Text>
                 <Table withTableBorder withColumnBorders fz="xs" aria-label={`Preview of ${csv.preview.fileName}`}>
                   <Table.Thead>
                     <Table.Tr>
                       {csv.columns.map((c, i) => (
                         <Table.Th key={i} miw={120}>
-                          <Stack gap={4}>
+                          <Stack gap={themeVars.gapXs}>
                             <Text size="xs" fw={600} ff="monospace">{columnName(c.header)}</Text>
                             <NativeSelect
                               size="xs"
@@ -266,23 +276,28 @@ export function ImportDialog({
                     ))}
                   </Table.Tbody>
                 </Table>
-              </ScrollArea.Autosize>
-            </Stack>
+              </Stack>
+            ) : (
+              <Stack gap="xs">
+                <Text size="sm">
+                  Choose a file to import into {dbName}.{collection}.
+                </Text>
+                {FORMATS.map((f) => (
+                  <div key={f.name}>
+                    <Text size="sm" fw={600}>{f.name}</Text>
+                    <Text size="xs" c="dimmed">{f.detail}</Text>
+                  </div>
+                ))}
+              </Stack>
+            )
           ) : (
-            <Text size="xs" c="dimmed">
-              A JSON array or JSONL file of Extended JSON documents (canonical or relaxed), or a CSV file with a header
-              row, into {dbName}.{collection}.
-            </Text>
-          )
-        ) : (
-          <>
-            <Text size="sm" role="status">
-              {report.cancelled ? 'Cancelled — ' : 'Imported '}
-              {plural(report.inserted, 'document')}{report.cancelled ? ' landed' : ''} from {report.fileName}
-              {report.failed > 0 ? `; ${plural(report.failed, 'document')} failed.` : '.'}
-            </Text>
-            {report.errors.length > 0 && (
-              <ScrollArea.Autosize mah={220} type="auto">
+            <Stack gap="sm">
+              <Text size="sm" role="status">
+                {report.cancelled ? 'Cancelled — ' : 'Imported '}
+                {plural(report.inserted, 'document')}{report.cancelled ? ' landed' : ''} from {report.fileName}
+                {report.failed > 0 ? `; ${plural(report.failed, 'document')} failed.` : '.'}
+              </Text>
+              {report.errors.length > 0 && (
                 <List size="xs" spacing={2} aria-label="Import failures">
                   {report.errors.map((e) => (
                     <List.Item key={e.at}>
@@ -290,38 +305,49 @@ export function ImportDialog({
                     </List.Item>
                   ))}
                 </List>
-              </ScrollArea.Autosize>
-            )}
-            {report.errorsTruncated && (
-              <Text size="xs" c="dimmed">
-                Only the first {report.errors.length} failures are listed.
-              </Text>
-            )}
-          </>
-        )}
+              )}
+              {report.errorsTruncated && (
+                <Text size="xs" c="dimmed">
+                  Only the first {report.errors.length} failures are listed.
+                </Text>
+              )}
+            </Stack>
+          )}
+        </div>
         {readOnly && (
-          <Alert color="yellow" variant="light" role="alert">
+          <Alert color="yellow" variant="light" role="alert" style={{ flex: 'none' }}>
             This connection is read-only. Importing is disabled.
           </Alert>
         )}
         {error && (
-          <Alert color="red" variant="light" role="alert">
+          <Alert color="red" variant="light" role="alert" style={{ flex: 'none' }}>
             {error}
           </Alert>
         )}
-        <Group justify="flex-end" gap="xs">
-          <Button variant="subtle" size="compact-xs" onClick={close} disabled={running}>
-            {report === null ? 'Cancel' : 'Close'}
-          </Button>
+        {/* "Choose another file…" sits furthest left so it appears without
+            pushing Cancel or Import; each button keeps a minimum width that
+            fits its longest label, so a label change never moves the one beside it. */}
+        <Group justify="flex-end" gap="xs" pt="sm" style={{ flex: 'none', borderTop: `1px solid ${themeVars.border}` }}>
           {csv && !running && (
             <Button variant="default" size="compact-xs" onClick={() => void chooseAndImport()} disabled={readOnly}>
               Choose another file…
             </Button>
           )}
+          <Button
+            variant="subtle"
+            size="compact-xs"
+            miw={92}
+            onClick={running ? cancelImport : close}
+          >
+            {running ? 'Cancel import' : report === null ? 'Cancel' : 'Close'}
+          </Button>
           <SubmitButton
             size="compact-xs"
+            miw={140}
             submitting={running}
             disabled={readOnly}
+            // The dialog opens on its one primary action rather than on Close.
+            data-autofocus
             onClick={() => void (csv ? importCsv(csv) : chooseAndImport())}
           >
             {running ? 'Importing…' : csv ? 'Import' : report === null ? 'Choose file…' : 'Import another file…'}

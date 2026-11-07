@@ -159,4 +159,11 @@ describe('classColor', () => {
       expect(dark.bg).toMatch(/0\.25/);
     }
   });
+
+  it('keeps the light ink in light mode and lightens it for dark mode', () => {
+    for (const cls of Object.keys(CLASS_COLOR) as OperatorClass[]) {
+      expect(classColor(cls, false).text).toBe(CLASS_COLOR[cls].text);
+      expect(classColor(cls, true).text).toBe(`color-mix(in srgb, ${CLASS_COLOR[cls].text} 40%, white)`);
+    }
+  });
 });

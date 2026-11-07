@@ -46,7 +46,7 @@ Header line, always visible:
 
 ```
 ┌───────────────────────────────────────────┬────────────────────────────┐
-│ Editor (60%)                               │ Stage preview (40%)        │
+│ Editor (fills the rest)                    │ Stage preview (280 px)     │
 │                                            │ ─ header: {count} docs ─   │
 │  { textarea, EJSON syntax hint }           │                            │
 │                                            │ { doc }                    │
@@ -56,6 +56,8 @@ Header line, always visible:
 │  [Copy] [Format]  …                        │                            │
 └───────────────────────────────────────────┴────────────────────────────┘
 ```
+
+When the stage list is narrower than 640 px, the editor sits above a full-width preview instead, so the editor never shrinks below a readable width. A container query on the stage list decides this, not the window width, because the navigator and outline take varying room. In neither layout does the height depend on the preview's documents: side by side it is fixed, and stacked it is the fixed-height editor plus a fixed-height preview, so a run never moves the page.
 
 ### Editor
 - Monospace textarea. Grows with content, height clamped (min 140, max 500 px; user-resizable via resize handle).

@@ -97,6 +97,13 @@ they cannot use.
   real focus throughout and only the pointer moves.
 - Because `aria-activedescendant` must reference a *mounted* element, the active
   index change and the `react-window` scroll-into-view are one operation, not two.
+- A move is an urgent update, so the next key (Space, `D`, Tab) acts on the row it
+  moved to. The exception is a sustained run: after 8 moves with no pause, further
+  moves are transitions until the keys pause for 250 ms and the last move has
+  settled. Urgent updates arriving faster than the list renders keep React's
+  nested-update count from ever resetting, and at 50 it throws "Maximum update
+  depth exceeded". During such a run the next key acts on the row that is painted,
+  which can briefly be behind the keys pressed.
 
 ### Test and mutation position
 
@@ -171,7 +178,9 @@ Per interactive control this spec touches:
 
 Per composite widget (grid, tree, tablist, listbox):
 
-- Exactly one tab stop for the whole widget, never one per child.
+- Exactly one tab stop for the whole widget, never one per child. A list whose
+  rows carry their own buttons keeps the active row's in the Tab order after it,
+  so each pointer action has a keyboard path; no other row's are.
 - Arrow keys move the active child; Home/End jump to first/last.
 - The active child is scrolled into view when it moves.
 - The active child is identified to assistive tech — `aria-activedescendant`

@@ -5,6 +5,7 @@ import { copyToClipboard } from '../../utils/clipboard';
 import { I } from '../../icons';
 import { useCollectionWorkspace } from './context';
 import { EMPTY_DOCUMENTS, useResultSelection } from './resultSelection';
+import { bandOccupant } from './resultPaneState';
 import {
   buildDeleteSelectedFilterJson,
   selectedDocs,
@@ -17,6 +18,8 @@ interface SelectionActionBarProps {
    *  [...]}}` filter and drives the shared DeleteConfirm count+token flow —
    *  this component only decides *whether* Delete is actionable. */
   onDeleteSelected: (docs: unknown[]) => void;
+  /** Set while the rows on screen outlive the connection they came from. */
+  connectionLost?: { reason: string; reconnecting: boolean; onReconnect: () => void };
 }
 
 // #106 — the strip's height, fixed regardless of selection state. The first
@@ -30,25 +33,29 @@ interface SelectionActionBarProps {
 const BAR_HEIGHT = 31;
 
 /**
- * Contextual bulk-action strip (T0.4 — quick win for a previously
- * dead-ended selection). The outer strip always renders when the workspace
- * isn't read-only (#106 — see `BAR_HEIGHT`); its contents (count, Copy,
- * Delete, Clear) render only once something is selected. `ResultViewer`
- * composes this as the `SelectionBar` slot; `ScriptTab`'s read-only
- * snapshot composition never renders it at all (AC7), and `meta.isReadOnly`
- * is checked here too so a future composition mistake can't surface
- * destructive actions there.
+ * The fixed band above the rows: a lost connection, a running find, or the
+ * bulk actions for a selection (T0.4), one at a time. The outer strip always
+ * renders when the workspace isn't read-only (#106 — see `BAR_HEIGHT`), so none
+ * of them can move or cover a row. `ResultViewer` composes this as the
+ * `SelectionBar` slot; `ScriptTab`'s read-only snapshot composition never
+ * renders it at all (AC7), and `meta.isReadOnly` is checked here too so a
+ * future composition mistake can't surface destructive actions there.
  */
-export function SelectionActionBar({ onDeleteSelected }: SelectionActionBarProps) {
+export function SelectionActionBar({ onDeleteSelected, connectionLost }: SelectionActionBarProps) {
   const T = themeVars;
-  const { state, meta } = useCollectionWorkspace();
+  const { state, meta, actions } = useCollectionWorkspace();
   const documents = state.lastRun?.documents ?? EMPTY_DOCUMENTS;
   const selection = useResultSelection(documents);
   const [copied, setCopied] = React.useState(false);
 
   if (meta.isReadOnly) return null;
 
-  const hasSelection = selection.indices.size > 0;
+  const occupant = bandOccupant({
+    lost: connectionLost !== undefined,
+    // A first load has no rows to run over: `Body` shows placeholders instead.
+    running: meta.isLoading && state.lastRun !== undefined,
+    selected: selection.indices.size > 0,
+  });
   const docs = selectedDocs(documents, selection.indices);
   // Null when none of the selected docs carry an `_id` (e.g. an `{_id: 0}`
   // projection) — Delete MUST stay disabled in that case rather than ever
@@ -75,19 +82,65 @@ export function SelectionActionBar({ onDeleteSelected }: SelectionActionBarProps
   return (
     <Group
       data-testid="selection-bar"
-      gap={10}
+      gap={themeVars.gapSm}
       wrap="nowrap"
       style={{
         height: BAR_HEIGHT,
         boxSizing: 'border-box',
         padding: '4px 14px',
         borderBottom: `1px solid ${T.border}`,
-        background: hasSelection ? T.accentSoft : 'transparent',
+        background:
+          occupant === 'selection' ? T.accentSoft : occupant === 'lost' ? T.warnSoft : 'transparent',
         flexShrink: 0,
-        fontSize: 11,
+        fontSize: T.fsXs,
       }}
     >
-      {hasSelection && (
+      {occupant === 'lost' && connectionLost && (
+        <>
+          <span
+            role="status"
+            data-testid="band-connection-lost"
+            title={connectionLost.reason}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              color: T.warnText,
+            }}
+          >
+            <strong>Connection lost.</strong> {connectionLost.reason}
+          </span>
+          <Button
+            size="compact-xs"
+            variant="default"
+            style={{ flexShrink: 0 }}
+            onClick={connectionLost.onReconnect}
+            disabled={connectionLost.reconnecting}
+          >
+            {connectionLost.reconnecting ? 'Reconnecting…' : 'Reconnect'}
+          </Button>
+        </>
+      )}
+      {occupant === 'running' && (
+        <>
+          <span role="status" style={{ color: T.textMuted }}>
+            Running…
+          </span>
+          <span style={{ flex: 1 }} />
+          <Button
+            data-testid="band-cancel"
+            size="compact-xs"
+            variant="subtle"
+            color="gray"
+            onClick={() => actions.cancel()}
+          >
+            Cancel
+          </Button>
+        </>
+      )}
+      {occupant === 'selection' && (
         <>
           <span data-testid="selection-bar-count" style={{ color: T.text, fontWeight: 600 }}>
             {selection.indices.size} selected

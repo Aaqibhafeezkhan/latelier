@@ -37,7 +37,7 @@ const itemStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
   cursor: 'pointer',
-  fontSize: 12,
+  fontSize: 'var(--atelier-fs-sm)',
   color: 'var(--atelier-text)',
 };
 

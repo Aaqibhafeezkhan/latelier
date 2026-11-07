@@ -52,7 +52,7 @@ export function OperatorDocPanel({
   if (!op) {
     return (
       <div role="note" aria-label="No operator documentation" id={id} style={outerStyle}>
-        <div style={{ fontSize: 12, color: T.textMuted, textAlign: 'center', padding: 12 }}>
+        <div style={{ fontSize: T.fsSm, color: T.textMuted, textAlign: 'center', padding: 12 }}>
           No documentation available
         </div>
       </div>
@@ -63,7 +63,7 @@ export function OperatorDocPanel({
   const badge = CLASS_BADGE[op.class] ?? op.class;
 
   const labelStyle: React.CSSProperties = {
-    fontSize: 10,
+    fontSize: T.fsXs,
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
     color: T.textMuted,
@@ -76,7 +76,7 @@ export function OperatorDocPanel({
     border: `1px solid ${T.border}`,
     borderRadius: T.rx,
     padding: '6px 8px',
-    fontSize: 11,
+    fontSize: T.fsXs,
     fontFamily: 'JetBrains Mono, monospace',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
@@ -91,11 +91,11 @@ export function OperatorDocPanel({
       id={id}
       style={outerStyle}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: T.gapSm }}>
         <span
           style={{
             fontFamily: 'JetBrains Mono, monospace',
-            fontSize: 13,
+            fontSize: T.fsMd,
             fontWeight: 600,
             color: T.text,
           }}
@@ -106,7 +106,7 @@ export function OperatorDocPanel({
           style={{
             padding: '2px 6px',
             borderRadius: T.rx,
-            fontSize: 9,
+            fontSize: T.fsXs,
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
             background: color.bg,
@@ -121,7 +121,7 @@ export function OperatorDocPanel({
       {op.description && (
         <div
           style={{
-            fontSize: 12,
+            fontSize: T.fsSm,
             lineHeight: 1.5,
             color: T.text,
             marginTop: 6,
@@ -151,10 +151,10 @@ export function OperatorDocPanel({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          gap: 8,
+          gap: T.gapSm,
         }}
       >
-        <span style={{ fontSize: 10, color: T.textMuted }}>
+        <span style={{ fontSize: T.fsXs, color: T.textMuted }}>
           Class: {CLASS_LABEL[op.class] ?? op.class}
         </span>
         {op.url && (
@@ -167,9 +167,9 @@ export function OperatorDocPanel({
               openDocsUrl(op.url!);
             }}
             style={{
-              color: T.accent,
+              color: T.accentInk,
               textDecoration: 'none',
-              fontSize: 10,
+              fontSize: T.fsXs,
               cursor: 'pointer',
             }}
           >

@@ -336,6 +336,7 @@ export function useQueryRunner({
           lastRun,
           lastRunHasMore: effectiveHasMore,
           lastRunQueryKey: queryKey,
+          lastValidQuery: { queryRaw: state.queryRaw, builder: state.builder },
         });
         // Fire-and-forget, like the count below: the plan badge's data. The
         // result never waits on it, and a failed explain only means no badge.
@@ -423,14 +424,17 @@ export function useQueryRunner({
         if (runToken !== runTokenRef.current.get(target.id)) return;
         const code = (err as { code?: string }).code ?? 'INTERNAL';
         const message = getErrorMessage(err, 'Unknown error');
-        const prevDocs = target.state.lastRun?.documents ?? [];
+        // Nothing of the previous result survives: rows under an error read as
+        // that query's answer. The selection and the count go with them.
         patchState(target.id, {
           lastRun: {
-            documents: prevDocs,
+            documents: [],
             durationMs: 0,
             ranAt: new Date().toISOString(),
             error: { code, message },
           },
+          lastRunHasMore: false,
+          totalCount: undefined,
         });
       } finally {
         // Only the run that still owns `target.id` clears the running/

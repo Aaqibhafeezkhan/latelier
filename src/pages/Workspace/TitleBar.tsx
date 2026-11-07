@@ -41,7 +41,7 @@ export function TitleBar({
     : 'Open a connection to use the shell';
   return (
     <Group
-      gap={10}
+      gap={themeVars.gapSm}
       wrap="nowrap"
       style={{
         height: 46,
@@ -54,7 +54,7 @@ export function TitleBar({
     >
       <div style={{ width: 70, flexShrink: 0 }} />
       <Group
-        gap={6}
+        gap={themeVars.gapXs}
         wrap="nowrap"
         style={{
           minWidth: 0,
@@ -70,7 +70,7 @@ export function TitleBar({
             {connectionSlot}
           </div>
         ) : (
-          <span style={{ fontSize: 12, color: T.textMuted }}>
+          <span style={{ fontSize: T.fsSm, color: T.textMuted }}>
             {connectionName ?? '—'}
           </span>
         )}

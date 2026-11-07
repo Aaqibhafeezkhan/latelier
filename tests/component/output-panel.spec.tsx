@@ -40,6 +40,8 @@ function renderPanel(
     onViewChange?: (v: ResultViewMode) => void;
     onSaveAsCollection?: () => void;
     onSaveAsView?: () => void;
+    onRun?: () => void;
+    canRun?: boolean;
   } = {},
 ) {
   return render(
@@ -54,6 +56,8 @@ function renderPanel(
         onViewChange={overrides.onViewChange ?? vi.fn()}
         onSaveAsCollection={overrides.onSaveAsCollection ?? vi.fn()}
         onSaveAsView={overrides.onSaveAsView ?? vi.fn()}
+        onRun={overrides.onRun ?? vi.fn()}
+        canRun={overrides.canRun ?? true}
       />
   );
 }
@@ -73,7 +77,7 @@ describe('OutputPanel — rendering and view switching', () => {
     };
     const { container } = renderPanel({ lastRun });
     expect(container.textContent).toContain('3 docs');
-    expect(container.textContent).toContain('42ms');
+    expect(container.textContent).toContain('42 ms');
   });
 
   it('renders an error banner from lastRun.error with role="alert"', () => {
@@ -85,7 +89,33 @@ describe('OutputPanel — rendering and view switching', () => {
     };
     renderPanel({ lastRun });
     const alert = screen.getByRole('alert');
-    expect(alert.textContent).toContain('pipeline blew up');
+    expect(alert.textContent).toContain('MONGO_ERROR: pipeline blew up');
+  });
+
+  it('offers the next run from each state, and only when the toolbar could run', () => {
+    const onRun = vi.fn();
+    const failed = { ...runMeta, rows: [], durationMs: 0, error: { code: 'X', message: 'boom' } };
+    const empty = { ...runMeta, rows: [], durationMs: 3 };
+    const cases: Array<[AggregationLastRun | undefined, string, string]> = [
+      [undefined, 'Run the pipeline to see output', 'Run pipeline'],
+      [failed, 'The pipeline failed', 'Run again'],
+      [empty, 'The pipeline returned no documents', 'Run again'],
+    ];
+    for (const [lastRun, title, button] of cases) {
+      const { unmount } = renderPanel({ lastRun, onRun });
+      expect(screen.getByText(title)).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: button }));
+      unmount();
+    }
+    expect(onRun).toHaveBeenCalledTimes(3);
+
+    renderPanel({ lastRun: empty, canRun: false });
+    expect((screen.getByRole('button', { name: 'Run again' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('disables the next run while a run is in flight', () => {
+    renderPanel({ lastRun: { ...runMeta, rows: [], durationMs: 3 }, running: true });
+    expect((screen.getByRole('button', { name: 'Run again' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('invokes onViewChange when the user clicks a view button', () => {
@@ -172,6 +202,8 @@ describe('OutputPanel — rendering and view switching', () => {
         onViewChange={vi.fn()}
         onSaveAsCollection={vi.fn()}
         onSaveAsView={vi.fn()}
+        onRun={vi.fn()}
+        canRun
       />
     );
     const { rerender } = render(panel(false));
@@ -195,7 +227,7 @@ describe('OutputPanel — rendering and view switching', () => {
 
   it('renders the document count with tabular numerals', () => {
     renderPanel({ lastRun: { ...runMeta, rows: [{ _id: 1 }], durationMs: 1 } });
-    expect(screen.getByText('1 docs').style.fontVariantNumeric).toBe('tabular-nums');
+    expect(screen.getByText('1 docs · 1 ms').style.fontVariantNumeric).toBe('tabular-nums');
   });
 });
 
@@ -218,6 +250,8 @@ function ControlledOutputPanel() {
       onViewChange={() => {}}
       onSaveAsCollection={() => {}}
       onSaveAsView={() => {}}
+      onRun={() => {}}
+      canRun
     />
   );
 }
@@ -320,5 +354,69 @@ describe('OutputPanel — Save as view', () => {
   it('is disabled while the pipeline runs', () => {
     renderPanel({ running: true });
     expect((screen.getByRole('button', { name: /Save as view/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe('OutputPanel bar', () => {
+  function giveBarWidth(width: number) {
+    const native = Element.prototype.getBoundingClientRect;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function rect(this: Element) {
+      return this.matches('[data-testid="output-bar"]') ? ({ width } as DOMRect) : native.call(this);
+    });
+  }
+  const lastRun: AggregationLastRun = { ...runMeta, rows: [{ _id: 1 }], durationMs: 3 };
+  const ACTIONS = ['Copy', 'Save as…', 'Save as view…', 'Download output as JSON'];
+
+  it('at 592 px shows named icons, the same before and after a run', () => {
+    giveBarWidth(592);
+    const { rerender } = renderPanel();
+    const form = () => ACTIONS.map((name) => screen.getByRole('button', { name }).className.includes('ActionIcon'));
+    expect(form()).toEqual([true, true, true, true]);
+    rerender(
+      <OutputPanel
+        height={260}
+        view="Tree"
+        lastRun={lastRun}
+        running={false}
+        pipelineName={null}
+        onHeightChange={vi.fn()}
+        onHeightCommit={vi.fn()}
+        onViewChange={vi.fn()}
+        onSaveAsCollection={vi.fn()}
+        onSaveAsView={vi.fn()}
+        onRun={vi.fn()}
+        canRun
+      />,
+    );
+    expect(form()).toEqual([true, true, true, true]);
+  });
+
+  it('at 800 px shows the words', () => {
+    giveBarWidth(800);
+    renderPanel();
+    expect(screen.getByRole('button', { name: 'Copy' }).textContent).toBe('Copy');
+    expect(screen.getByRole('button', { name: 'Save as view…' }).textContent).toBe('Save as view…');
+  });
+
+  it('at 423 px puts all four in one menu, which still reaches them', async () => {
+    giveBarWidth(423);
+    const onSaveAsView = vi.fn();
+    renderPanel({ onSaveAsView });
+    expect(screen.queryByRole('button', { name: 'Copy' })).toBeNull();
+    expect(screen.queryByText('Pipeline output')).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Output actions' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Save as view…' }));
+    expect(onSaveAsView).toHaveBeenCalledOnce();
+  });
+
+  it('holds the count slot before any run, so a first run moves no control', () => {
+    giveBarWidth(592);
+    renderPanel();
+    const bar = screen.getByTestId('output-bar');
+    const slot = [...bar.children].find((c) => (c as HTMLElement).style.flexGrow === '1') as HTMLElement;
+    expect(slot).toBeTruthy();
+    expect(slot.style.minWidth).toBe('0px');
+    expect(slot.style.textOverflow).toBe('ellipsis');
   });
 });

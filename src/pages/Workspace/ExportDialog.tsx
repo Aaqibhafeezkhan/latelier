@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button, Checkbox, Group, Modal, SegmentedControl, Stack } from '@mantine/core';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
+import { useOpenFocus } from '../../hooks/useOpenFocus';
 import { SubmitButton } from '../../components/SubmitButton';
 import { api, getErrorMessage } from '../../api/atelier';
 import { notify } from '../../theme/notifications';
@@ -49,6 +50,7 @@ const EXPORT_ALL_CAP = 100_000;
 export function ExportDialog({ onClose }: ExportDialogProps) {
   const { state, meta } = useCollectionWorkspace();
   const close = useDialogFocusReturn(onClose);
+  const bodyRef = useOpenFocus();
   const documents = state.lastRun?.documents ?? EMPTY_DOCUMENTS;
   const [scope, setScope] = React.useState<ExportScope>('page');
   const [format, setFormat] = React.useState<ExportFormat>('json');
@@ -121,7 +123,7 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
 
   return (
     <Modal opened onClose={close} title="Export documents" size={380} centered>
-      <Stack gap={12}>
+      <Stack gap="var(--atelier-gap-md)" ref={bodyRef}>
         <SegmentedControl
           size="xs"
           fullWidth
@@ -141,20 +143,21 @@ export function ExportDialog({ onClose }: ExportDialogProps) {
           data={FORMAT_DATA}
         />
 
-        {format !== 'csv' && (
-          <Checkbox
-            size="xs"
-            label="Relaxed EJSON (friendlier to other tools; not lossless for every type)"
-            checked={relaxed}
-            onChange={(e) => setRelaxed(e.currentTarget.checked)}
-          />
-        )}
+        {/* Disabled rather than removed for CSV, so picking a format never
+            resizes the dialog or moves Export. */}
+        <Checkbox
+          size="xs"
+          label="Relaxed EJSON (friendlier to other tools; not lossless for every type)"
+          checked={relaxed}
+          disabled={format === 'csv'}
+          onChange={(e) => setRelaxed(e.currentTarget.checked)}
+        />
 
-        <Group justify="flex-end" gap={8} mt={4}>
+        <Group justify="flex-end" gap="var(--atelier-gap-sm)" mt={4}>
           <Button variant="default" size="xs" onClick={close}>
             Cancel
           </Button>
-          <SubmitButton size="xs" submitting={saving} disabled={!canExport} onClick={() => void handleExport()}>
+          <SubmitButton size="xs" miw={96} submitting={saving} disabled={!canExport} onClick={() => void handleExport()}>
             {saving ? 'Exporting…' : 'Export…'}
           </SubmitButton>
         </Group>

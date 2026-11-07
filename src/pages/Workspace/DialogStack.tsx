@@ -111,13 +111,13 @@ export function NewTabPicker({ connectionId, onCancel, onPick }: NewTabPickerPro
         {err && (
           <div
             role="alert"
-            style={{ color: T.warn, fontSize: 12, marginBottom: 12 }}
+            style={{ color: T.warn, fontSize: T.fsSm, marginBottom: 12 }}
           >
             {err}
           </div>
         )}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <label style={{ fontSize: 11, color: T.textMuted }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: themeVars.gapSm }}>
+          <label style={{ fontSize: T.fsXs, color: T.textMuted }}>
             Database
             <select
               aria-label="Database"
@@ -136,7 +136,7 @@ export function NewTabPicker({ connectionId, onCancel, onPick }: NewTabPickerPro
                 borderRadius: T.rs,
                 background: T.surfaceRaised,
                 color: T.text,
-                fontSize: 12,
+                fontSize: T.fsSm,
               }}
             >
               {!dbs && <option value="">Loading…</option>}
@@ -147,7 +147,7 @@ export function NewTabPicker({ connectionId, onCancel, onPick }: NewTabPickerPro
               ))}
             </select>
           </label>
-          <label style={{ fontSize: 11, color: T.textMuted }}>
+          <label style={{ fontSize: T.fsXs, color: T.textMuted }}>
             Collection
             <select
               aria-label="Collection"
@@ -161,7 +161,7 @@ export function NewTabPicker({ connectionId, onCancel, onPick }: NewTabPickerPro
                 borderRadius: T.rs,
                 background: T.surfaceRaised,
                 color: T.text,
-                fontSize: 12,
+                fontSize: T.fsSm,
               }}
             >
               {!ownGet(collsByDb, selectedDb) && <option value="">Loading…</option>}
@@ -172,7 +172,7 @@ export function NewTabPicker({ connectionId, onCancel, onPick }: NewTabPickerPro
               ))}
             </select>
           </label>
-          <label style={{ fontSize: 11, color: T.textMuted }}>
+          <label style={{ fontSize: T.fsXs, color: T.textMuted }}>
             Open as
             <select
               aria-label="Initial view"
@@ -186,7 +186,7 @@ export function NewTabPicker({ connectionId, onCancel, onPick }: NewTabPickerPro
                 borderRadius: T.rs,
                 background: T.surfaceRaised,
                 color: T.text,
-                fontSize: 12,
+                fontSize: T.fsSm,
               }}
             >
               <option value="documents">Documents</option>
@@ -195,7 +195,7 @@ export function NewTabPicker({ connectionId, onCancel, onPick }: NewTabPickerPro
             </select>
           </label>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: T.gapSm, marginTop: 18 }}>
           <Button size="compact-xs" variant="subtle" onClick={close}>
             Cancel
           </Button>

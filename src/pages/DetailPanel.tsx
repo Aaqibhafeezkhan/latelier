@@ -43,8 +43,8 @@ function KVRow({ k, v }: { k: string; v: React.ReactNode }) {
       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       padding: '6px 0', borderBottom: `1px solid ${T.border}`,
     }}>
-      <span style={{ fontSize: 11, color: T.textMuted }}>{k}</span>
-      <span style={{ fontSize: 11, color: T.text, fontWeight: 500 }}>{v}</span>
+      <span style={{ fontSize: T.fsXs, color: T.textMuted }}>{k}</span>
+      <span style={{ fontSize: T.fsXs, color: T.text, fontWeight: 500 }}>{v}</span>
     </div>
   );
 }
@@ -57,7 +57,7 @@ function OverviewCard({ title, rows }: { title: string; rows: [string, React.Rea
       padding: '12px 14px', background: T.surface, minWidth: 180,
     }}>
       <div style={{
-        fontSize: 11, fontWeight: 600, color: T.textMuted, marginBottom: 8,
+        fontSize: T.fsXs, fontWeight: 600, color: T.textMuted, marginBottom: 8,
         textTransform: 'uppercase', letterSpacing: '0.06em',
       }}>
         {title}
@@ -130,7 +130,7 @@ function OverviewTab({ conn, runtime }: {
     const isConnecting = runtime.status === 'connecting';
     return (
       <div style={{ padding: 32, textAlign: 'center' }}>
-        <div style={{ fontSize: 13, color: T.text, marginBottom: 16 }}>
+        <div style={{ fontSize: T.fsMd, color: T.text, marginBottom: 16 }}>
           {isConnecting
             ? 'Connecting…'
             : hasError
@@ -150,7 +150,7 @@ function OverviewTab({ conn, runtime }: {
           </Button>
         )}
         {(needsConnect || hasError) && (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: T.gapMd }}>
             <Button
               variant="filled"
               size="xs"
@@ -165,7 +165,7 @@ function OverviewTab({ conn, runtime }: {
               <Button
                 variant="subtle"
                 size="compact-xs"
-                c={T.accent}
+                c={T.accentInk}
                 onClick={() =>
                   help.open({
                     errorCode: runtime.errorCode,
@@ -184,9 +184,9 @@ function OverviewTab({ conn, runtime }: {
 
   if (!info && error) {
     return (
-      <div style={{ padding: 20, color: T.warn, fontSize: 13 }}>
+      <div style={{ padding: 20, color: T.warn, fontSize: T.fsMd }}>
         {error}{' '}
-        <Button variant="subtle" size="compact-xs" c={T.accent} ml={8} onClick={() => void load()}>
+        <Button variant="subtle" size="compact-xs" c={T.accentInk} ml={8} onClick={() => void load()}>
           Retry
         </Button>
       </div>
@@ -194,7 +194,7 @@ function OverviewTab({ conn, runtime }: {
   }
   if (!info) {
     return (
-      <div style={{ padding: 20, color: T.textMuted, fontSize: 13 }}>
+      <div style={{ padding: 20, color: T.textMuted, fontSize: T.fsMd }}>
         {loading ? 'Loading server info…' : 'Preparing…'}
       </div>
     );
@@ -203,14 +203,14 @@ function OverviewTab({ conn, runtime }: {
   return (
     <div style={{ padding: 20 }}>
       <div style={{
-        display: 'flex', alignItems: 'center', marginBottom: 12, gap: 10,
+        display: 'flex', alignItems: 'center', marginBottom: 12, gap: themeVars.gapSm,
       }}>
-        <span style={{ fontSize: 11, color: T.textMuted }}>
+        <span style={{ fontSize: T.fsXs, color: T.textMuted }}>
           {lastLoadedAt ? `Updated ${new Date(lastLoadedAt).toLocaleTimeString()}` : 'Never refreshed'}
         </span>
         {stale && (
           <span style={{
-            fontSize: 10, padding: '2px 6px', borderRadius: T.rx,
+            fontSize: T.fsXs, padding: '2px 6px', borderRadius: T.rx,
             background: 'rgba(184,76,20,0.1)', color: T.warn,
           }}>
             stale — refresh failed
@@ -227,7 +227,7 @@ function OverviewTab({ conn, runtime }: {
           style={{
             marginBottom: 12,
             padding: '8px 10px',
-            fontSize: 11,
+            fontSize: T.fsXs,
             color: T.textMuted,
             background: T.surfaceRaised,
             border: `1px solid ${T.border}`,
@@ -239,7 +239,7 @@ function OverviewTab({ conn, runtime }: {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', gap: T.gapMd, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         <OverviewCard
           title="Server"
           rows={[
@@ -370,7 +370,7 @@ function CollectionsTab({ conn, runtime }: {
     return (
       <div style={{ padding: 20, color: T.warn }}>
         {error}
-        <Button variant="subtle" size="compact-xs" c={T.accent} ml={8} onClick={() => void loadDatabases()}>
+        <Button variant="subtle" size="compact-xs" c={T.accentInk} ml={8} onClick={() => void loadDatabases()}>
           Retry
         </Button>
       </div>
@@ -382,12 +382,12 @@ function CollectionsTab({ conn, runtime }: {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
+        display: 'flex', alignItems: 'center', gap: themeVars.gapSm,
         padding: '10px 16px', borderBottom: `1px solid ${T.border}`,
         background: T.surface,
       }}>
         <div style={{
-          flex: 1, display: 'flex', alignItems: 'center', gap: 6,
+          flex: 1, display: 'flex', alignItems: 'center', gap: themeVars.gapXs,
           border: `1px solid ${T.border}`, borderRadius: T.rs,
           background: T.surfaceRaised, padding: '4px 8px', maxWidth: 320,
         }}>
@@ -399,11 +399,11 @@ function CollectionsTab({ conn, runtime }: {
             aria-label="Filter collections"
             style={{
               flex: 1, border: 'none', outline: 'none', background: 'transparent',
-              fontSize: 12, color: T.text, fontFamily: 'inherit',
+              fontSize: T.fsSm, color: T.text, fontFamily: 'inherit',
             }}
           />
         </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: T.textMuted, cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: themeVars.gapXs, fontSize: T.fsXs, color: T.textMuted, cursor: 'pointer' }}>
           <input
             type="checkbox"
             checked={showSystem}
@@ -420,10 +420,10 @@ function CollectionsTab({ conn, runtime }: {
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {!dbs && (
-          <div style={{ padding: 20, color: T.textMuted, fontSize: 13 }}>Loading databases…</div>
+          <div style={{ padding: 20, color: T.textMuted, fontSize: T.fsMd }}>Loading databases…</div>
         )}
         {dbs && dbs.length === 0 && (
-          <div style={{ padding: 20, color: T.textMuted, fontSize: 13, textAlign: 'center' }}>
+          <div style={{ padding: 20, color: T.textMuted, fontSize: T.fsMd, textAlign: 'center' }}>
             No databases on this server.
           </div>
         )}
@@ -440,7 +440,7 @@ function CollectionsTab({ conn, runtime }: {
                 onClick={() => toggleDb(db.name)}
                 aria-expanded={open}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
+                  display: 'flex', alignItems: 'center', gap: T.gapSm,
                   padding: '9px 16px', borderBottom: `1px solid ${T.border}`,
                   background: T.surface, width: '100%',
                   font: 'inherit', color: 'inherit', textAlign: 'left',
@@ -448,25 +448,25 @@ function CollectionsTab({ conn, runtime }: {
               >
                 <span style={{ color: T.textGhost, display: 'flex' }}>{open ? I.chevD : I.chevR}</span>
                 <span style={{ color: T.textMuted, display: 'flex' }}>{I.db}</span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: T.text, flex: 1 }}>{db.name}</span>
-                <span style={{ fontSize: 11, color: T.textMuted }}>
+                <span style={{ fontSize: T.fsMd, fontWeight: 600, color: T.text, flex: 1 }}>{db.name}</span>
+                <span style={{ fontSize: T.fsXs, color: T.textMuted }}>
                   {db.sizeOnDisk === undefined ? '—' : humanBytes(db.sizeOnDisk)}
                 </span>
               </UnstyledButton>
               {open && (
                 <div style={{ borderBottom: `1px solid ${T.border}` }}>
                   {!entry && (
-                    <div style={{ padding: '12px 16px', color: T.textMuted, fontSize: 12 }}>
+                    <div style={{ padding: '12px 16px', color: T.textMuted, fontSize: T.fsSm }}>
                       Loading collections…
                     </div>
                   )}
                   {entry && 'error' in entry && (
-                    <div style={{ padding: '12px 16px', color: T.warn, fontSize: 12 }}>
+                    <div style={{ padding: '12px 16px', color: T.warn, fontSize: T.fsSm }}>
                       {entry.error}
                     </div>
                   )}
                   {rows && rows.length === 0 && (
-                    <div style={{ padding: '12px 16px', color: T.textMuted, fontSize: 12 }}>
+                    <div style={{ padding: '12px 16px', color: T.textMuted, fontSize: T.fsSm }}>
                       No collections{lowered ? ' match the filter' : ''}.
                     </div>
                   )}
@@ -475,9 +475,9 @@ function CollectionsTab({ conn, runtime }: {
                       highlightOnHover
                       aria-label={`Collections in ${db.name}`}
                       styles={{
-                        table: { fontSize: 11 },
+                        table: { fontSize: T.fsXs },
                         th: {
-                          fontSize: 10, fontWeight: 700, letterSpacing: 0.6,
+                          fontSize: T.fsXs, fontWeight: 700, letterSpacing: 0.6,
                           textTransform: 'uppercase', color: T.textMuted,
                           background: T.surfaceRaised, padding: '6px 16px',
                         },
@@ -498,9 +498,9 @@ function CollectionsTab({ conn, runtime }: {
                         {rows.map((c) => (
                           <Table.Tr key={c.name}>
                             <Table.Td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: themeVars.gapXs }}>
                                 <span style={{ color: T.textGhost, display: 'flex' }}>{I.doc}</span>
-                                <span style={{ fontSize: 12, fontWeight: 500, color: T.text }}>{c.name}</span>
+                                <span style={{ fontSize: T.fsSm, fontWeight: 500, color: T.text }}>{c.name}</span>
                               </div>
                             </Table.Td>
                             <Table.Td style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -582,7 +582,7 @@ export function DetailPanel({ selected, loading, onDelete, onDisconnect }: {
     return (
       <div style={{
         flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: T.bg, color: T.textMuted, fontSize: 13,
+        background: T.bg, color: T.textMuted, fontSize: T.fsMd,
       }}>
         Loading…
       </div>
@@ -593,10 +593,10 @@ export function DetailPanel({ selected, loading, onDelete, onDisconnect }: {
     return (
       <div style={{
         flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: T.bg, color: T.textMuted, fontSize: 13,
+        background: T.bg, color: T.textMuted, fontSize: T.fsMd,
       }}>
         <div style={{ textAlign: 'center', maxWidth: 320 }}>
-          <div style={{ marginBottom: 16, fontSize: 14, color: T.textMuted }}>
+          <div style={{ marginBottom: 16, fontSize: T.fsMd, color: T.textMuted }}>
             This connection no longer exists.
           </div>
           <Button variant="filled" size="xs" leftSection={I.chevL} onClick={() => navigate('/workspace')}>
@@ -617,36 +617,36 @@ export function DetailPanel({ selected, loading, onDelete, onDisconnect }: {
         padding: '14px 20px 0', background: T.surface,
         borderBottom: `1px solid ${T.border}`,
       }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: T.gapMd, marginBottom: 10 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-              <span style={{ fontSize: 15, fontWeight: 700, color: T.text }}>{selected.name}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: themeVars.gapSm, marginBottom: 4 }}>
+              <span style={{ fontSize: T.fsLg, fontWeight: 700, color: T.text }}>{selected.name}</span>
               <span style={{
-                fontSize: 10, fontWeight: 600, letterSpacing: '0.05em',
+                fontSize: T.fsXs, fontWeight: 600, letterSpacing: '0.05em',
                 padding: '2px 7px', borderRadius: 20,
                 background: effective.status === 'connected' ? T.accentSoft : `rgba(176,74,20,0.1)`,
-                color: effective.status === 'connected' ? T.accent : T.warn,
+                color: effective.status === 'connected' ? T.accentInk : T.warn,
                 border: `1px solid ${effective.status === 'connected' ? T.accentBorder : 'rgba(176,74,20,0.25)'}`,
               }}>
                 {effective.status === 'connected' ? 'Connected' : effective.status}
               </span>
             </div>
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, color: T.textMuted }}>
+            <div style={{ display: 'flex', gap: T.gapLg, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: T.fsXs, color: T.textMuted }}>
                 <span style={{ color: T.textMuted }}>Host: </span>
                 <span style={{ fontFamily: 'ui-monospace, monospace' }}>
                   {selected.host}:{selected.port}
                 </span>
               </span>
               {effective.serverVersion && (
-                <span style={{ fontSize: 11, color: T.textMuted }}>
+                <span style={{ fontSize: T.fsXs, color: T.textMuted }}>
                   <span style={{ color: T.textMuted }}>Version: </span>
                   <span style={{ fontFamily: 'ui-monospace, monospace' }}>{effective.serverVersion}</span>
                 </span>
               )}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: themeVars.gapXs, alignItems: 'center' }}>
             <Button variant="subtle" size="compact-xs" leftSection={I.edit} onClick={() => navigate(`/connections/${selected.id}/edit`)}>
               Edit
             </Button>
@@ -687,7 +687,7 @@ export function DetailPanel({ selected, loading, onDelete, onDisconnect }: {
                 onClick={() => setActiveTab(tab)}
                 style={{
                   padding: '7px 14px', border: 'none', background: 'transparent',
-                  fontSize: 12, fontWeight: active ? 600 : 400,
+                  fontSize: T.fsSm, fontWeight: active ? 600 : 400,
                   color: active ? T.text : T.textMuted,
                   cursor: 'pointer',
                   borderBottom: active ? `2px solid ${T.accent}` : '2px solid transparent',

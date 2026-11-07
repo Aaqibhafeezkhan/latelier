@@ -73,6 +73,7 @@ export function RenameCollectionModal({
         <TextInput
           aria-label="New name"
           autoFocus
+          data-autofocus
           value={newName}
           onChange={(e) => setNewName(e.currentTarget.value)}
           placeholder="new collection name"

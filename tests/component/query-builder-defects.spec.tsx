@@ -490,7 +490,8 @@ describe('W13 §7 — ⌘↵ runs from anywhere in the Documents view', () => {
 
   it('does not run a find query from the Aggregation view', async () => {
     const { findSpy } = mountWith(makeState({ activeView: 'aggregation' }));
-    const result = await screen.findByRole('button', { name: /Run/ });
+    // The toolbar's Run; the output pane offers its own "Run pipeline" too.
+    const result = await screen.findByRole('button', { name: /^Run$/ });
 
     fireEvent.keyDown(result, cmdEnter);
 

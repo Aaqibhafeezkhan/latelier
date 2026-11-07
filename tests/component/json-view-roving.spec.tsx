@@ -4,6 +4,7 @@ import { fireEvent, render, screen, within, emptyWorkspaceActions, emptyWorkspac
 import { JsonView } from '../../src/pages/Workspace/views/JsonView';
 import { CollectionWorkspaceProvider } from '../../src/pages/Workspace/CollectionWorkspaceProvider';
 import type { CollectionTabState } from '@shared/types';
+import type { CollectionWorkspaceMeta } from '../../src/pages/Workspace/context';
 
 const DOCS = [
   { _id: 1, name: 'alpha' },
@@ -11,7 +12,7 @@ const DOCS = [
   { _id: 3, name: 'gamma' },
 ];
 
-function renderJson(docs: unknown[] = DOCS) {
+function renderJson(docs: unknown[] = DOCS, meta: Partial<CollectionWorkspaceMeta> = {}) {
   const actions = emptyWorkspaceActions();
   const state: CollectionTabState = {
     view: 'JSON',
@@ -22,7 +23,7 @@ function renderJson(docs: unknown[] = DOCS) {
     activeBuilderTab: 'Builder',
   };
   const utils = render(
-    <CollectionWorkspaceProvider state={state} actions={actions} meta={emptyWorkspaceMeta()}>
+    <CollectionWorkspaceProvider state={state} actions={actions} meta={emptyWorkspaceMeta(meta)}>
       <JsonView documents={docs} />
     </CollectionWorkspaceProvider>,
   );
@@ -41,6 +42,25 @@ describe('JsonView — active row', () => {
     expect(tree.getAttribute('aria-activedescendant')).toBe(card(1).id);
     expect(card(1).id).toBe('json-row-0');
     for (const n of [1, 2, 3]) expect(card(n).getAttribute('tabindex')).toBe('-1');
+  });
+
+  // One tab stop per widget (X19): of every control inside the cards, only the
+  // roving card's are tabbable (its buttons and its brace collapse toggles), and
+  // the set moves with the arrow keys.
+  it('only the active card\'s controls are in the Tab order, and they follow the arrows', () => {
+    const { tree, card } = renderJson();
+    const cardsOfTabbable = () =>
+      [...tree.querySelectorAll<HTMLElement>('button, [role="button"]')]
+        .filter((el) => el.getAttribute('tabindex') !== '-1')
+        .map((el) => el.closest('[role="treeitem"]')!.id);
+
+    const inCard0 = cardsOfTabbable();
+    expect(inCard0.length).toBeGreaterThan(5);
+    expect(new Set(inCard0)).toEqual(new Set([card(1).id]));
+
+    fireEvent.keyDown(tree, { key: 'ArrowDown' });
+    expect(new Set(cardsOfTabbable())).toEqual(new Set([card(2).id]));
+    expect(cardsOfTabbable()).toHaveLength(inCard0.length);
   });
 
   it('each card is a treeitem whose nearest role-bearing ancestor is the tree', () => {
@@ -81,6 +101,25 @@ describe('JsonView — active row', () => {
 
     expect(actions.openEdit).toHaveBeenCalledTimes(1);
     expect(actions.openEdit).toHaveBeenCalledWith(DOCS[2]);
+  });
+
+  it('D on the list deletes the active card', async () => {
+    const { tree, card, actions } = renderJson();
+    await userEvent.click(card(1));
+    fireEvent.keyDown(tree, { key: 'ArrowDown' });
+
+    fireEvent.keyDown(tree, { key: 'd', ctrlKey: true });
+    expect(actions.openDelete).not.toHaveBeenCalled();
+    fireEvent.keyDown(tree, { key: 'd' });
+    expect(actions.openDelete).toHaveBeenCalledWith(DOCS[1]);
+  });
+
+  it.each([{ isView: true }, { isReadOnly: true }])('D does nothing when %o', (meta) => {
+    const { tree, actions } = renderJson(DOCS, meta);
+
+    fireEvent.keyDown(tree, { key: 'd' });
+
+    expect(actions.openDelete).not.toHaveBeenCalled();
   });
 
   it('Shift+F10 opens the document menu for the active card', async () => {

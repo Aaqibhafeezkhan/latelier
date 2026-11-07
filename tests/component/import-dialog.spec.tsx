@@ -216,6 +216,56 @@ describe('ImportDialog', () => {
     expect((await screen.findByRole('status')).textContent).toMatch(/^Cancelled/);
   });
 
+  it('lists the three formats at the start, and opens on its one primary action rather than Close', async () => {
+    mockApi();
+    renderDialog();
+    for (const name of ['JSON array', 'JSONL', 'CSV']) expect(screen.getByText(name)).toBeTruthy();
+    const primary = screen.getByRole('button', { name: 'Choose file…' });
+    await vi.waitFor(() => expect(document.activeElement).toBe(primary));
+  });
+
+  it('holds one dialog height at the start, on the CSV check step and on the report', async () => {
+    mockApi({ path: '/home/me/people.csv', report: CSV_REPORT });
+    renderDialog();
+    const height = () => screen.getByRole('dialog').style.height;
+    const start = height();
+    expect(start).toContain('440px');
+    choose();
+    await screen.findByRole('table', { name: 'Preview of people.csv' });
+    expect(height()).toBe(start);
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await screen.findByRole('status');
+    expect(height()).toBe(start);
+  });
+
+  it('keeps Cancel and the primary button in the footer while running, with Cancel import in the Cancel slot', async () => {
+    let releaseImport!: () => void;
+    mockApi({ onImport: async () => { await new Promise<void>((resolve) => { releaseImport = resolve; }); } });
+    renderDialog();
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    const primary = screen.getByRole('button', { name: 'Choose file…' });
+    expect(cancel.parentElement).toBe(primary.parentElement);
+    choose();
+    const cancelImport = await screen.findByRole('button', { name: 'Cancel import' });
+    const importing = screen.getByRole('button', { name: 'Importing…' });
+    expect(cancelImport.parentElement).toBe(importing.parentElement);
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    releaseImport();
+    await screen.findByRole('status');
+  });
+
+  it('puts Choose another file… furthest left, so it appears without moving Cancel or Import', async () => {
+    mockApi({ path: '/home/me/people.csv' });
+    renderDialog();
+    choose();
+    await screen.findByRole('table', { name: 'Preview of people.csv' });
+    const another = screen.getByRole('button', { name: 'Choose another file…' });
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    const primary = screen.getByRole('button', { name: 'Import' });
+    expect(another.compareDocumentPosition(cancel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(cancel.compareDocumentPosition(primary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('ignores a progress event for another run\'s token', async () => {
     let releaseImport!: () => void;
     const { emitProgress } = mockApi({

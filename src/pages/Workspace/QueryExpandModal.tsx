@@ -73,7 +73,7 @@ export function QueryExpandModal({ queryRaw, onApply, onClose }: QueryExpandModa
             width: '100%',
             minHeight: 320,
             fontFamily: '"JetBrains Mono", monospace',
-            fontSize: 12,
+            fontSize: T.fsSm,
             lineHeight: 1.5,
             padding: 10,
             border: `1px solid ${shell.refusal ? T.warn : T.border}`,

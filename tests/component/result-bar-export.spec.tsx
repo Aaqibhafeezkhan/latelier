@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, emptyWorkspaceActions, emptyWorkspaceMeta } from '../helpers/render';
+import { render, screen, fireEvent, within, emptyWorkspaceActions, emptyWorkspaceMeta } from '../helpers/render';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { ResultBar } from '../../src/pages/Workspace/ResultBar';
 import { notify } from '../../src/theme/notifications';
@@ -87,6 +87,24 @@ describe('ResultBar — Export', () => {
     expect(JSON.parse(content)).toEqual([
       { _id: { $oid: '507f1f77bcf86cd799439011' }, name: 'Ann, A.', age: { $numberInt: '30' } },
     ]);
+  });
+
+  it('keeps the Relaxed EJSON row for CSV, disabled, so choosing a format never resizes the dialog', async () => {
+    renderBar({}, { collection: 'orders' });
+    const dialog = await openExportDialog();
+    const relaxed = () => within(dialog).getByRole('checkbox', { name: /Relaxed EJSON/ }) as HTMLInputElement;
+    expect(relaxed().disabled).toBe(false);
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'CSV' }));
+    expect(relaxed().disabled).toBe(true);
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'JSONL' }));
+    expect(relaxed().disabled).toBe(false);
+  });
+
+  it('opens on its first control, not on Close', async () => {
+    renderBar({}, { collection: 'orders' });
+    const dialog = await openExportDialog();
+    const first = within(dialog).getAllByRole('radio')[0]!;
+    await vi.waitFor(() => expect(document.activeElement).toBe(first));
   });
 
   it('keeps the dialog open when the save panel is cancelled', async () => {

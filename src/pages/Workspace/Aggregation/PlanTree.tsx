@@ -3,7 +3,7 @@ import { themeVars } from '../../../theme/themeVars';
 import { buildPlanTree, type PlanNode } from '../../../utils/explainSummary';
 
 const chipStyle = (T: typeof themeVars): React.CSSProperties => ({
-  fontSize: 10,
+  fontSize: T.fsXs,
   padding: '1px 6px',
   borderRadius: T.rs,
   background: T.surface,
@@ -26,14 +26,14 @@ function Row({ node }: { node: PlanNode }) {
           display: 'flex',
           flexWrap: 'wrap',
           alignItems: 'center',
-          gap: 6,
+          gap: themeVars.gapXs,
           padding: '3px 8px',
           marginBottom: 3,
           borderRadius: T.rs,
           border: `1px solid ${node.collscan ? T.warnBorder : T.border}`,
           background: node.collscan ? T.warnSoft : T.surfaceRaised,
           color: node.collscan ? T.warnText : T.text,
-          fontSize: 11,
+          fontSize: T.fsXs,
         }}
       >
         <strong style={{ fontFamily: '"JetBrains Mono", monospace', fontWeight: 600 }}>
@@ -42,7 +42,7 @@ function Row({ node }: { node: PlanNode }) {
         {node.shardName !== undefined && <span style={chipStyle(T)}>shard {node.shardName}</span>}
         {node.indexName !== undefined && <span>{node.indexName}</span>}
         {node.keyPattern !== undefined && (
-          <code style={{ fontSize: 10, color: T.textMuted }}>{JSON.stringify(node.keyPattern)}</code>
+          <code style={{ fontSize: T.fsXs, color: T.textMuted }}>{JSON.stringify(node.keyPattern)}</code>
         )}
         {figures.map((f) => (
           <span key={f} style={chipStyle(T)}>

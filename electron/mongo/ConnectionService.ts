@@ -55,6 +55,7 @@ export class ConnectionService {
         status: runtime.status === 'disconnected' ? 'unknown' : runtime.status,
         serverVersion: runtime.serverVersion,
         readOnly: row.read_only === 1,
+        lostReason: runtime.lostReason,
       };
     });
   }

@@ -57,10 +57,14 @@ export function useCollectionTabActions(deps: {
     },
     [activeCollectionRef, tabs.setActiveView],
   );
+  // Runs as well: the pane offering this describes the last run, so clearing
+  // the text alone would leave it saying the collection is empty.
   const clearActiveFilter = React.useCallback(() => {
     const a = activeCollectionRef.current;
-    if (a) tabs.patchCollectionState(a.id, CLEAR_FILTER_PATCH);
-  }, [activeCollectionRef, tabs.patchCollectionState]);
+    if (!a) return;
+    tabs.patchCollectionState(a.id, CLEAR_FILTER_PATCH);
+    void run(CLEAR_FILTER_PATCH);
+  }, [activeCollectionRef, tabs.patchCollectionState, run]);
   // These three use the functional-updater variant so the merge runs against the latest pending patch, not a stale ref snapshot.
   const handleColumnResize = React.useCallback(
     (field: string, width: number) => {

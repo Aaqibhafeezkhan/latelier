@@ -23,7 +23,7 @@
 }
 
 .atelier-splash__tagline {
-  font-size: 13px;
+  font-size: var(--atelier-fs-md);
   letter-spacing: 0.04em;
   /* T153 contrast audit: reviewed against fixed --atelier-deep (#1a1a2e) —
      verified ~4.94:1, clears WCAG AA (4.5:1). Leave unchanged. */

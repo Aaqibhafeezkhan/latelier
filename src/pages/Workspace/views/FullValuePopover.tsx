@@ -80,7 +80,7 @@ export function FullValuePopover({
             pointerEvents: visible ? 'auto' : 'none',
             borderRadius: 3,
             background: 'var(--atelier-surface-raised)',
-            fontSize: 10,
+            fontSize: 'var(--atelier-fs-xs)',
             lineHeight: '16px',
           }}
         >
@@ -100,7 +100,7 @@ export function FullValuePopover({
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
             fontFamily: '"JetBrains Mono", monospace',
-            fontSize: 11,
+            fontSize: 'var(--atelier-fs-xs)',
             color: 'var(--atelier-text)',
           }}
         >

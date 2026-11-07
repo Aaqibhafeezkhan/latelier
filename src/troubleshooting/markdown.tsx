@@ -38,7 +38,7 @@ export function InlineMarkdown({ source }: { source: string }) {
                 key={i}
                 style={{
                   fontFamily: 'JetBrains Mono, monospace',
-                  fontSize: '0.92em',
+                  fontSize: T.fsXs,
                   background: T.surfaceRaised,
                   border: `1px solid ${T.border}`,
                   borderRadius: T.rx,
@@ -59,7 +59,7 @@ export function InlineMarkdown({ source }: { source: string }) {
                     notify.error('Could not open the link');
                   });
                 }}
-                style={{ color: T.accent, textDecoration: 'underline' }}
+                style={{ color: T.accentInk, textDecoration: 'underline' }}
               >
                 {n.label}
               </a>

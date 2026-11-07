@@ -256,8 +256,8 @@ defect, not the missing message.
 
 **Behavior.**
 
-1. An inline message under the offending input, carrying the transform's
-   `reason` verbatim.
+1. A one-line message beside Run, carrying the transform's `reason` verbatim.
+   Its place is already reserved, so showing it moves nothing.
 2. The character offset from `index` locates the problem — at minimum a line
    or column reference, so a typo forty lines into a stage body does not have
    to be found by eye.
@@ -367,7 +367,7 @@ main process, and it is pure JavaScript with no Node built-ins, so
 
 ### T5 — error feedback
 
-- A failed input shows its reason inline, under that input.
+- A failed input shows its reason on one line beside Run.
 - The message locates the problem by line or column.
 - The stale result count is not presented as current while the input is
   unrunnable.

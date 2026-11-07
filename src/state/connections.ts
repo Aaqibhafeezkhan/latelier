@@ -113,11 +113,15 @@ export function useConnections(): ConnectionsState {
         const current = cs[idx]!;
         const nextStatus = mapRuntimeStatus(runtime.status);
         const nextVersion = runtime.serverVersion ?? current.serverVersion;
-        if (current.status === nextStatus && current.serverVersion === nextVersion) {
+        if (
+          current.status === nextStatus &&
+          current.serverVersion === nextVersion &&
+          current.lostReason === runtime.lostReason
+        ) {
           return cs;
         }
         const next = cs.slice();
-        next[idx] = { ...current, status: nextStatus, serverVersion: nextVersion };
+        next[idx] = { ...current, status: nextStatus, serverVersion: nextVersion, lostReason: runtime.lostReason };
         return next;
       });
     });

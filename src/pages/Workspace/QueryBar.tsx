@@ -68,25 +68,28 @@ const FIND_OPTION_KEYS: readonly FindOptionKey[] = ['collation', 'hint', 'maxTim
 const SKIP_EXPLANATION = 'Skip is driven by the page selector below the results';
 
 /**
- * Inline `role="alert"` strip — the same treatment the filter tree gives an
- * unprintable row (`BuilderPane.tsx:446`). A full-width strip rather than a
- * cell sibling: every one of these messages is longer than the 1fr track.
+ * Why the query can't run, or runs as something else, as a `role="alert"` line
+ * in the gap beside Run. Never a strip of its own: that pushed the toolbar and
+ * the rows down and back with every complaint. It truncates in the gap, with
+ * the whole message on hover; a screen reader gets all of it.
  */
-function Notice({ id, children }: { id?: string; children: React.ReactNode }) {
+function Notice({ id, text }: { id: string; text: string }) {
   return (
     <div
       id={id}
       role="alert"
+      title={text}
       style={{
-        padding: '3px 12px 4px',
-        fontSize: 10,
-        lineHeight: 1.3,
-        color: themeVars.warn,
-        background: themeVars.surface,
-        borderTop: `1px solid ${themeVars.border}`,
+        flex: '0 1 auto',
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        fontSize: themeVars.fsXs,
+        color: themeVars.warnText,
       }}
     >
-      {children}
+      {text}
     </div>
   );
 }
@@ -349,7 +352,6 @@ function QueryBarInner({
       : null;
 
   const skipValue = state.page * state.pageSize;
-  const runError = state.lastRun?.error;
 
   // Advanced rows (sort/skip/limit) are hidden by default and
   // expand from the QUERY row's chevron. The row opens automatically when the
@@ -431,7 +433,7 @@ function QueryBarInner({
     padding: '0 12px',
     background: T.surfaceRaised,
     borderRight: `1px solid ${T.border}`,
-    fontSize: 10,
+    fontSize: T.fsXs,
     fontWeight: 700,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
@@ -453,13 +455,38 @@ function QueryBarInner({
     flex: 1,
     minWidth: 0,
     fontFamily: '"JetBrains Mono", monospace',
-    fontSize: 11,
+    fontSize: T.fsXs,
     padding: '4px 0',
     border: 'none',
     background: 'transparent',
     color: T.text,
     outline: 'none',
   };
+
+  // A run the runner refused (Saved or Recent "Run here", the palette) keeps its
+  // rows, so the pane has no room to say why. Only until the text can run.
+  const refusedRun =
+    state.lastRun?.error && state.lastRun.documents.length > 0 && findProblem(state) !== null
+      ? `${state.lastRun.error.code}: ${state.lastRun.error.message}`
+      : null;
+  const advanced = advancedOpen
+    ? [
+        { id: 'query-bar-sort-error', text: sortField.refusal ?? sortError },
+        { id: 'query-bar-limit-error', text: limitError },
+        { id: 'query-bar-collation-error', text: optionErrors.collation },
+        { id: 'query-bar-hint-error', text: optionErrors.hint },
+        { id: 'query-bar-maxtime-error', text: optionErrors.maxTimeMS ?? maxTimeWarning },
+        { id: 'query-bar-readpref-error', text: optionErrors.readPreference },
+      ]
+    : [];
+  // One line, so the first shows and the rest wait their turn for sight. Every
+  // one stays in the document: the inputs are described by these ids.
+  const notices = [
+    { id: 'query-bar-run-blocked', text: blocked && `Not run: ${blocked.reason}`, seq: blocked?.seq },
+    { id: 'query-bar-filter-error', text: filterField.refusal },
+    ...advanced,
+    { id: 'query-bar-run-refused', text: refusedRun },
+  ].filter((n): n is { id: string; text: string; seq?: number } => !!n.text);
 
   return (
     <div
@@ -475,7 +502,7 @@ function QueryBarInner({
           query on this collection". This is now the one Save button in the
           Documents view — the builder-drawer footer's copy was deleted, and
           `saved.create`'s hint anchor moved here with it. */}
-      <Group gap={8} wrap="nowrap" style={{ padding: '8px 12px' }}>
+      <Group gap={T.gapSm} wrap="nowrap" style={{ padding: '8px 12px' }}>
         <Button
           data-hint-anchor="saved.create"
           variant="default"
@@ -488,13 +515,22 @@ function QueryBarInner({
         <Button variant="default" size="compact-xs" leftSection={I.clock} onClick={onHistory}>
           History
         </Button>
+        {notices.map((n, i) =>
+          i === 0 ? (
+            <Notice key={`${n.id}-${n.seq}`} id={n.id} text={n.text} />
+          ) : (
+            <VisuallyHidden key={`${n.id}-${n.seq}`} id={n.id} role="alert">
+              {n.text}
+            </VisuallyHidden>
+          ),
+        )}
         {/* Run sits at the right end, beside the drawer, so the
             pointer's trip from a builder row to Run is short. */}
         <span style={{ flex: 1 }} />
         {willResetPage && (
           <span
             data-testid="page-reset-hint"
-            style={{ fontSize: 11, color: T.textMuted, whiteSpace: 'nowrap' }}
+            style={{ fontSize: T.fsXs, color: T.textMuted, whiteSpace: 'nowrap' }}
           >
             Will jump to page 1 on run
           </span>
@@ -634,7 +670,7 @@ function QueryBarInner({
               // in the 120px track, so the badge drops to its own line
               // rather than spilling under the filter cell.
               ...(!advancedOpen && hasAdvanced && advancedProblems > 0
-                ? { flexWrap: 'wrap', rowGap: 2, paddingTop: 3, paddingBottom: 3 }
+                ? { flexWrap: 'wrap', rowGap: themeVars.gapXs, paddingTop: 3, paddingBottom: 3 }
                 : null),
             }}
           >
@@ -650,7 +686,7 @@ function QueryBarInner({
             >
               {I.chevD}
             </span>
-            <span style={{ color: T.accent }}>query</span>
+            <span style={{ color: T.accentInk }}>query</span>
             {/* W14 §2 — collapsed, the row gave no non-hover sign that
                 sort / limit were set. A count rather than the dot
                 43ee030 shipped and 7a21468 reverted: it survives monochrome
@@ -693,7 +729,7 @@ function QueryBarInner({
             style={{
               flex: 1,
               fontFamily: '"JetBrains Mono", monospace',
-              fontSize: 12,
+              fontSize: T.fsSm,
               padding: '6px 8px',
               border: 'none',
               borderBottom: `1px solid ${
@@ -725,8 +761,6 @@ function QueryBarInner({
           {autocomplete.popover}
         </div>
       </div>
-
-      {filterField.refusal && <Notice id="query-bar-filter-error">{filterField.refusal}</Notice>}
 
       {advancedOpen && (
       <div id="query-bar-advanced">
@@ -768,10 +802,6 @@ function QueryBarInner({
           />
         </div>
       </div>
-
-      {(sortField.refusal ?? sortError) && (
-        <Notice id="query-bar-sort-error">{sortField.refusal ?? sortError}</Notice>
-      )}
 
       {/* SKIP + LIMIT row */}
       <div style={gridStyle}>
@@ -837,8 +867,6 @@ function QueryBarInner({
         </div>
       </div>
 
-      {limitError && <Notice id="query-bar-limit-error">{limitError}</Notice>}
-
       {/* OPTIONS rows (W14 §9): what the find carries besides its clauses.
           Labelled off the visible cells like sort and limit (W15 §5). */}
       <div
@@ -882,9 +910,6 @@ function QueryBarInner({
           />
         </div>
       </div>
-      {optionErrors.collation && <Notice id="query-bar-collation-error">{optionErrors.collation}</Notice>}
-      {optionErrors.hint && <Notice id="query-bar-hint-error">{optionErrors.hint}</Notice>}
-
       <div style={{ ...gridStyle, gridTemplateColumns: '120px 1fr 120px 1fr' }}>
         <div id="query-bar-maxtime-label" style={labelCellStyle}>maxTimeMS</div>
         <div style={valueCellStyle}>
@@ -933,44 +958,7 @@ function QueryBarInner({
           </select>
         </div>
       </div>
-      {(optionErrors.maxTimeMS ?? maxTimeWarning) && (
-        <Notice id="query-bar-maxtime-error">{optionErrors.maxTimeMS ?? maxTimeWarning}</Notice>
-      )}
-      {optionErrors.readPreference && (
-        <Notice id="query-bar-readpref-error">{optionErrors.readPreference}</Notice>
-      )}
       </div>
-      )}
-
-      {blocked && (
-        <Notice key={blocked.seq} id="query-bar-run-blocked">Not run: {blocked.reason}</Notice>
-      )}
-
-      {runError && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '4px 12px 6px',
-            fontSize: 11,
-            color: T.textMuted,
-            borderTop: `1px solid ${T.border}`,
-          }}
-        >
-          <span
-            role="alert"
-            style={{
-              color: T.redText,
-              padding: '1px 7px',
-              borderRadius: T.rx,
-              background: T.redSoft,
-              border: `1px solid ${T.redBorder}`,
-            }}
-          >
-            {runError.code}: {runError.message}
-          </span>
-        </div>
       )}
 
       {expandOpen && (

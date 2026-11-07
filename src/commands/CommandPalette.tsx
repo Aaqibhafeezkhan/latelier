@@ -113,23 +113,23 @@ function ActionItem({ cmd, id, isCursor, onActivate, onHover, index }: ActionIte
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 10,
+        gap: 'var(--atelier-gap-sm)',
         padding: '9px 16px',
         width: '100%',
         background: 'transparent',
         textAlign: 'left',
         fontFamily: 'inherit',
-        fontSize: 13,
+        fontSize: 'var(--atelier-fs-md)',
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--atelier-gap-xs)', flex: 1, minWidth: 0 }}>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {cmd.title}
         </span>
         {cmd.subtitle && (
           <span
             style={{
-              fontSize: 11,
+              fontSize: 'var(--atelier-fs-xs)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -144,7 +144,7 @@ function ActionItem({ cmd, id, isCursor, onActivate, onHover, index }: ActionIte
         <span
           style={{
             marginLeft: 'auto',
-            fontSize: 11,
+            fontSize: 'var(--atelier-fs-xs)',
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
             color: 'var(--atelier-text-ghost)',
           }}
@@ -253,7 +253,7 @@ function PaletteContent({ onClose, recentIds, recordRecent }: PaletteContentProp
             style={{
               padding: '24px 16px',
               textAlign: 'center',
-              fontSize: 12,
+              fontSize: 'var(--atelier-fs-sm)',
               color: 'var(--atelier-text-muted)',
             }}
           >
@@ -266,7 +266,7 @@ function PaletteContent({ onClose, recentIds, recordRecent }: PaletteContentProp
                 id={`${listId}-grp-${group.key}`}
                 style={{
                   padding: '8px 16px 4px',
-                  fontSize: 10,
+                  fontSize: 'var(--atelier-fs-xs)',
                   fontWeight: 700,
                   textTransform: 'uppercase',
                   letterSpacing: '0.08em',

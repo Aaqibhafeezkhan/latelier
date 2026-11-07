@@ -28,6 +28,7 @@ async function mountModal(prefs: {
       <SettingsModal onClose={() => {}} />
     </HintsProvider>,
   );
+  fireEvent.click(await screen.findByRole('tab', { name: 'Editor and startup' }));
   return screen.findByRole('switch', { name: 'Reopen tabs on launch' });
 }
 

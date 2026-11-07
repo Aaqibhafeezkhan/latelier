@@ -4,7 +4,7 @@
 // this hook's key-mapping logic is pure and fast enough for Stryker's
 // per-mutant rerun, but exercising a React hook still needs a real render.
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { renderHook, act } from '../helpers/render';
 import { installJsdomTeardown } from '../helpers/jsdomTeardown';
 import { useRovingFocus } from '../../src/hooks/useRovingFocus';
@@ -663,6 +663,122 @@ describe('useRovingFocus', () => {
 
       expect(scrollToIndex).not.toHaveBeenCalledWith(0);
       expect(scrollToIndex).toHaveBeenCalledWith(4);
+    });
+
+    describe('moves that outrun settling', () => {
+      // Mirror `URGENT_MOVES_IN_A_RUN` and `RUN_PAUSE_MS`, for the same reason as `MAX_SETTLE_FRAMES` above.
+      const URGENT_MOVES = 8;
+      const RUN_PAUSE_MS = 250;
+      let startTransition: MockInstance<typeof React.startTransition>;
+
+      beforeEach(() => {
+        startTransition = vi.spyOn(React, 'startTransition');
+      });
+
+      afterEach(() => {
+        vi.restoreAllMocks();
+      });
+
+      function pressRepeatedly(onKeyDown: () => (e: React.KeyboardEvent) => void, key: string, times: number): void {
+        for (let i = 0; i < times; i++) act(() => onKeyDown()(keyEvent(key)));
+      }
+
+      it('stays urgent up to the limit, then defers each further move without losing one', () => {
+        const scrollToIndex = vi.fn();
+        const { result } = renderHook(() =>
+          useRovingFocus({ count: 20, idPrefix: 'row-', scrollToIndex }),
+        );
+
+        pressRepeatedly(() => result.current.onKeyDown, 'ArrowDown', URGENT_MOVES);
+        expect(startTransition).not.toHaveBeenCalled();
+        expect(result.current.activeIndex).toBe(URGENT_MOVES);
+
+        pressRepeatedly(() => result.current.onKeyDown, 'ArrowDown', 2);
+        expect(startTransition).toHaveBeenCalledTimes(2);
+        expect(result.current.activeIndex).toBe(URGENT_MOVES + 2);
+        expect(scrollToIndex).toHaveBeenLastCalledWith(URGENT_MOVES + 2);
+      });
+
+      it.each(['ArrowUp', 'Home', 'End'])('%s counts toward the run and is deferred past the limit', (key) => {
+        const scrollToIndex = vi.fn();
+        const { result } = renderHook(() =>
+          useRovingFocus({ count: 20, idPrefix: 'row-', scrollToIndex }),
+        );
+
+        pressRepeatedly(() => result.current.onKeyDown, 'ArrowDown', URGENT_MOVES);
+        const before = startTransition.mock.calls.length;
+        pressRepeatedly(() => result.current.onKeyDown, key, 1);
+        expect(startTransition.mock.calls.length).toBe(before + 1);
+      });
+
+      it('a key that is not a move neither counts toward the run nor is deferred', () => {
+        const scrollToIndex = vi.fn();
+        const { result } = renderHook(() =>
+          useRovingFocus({ count: 20, idPrefix: 'row-', scrollToIndex }),
+        );
+
+        pressRepeatedly(() => result.current.onKeyDown, 'ArrowDown', URGENT_MOVES);
+        pressRepeatedly(() => result.current.onKeyDown, 'x', 3);
+        expect(startTransition).not.toHaveBeenCalled();
+      });
+
+      // A run past the limit, at a fixed clock, so each test decides what ends it.
+      function runPastTheLimit(settle?: boolean) {
+        const clock = vi.spyOn(performance, 'now').mockReturnValue(1000);
+        const { result } = renderHook(() =>
+          useRovingFocus({ count: 20, idPrefix: 'row-', scrollToIndex: vi.fn(), settle }),
+        );
+        pressRepeatedly(() => result.current.onKeyDown, 'ArrowDown', URGENT_MOVES + 1);
+        return { clock, press: () => pressRepeatedly(() => result.current.onKeyDown, 'ArrowDown', 1) };
+      }
+
+      function settleTheLastMove(): void {
+        const landed = document.createElement('div');
+        landed.id = `row-${URGENT_MOVES + 1}`;
+        document.body.appendChild(landed);
+        for (let frame = 0; frame < 3; frame++) act(() => queue.flush());
+        expect(queue.pending()).toBe(0);
+      }
+
+      it('settled and paused ends the run, so the next move is urgent again', () => {
+        const { clock, press } = runPastTheLimit();
+        expect(startTransition).toHaveBeenCalledTimes(1);
+
+        settleTheLastMove();
+        clock.mockReturnValue(1000 + RUN_PAUSE_MS);
+        press();
+
+        expect(startTransition).toHaveBeenCalledTimes(1);
+      });
+
+      it('settled without a long enough pause stays in the run', () => {
+        const { clock, press } = runPastTheLimit();
+
+        settleTheLastMove();
+        clock.mockReturnValue(1000 + RUN_PAUSE_MS - 1);
+        press();
+
+        expect(startTransition).toHaveBeenCalledTimes(2);
+      });
+
+      it('a long pause with the last move still settling stays in the run', () => {
+        const { clock, press } = runPastTheLimit();
+
+        clock.mockReturnValue(1000 + RUN_PAUSE_MS);
+        press();
+
+        expect(startTransition).toHaveBeenCalledTimes(2);
+      });
+
+      it('with no settle loop, a pause still ends the run', () => {
+        const { clock, press } = runPastTheLimit(false);
+        expect(startTransition).toHaveBeenCalledTimes(1);
+
+        clock.mockReturnValue(1000 + RUN_PAUSE_MS);
+        press();
+
+        expect(startTransition).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('unmounting cancels a still-pending settle', () => {

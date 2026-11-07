@@ -117,7 +117,7 @@ export function CondValueEditor({
   // No input to hang it on: a problem, should one ever reach these rows,
   // still shows.
   const bareProblem = problem && (
-    <span role="alert" style={{ fontSize: 10, color: T.warn, lineHeight: 1.3 }}>
+    <span role="alert" style={{ fontSize: T.fsXs, color: T.warn, lineHeight: 1.3 }}>
       {problem}
     </span>
   );
@@ -135,7 +135,7 @@ export function CondValueEditor({
       ),
     ];
     return (
-      <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start', flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: T.gapXs, alignItems: 'flex-start', flex: 1, minWidth: 0 }}>
         <TagsInput
           aria-label="Values"
           placeholder="add a value, Enter"
@@ -197,8 +197,8 @@ export function CondValueEditor({
   // The preview sits on its own line: beside the input it took the width the
   // input and its error message needed once the pane was narrow.
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
-      <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start', minWidth: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: themeVars.gapXs, flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: T.gapXs, alignItems: 'flex-start', minWidth: 0 }}>
         <TextInput
           ref={valueInputRef}
           placeholder="value"
@@ -216,7 +216,7 @@ export function CondValueEditor({
           error={problem}
           size="xs"
           style={{ flex: 1, minWidth: 140 }}
-          styles={{ input: { fontFamily: 'monospace' }, error: { fontSize: 10 } }}
+          styles={{ input: { fontFamily: 'monospace' }, error: { fontSize: T.fsXs } }}
         />
         {valueSuggestionsAllowed && (
           <SuggestionPopover
@@ -262,7 +262,7 @@ export function CondValueEditor({
                 style={{
                   width: '100%',
                   font: 'inherit',
-                  fontSize: 11,
+                  fontSize: T.fsXs,
                   padding: '3px 4px',
                   color: T.text,
                   background: T.surface,
@@ -297,7 +297,7 @@ export function CondValueEditor({
           <span
             aria-hidden="true"
             style={{
-              fontSize: 9,
+              fontSize: T.fsXs,
               color: T.textGhost,
               fontFamily: '"JetBrains Mono", monospace',
               overflow: 'hidden',
@@ -325,7 +325,7 @@ function ListToggle({ asText, disabled, onToggle }: { asText: boolean; disabled:
       size="compact-xs"
       disabled={disabled}
       onClick={onToggle}
-      styles={{ root: { flexShrink: 0, fontSize: 10, padding: '0 4px', marginTop: 4 } }}
+      styles={{ root: { flexShrink: 0, fontSize: themeVars.fsXs, padding: '0 4px', marginTop: 4 } }}
     >
       {asText ? 'Edit as chips' : 'Edit as JSON'}
     </Button>

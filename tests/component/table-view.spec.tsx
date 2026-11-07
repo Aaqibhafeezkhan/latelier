@@ -17,7 +17,7 @@ import { itReturnsFocusToPopoverTrigger } from '../helpers/popoverFocusReturn';
 import { TableView } from '../../src/pages/Workspace/views/TableView';
 import { FieldsControl } from '../../src/pages/Workspace/FieldsControl';
 import { CollectionWorkspaceProvider } from '../../src/pages/Workspace/CollectionWorkspaceProvider';
-import type { CollectionWorkspaceActions } from '../../src/pages/Workspace/context';
+import type { CollectionWorkspaceActions, CollectionWorkspaceMeta } from '../../src/pages/Workspace/context';
 import type { CollectionTabState, ReferenceRule } from '@shared/types';
 import { DRAGGED_FIELD_MIME, cycleSortField } from '../../src/pages/Workspace/builder';
 
@@ -66,6 +66,7 @@ function renderTable(
     expandedRows?: Record<string, boolean>;
     onRowExpand?: (docId: string, expanded: boolean) => void;
     actions?: Partial<CollectionWorkspaceActions>;
+    meta?: Partial<CollectionWorkspaceMeta>;
     sort?: string;
     onSortField?: (field: string) => void;
   } = {},
@@ -74,7 +75,7 @@ function renderTable(
       <CollectionWorkspaceProvider
         state={emptyState()}
         actions={emptyWorkspaceActions(extra.actions)}
-        meta={emptyWorkspaceMeta()}
+        meta={emptyWorkspaceMeta(extra.meta)}
       >
         <TableView
           documents={docs}
@@ -587,6 +588,33 @@ describe('TableView — rendering and interaction', () => {
       expect(container.querySelector('#table-row-0')).not.toBeNull();
     });
 
+    // One tab stop per widget (X19): of every control inside the rows, only the
+    // roving row's are tabbable, and the set moves with the arrow keys.
+    it('only the active row\'s buttons and inputs are in the Tab order, and they follow the arrows', () => {
+      const { container, grid } = renderGrid();
+      const rowOfTabbable = () =>
+        [...container.querySelectorAll<HTMLElement>('[id^="table-row-"] button, [id^="table-row-"] input')]
+          .filter((el) => el.getAttribute('tabindex') !== '-1')
+          .map((el) => el.closest('[id^="table-row-"]')!.id);
+
+      const inRow0 = rowOfTabbable();
+      expect(inRow0.length).toBeGreaterThan(4);
+      expect(new Set(inRow0)).toEqual(new Set(['table-row-0']));
+
+      fireEvent.keyDown(grid, { key: 'ArrowDown' });
+      expect(new Set(rowOfTabbable())).toEqual(new Set(['table-row-1']));
+      expect(rowOfTabbable()).toHaveLength(inRow0.length);
+    });
+
+    it('a click on a button of a row that is not active still acts', () => {
+      const openDelete = vi.fn();
+      const { container } = renderTable(THREE_DOCS, { actions: { openDelete } });
+
+      fireEvent.click(container.querySelector('#table-row-2 [aria-label^="Delete document"]')!);
+
+      expect(openDelete).toHaveBeenCalledWith(THREE_DOCS[2]);
+    });
+
     it.each([
       { key: 'ArrowDown', description: 'ArrowDown moves the active descendant to the next row', expected: 'table-row-1' },
       { key: 'ArrowUp', description: 'ArrowUp from row 0 wraps to the last row', expected: 'table-row-2' },
@@ -632,6 +660,30 @@ describe('TableView — rendering and interaction', () => {
 
       fireEvent.keyDown(grid, { key: 'e' });
       expect(openEdit).toHaveBeenCalledWith(docs[1]);
+    });
+
+    it('D on the grid opens the delete confirmation for the active row', () => {
+      const openDelete = vi.fn();
+      const docs = [{ _id: 1, name: 'a' }, { _id: 2, name: 'b' }];
+      const { container } = renderTable(docs, { actions: { openDelete } });
+      const grid = container.querySelector('[role="grid"]')!;
+
+      fireEvent.keyDown(grid, { key: 'ArrowDown' });
+      fireEvent.keyDown(grid, { key: 'd', ctrlKey: true });
+      fireEvent.keyDown(container.querySelector('[aria-label="Expand document"]')!, { key: 'd' });
+      expect(openDelete).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(grid, { key: 'd' });
+      expect(openDelete).toHaveBeenCalledWith(docs[1]);
+    });
+
+    it.each([{ isView: true }, { isReadOnly: true }])('D does nothing when %o', (meta) => {
+      const openDelete = vi.fn();
+      const { container } = renderTable([{ _id: 1, name: 'a' }], { actions: { openDelete }, meta });
+
+      fireEvent.keyDown(container.querySelector('[role="grid"]')!, { key: 'd' });
+
+      expect(openDelete).not.toHaveBeenCalled();
     });
 
     // The mutation this guards against: dropping `e.target !== e.currentTarget`

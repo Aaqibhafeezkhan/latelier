@@ -68,6 +68,35 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('DbCollectionNavigator — a filter with no match', () => {
+  const connected = connectionFixture({ id: 'c1', name: 'Prod', status: 'connected' });
+
+  it('says so and offers clearing it, once every list has loaded', async () => {
+    mockTree();
+    mount({ connections: [connected], focusedConnectionId: 'c1' });
+    await screen.findByTestId('nav-db-shop');
+    const filter = screen.getByRole('textbox', { name: 'Filter collections' });
+
+    await userEvent.type(filter, 'zzz');
+
+    expect((await screen.findByTestId('nav-filter-empty')).textContent).toContain('No collections match “zzz”');
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
+    expect((filter as HTMLInputElement).value).toBe('');
+    expect(screen.queryByTestId('nav-filter-empty')).toBeNull();
+  });
+
+  it('stays quiet while a filter still matches', async () => {
+    mockTree();
+    mount({ connections: [connected], focusedConnectionId: 'c1' });
+    await screen.findByTestId('nav-db-shop');
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Filter collections' }), 'ord');
+
+    await waitFor(() => expect(within(tree()).getByText('orders')).toBeTruthy());
+    expect(screen.queryByTestId('nav-filter-empty')).toBeNull();
+  });
+});
+
 describe('DbCollectionNavigator — an accordion of Connection roots', () => {
   it('renders one root per Connection, each named', () => {
     mockTree();

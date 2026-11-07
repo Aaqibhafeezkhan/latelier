@@ -113,9 +113,9 @@ export function SavePipelineModal({
           e.preventDefault();
           void submit();
         }}
-        style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+        style={{ display: 'flex', flexDirection: 'column', gap: T.gapMd }}
       >
-        <label style={{ fontSize: 12, color: T.textMuted }}>
+        <label style={{ fontSize: T.fsSm, color: T.textMuted }}>
           Name *
           <input
             value={name}
@@ -138,13 +138,13 @@ export function SavePipelineModal({
               borderRadius: T.rs,
               background: T.surfaceRaised,
               color: T.text,
-              fontSize: 12,
+              fontSize: T.fsSm,
               boxSizing: 'border-box',
             }}
           />
         </label>
 
-        <label style={{ fontSize: 12, color: T.textMuted }}>
+        <label style={{ fontSize: T.fsSm, color: T.textMuted }}>
           Description
           <textarea
             value={description}
@@ -178,7 +178,7 @@ export function SavePipelineModal({
               borderRadius: T.rs,
               background: T.surfaceRaised,
               color: T.text,
-              fontSize: 12,
+              fontSize: T.fsSm,
               resize: 'vertical',
               boxSizing: 'border-box',
             }}
@@ -186,12 +186,12 @@ export function SavePipelineModal({
         </label>
 
         {err && (
-          <div role="alert" style={{ fontSize: 12, color: T.red }}>
+          <div role="alert" style={{ fontSize: T.fsSm, color: T.red }}>
             {err}
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: T.gapSm, justifyContent: 'flex-end' }}>
           {/* Explicit `type="button"` for intent: an untyped button inside a
               form defaults to submit, and this one is first in tree order.
               Stated plainly because it was measured rather than assumed —

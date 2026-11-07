@@ -204,7 +204,7 @@ export function UsersTab({
     return (
       <div style={{ padding: 20, color: T.warn }}>
         {dbError}
-        <Button variant="subtle" size="compact-xs" c={T.accent} ml={8} onClick={() => void loadDatabases()}>
+        <Button variant="subtle" size="compact-xs" c={T.accentInk} ml={8} onClick={() => void loadDatabases()}>
           Retry
         </Button>
       </div>
@@ -234,7 +234,7 @@ export function UsersTab({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: themeVars.gapSm,
           padding: '10px 16px',
           borderBottom: `1px solid ${T.border}`,
           background: T.surface,
@@ -249,7 +249,7 @@ export function UsersTab({
             borderRadius: T.rs,
             background: T.surfaceRaised,
             padding: '4px 8px',
-            fontSize: 12,
+            fontSize: T.fsSm,
             color: T.text,
             minWidth: 160,
           }}
@@ -267,7 +267,7 @@ export function UsersTab({
             flex: 1,
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
+            gap: themeVars.gapXs,
             border: `1px solid ${T.border}`,
             borderRadius: T.rs,
             background: T.surfaceRaised,
@@ -286,7 +286,7 @@ export function UsersTab({
               border: 'none',
               outline: 'none',
               background: 'transparent',
-              fontSize: 12,
+              fontSize: T.fsSm,
               color: T.text,
               fontFamily: 'inherit',
             }}
@@ -318,7 +318,7 @@ export function UsersTab({
         style={{ flex: 1, overflowY: 'auto' }}
       >
         {loading && !users && (
-          <div style={{ padding: 20, color: T.textMuted, fontSize: 13 }}>Loading users…</div>
+          <div style={{ padding: 20, color: T.textMuted, fontSize: T.fsMd }}>Loading users…</div>
         )}
 
         {error && (
@@ -327,10 +327,10 @@ export function UsersTab({
             color="orange"
             variant="light"
             m="sm"
-            styles={{ message: { fontSize: 12 } }}
+            styles={{ message: { fontSize: T.fsSm } }}
           >
             {error.code === 'UNAUTHORIZED' ? (
-              <Stack gap={4}>
+              <Stack gap={T.gapXs}>
                 <Text size="xs">
                   This connection lacks the privilege to read users on{' '}
                   {picked === ALL_DBS ? 'this server' : picked}.
@@ -354,7 +354,7 @@ export function UsersTab({
         )}
 
         {!error && filteredUsers && filteredUsers.length === 0 && (
-          <div style={{ padding: 20, color: T.textMuted, fontSize: 13, textAlign: 'center' }}>
+          <div style={{ padding: 20, color: T.textMuted, fontSize: T.fsMd, textAlign: 'center' }}>
             {lowered
               ? `No users match "${filter}".`
               : `No users defined on ${picked === ALL_DBS ? 'this server' : picked}.`}
@@ -368,9 +368,9 @@ export function UsersTab({
             withTableBorder
             withColumnBorders={false}
             styles={{
-              table: { fontSize: 12 },
+              table: { fontSize: T.fsSm },
               th: {
-                fontSize: 10,
+                fontSize: T.fsXs,
                 textTransform: 'uppercase',
                 letterSpacing: '0.06em',
                 fontWeight: 600,
@@ -403,7 +403,7 @@ export function UsersTab({
                       style={{ cursor: 'pointer' }}
                     >
                       <Table.Td>
-                        <Group gap={6} wrap="nowrap">
+                        <Group gap={themeVars.gapXs} wrap="nowrap">
                           <DisclosureToggle open={open}>
                             <span
                               style={{
@@ -423,13 +423,13 @@ export function UsersTab({
                         </Group>
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={6} wrap="nowrap">
+                        <Group gap={themeVars.gapXs} wrap="nowrap">
                           <Text size="xs" c="dimmed">{u.db}</Text>
                           {u.db === '$external' && <RoleBadge label="external" />}
                         </Group>
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={4} wrap="wrap">
+                        <Group gap={T.gapXs} wrap="wrap">
                           {visibleRoles.map((r) => (
                             <RoleBadge
                               key={`${r.role}@${r.db}`}
@@ -452,7 +452,7 @@ export function UsersTab({
                         </Group>
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={4} wrap="wrap">
+                        <Group gap={T.gapXs} wrap="wrap">
                           {u.mechanisms.length === 0 ? (
                             <Text size="xs" c="dimmed">—</Text>
                           ) : (
@@ -463,7 +463,7 @@ export function UsersTab({
                         </Group>
                       </Table.Td>
                       <Table.Td>
-                        <Group gap={4} justify="flex-end" wrap="nowrap">
+                        <Group gap={T.gapXs} justify="flex-end" wrap="nowrap">
                           {!isSelf && (
                             <>
                               <ActionIcon
@@ -508,7 +508,7 @@ export function UsersTab({
                             paddingLeft: 38,
                           }}
                         >
-                          <Stack gap={6} py={4}>
+                          <Stack gap={themeVars.gapXs} py={4}>
                             <Text size="xs" c="dimmed">
                               <span style={{ color: T.textMuted }}>External</span>
                               {' · '}
@@ -760,7 +760,7 @@ function UserDrawer({
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          gap: 16,
+          gap: T.gapLg,
         }}
       >
         {!editing && (
@@ -782,7 +782,7 @@ function UserDrawer({
               border: `1px solid ${T.borderMed}`,
               background: T.surfaceRaised,
               color: T.textMuted,
-              fontSize: 11,
+              fontSize: T.fsXs,
               lineHeight: 1.5,
             }}
           >
@@ -865,7 +865,7 @@ function UserDrawer({
               border: `1px solid ${T.warn}`,
               background: 'rgba(184,76,20,0.08)',
               color: T.warn,
-              fontSize: 11,
+              fontSize: T.fsXs,
             }}
           >
             {error}
@@ -878,7 +878,7 @@ function UserDrawer({
           paddingTop: 12,
           borderTop: `1px solid ${T.border}`,
           display: 'flex',
-          gap: 8,
+          gap: T.gapSm,
           justifyContent: 'flex-end',
         }}
       >
@@ -904,7 +904,7 @@ function DrawerSection({ title, children }: { title: string; children: React.Rea
     <div>
       <div
         style={{
-          fontSize: 10,
+          fontSize: T.fsXs,
           fontWeight: 600,
           color: T.textMuted,
           textTransform: 'uppercase',
@@ -934,8 +934,8 @@ function DrawerCheck({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
-        fontSize: 12,
+        gap: themeVars.gapXs,
+        fontSize: T.fsSm,
         color: T.text,
         marginBottom: 4,
         cursor: 'pointer',
@@ -958,7 +958,7 @@ function drawerInputStyle(T: typeof themeVars): React.CSSProperties {
     border: `1px solid ${T.border}`,
     borderRadius: T.rs,
     padding: '4px 8px',
-    fontSize: 12,
+    fontSize: T.fsSm,
     color: T.text,
     background: T.surfaceRaised,
     outline: 'none',
@@ -1023,7 +1023,7 @@ function DropUserDialog({
         <Text size="xs" c="dimmed" lh={1.5}>
           This is permanent. Apps using these credentials will fail to authenticate.
         </Text>
-        <Stack gap={6}>
+        <Stack gap={themeVars.gapXs}>
           <Text size="xs" c="dimmed">
             Type the username to confirm:
           </Text>

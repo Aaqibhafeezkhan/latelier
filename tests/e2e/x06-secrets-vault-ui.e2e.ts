@@ -82,6 +82,7 @@ test('secrets vault ui: SCRAM password is masked + stored on edit reopen', async
 
     // With a usable keychain the column key is wrapped, and Settings says so.
     await win.getByRole('button', { name: 'Open settings' }).click();
+    await win.getByRole('tab', { name: 'Data and support' }).click();
     await expect(win.getByTestId('local-data-protection')).toContainText(
       'encrypted on disk with a key held by the OS keychain',
     );

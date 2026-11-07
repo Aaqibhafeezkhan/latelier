@@ -96,12 +96,15 @@ function parseHint(text: string): Hint {
  * which leaves the cause to guess: it is named instead. Still MONGO_ERROR,
  * as `classifyMongoOpError` has it: TIMEOUT would say the query itself ran
  * too long.
+ *
+ * With no read preference chosen, nothing in the query asked for a server that
+ * is missing: the cluster is out of reach, so it is NETWORK, and the results
+ * pane does not offer to revert a query that was never at fault.
  */
 function classifyReadError(err: unknown, readPreference: ReadPreferenceMode | undefined): AppError {
   const classified = classifyMongoOpError(err);
-  if (readPreference === undefined || (err as { name?: unknown } | null)?.name !== 'MongoServerSelectionError') {
-    return classified;
-  }
+  if ((err as { name?: unknown } | null)?.name !== 'MongoServerSelectionError') return classified;
+  if (readPreference === undefined) return new SystemError('NETWORK', classified.message);
   return new SystemError(
     classified.code,
     `No server can serve the read preference ${readPreference}: server selection timed out. Choose another read preference, or clear it.`,

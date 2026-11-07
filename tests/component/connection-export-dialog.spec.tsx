@@ -40,9 +40,39 @@ describe('ConnectionExportDialog', () => {
       expect(((await screen.findByRole('checkbox', { name: r.name })) as HTMLInputElement).checked).toBe(true);
     }
     expect((screen.getByRole('checkbox', { name: /Include passwords/ }) as HTMLInputElement).checked).toBe(false);
-    expect(screen.queryByLabelText('Export Passphrase')).toBeNull();
     await userEvent.click(exportButton());
     await waitFor(() => expect(exportFn).toHaveBeenCalledWith({ ids: ['c1', 'c2', 'c3'], includeSecrets: false }));
+  });
+
+  it('keeps the passphrase fields in the dialog, disabled until passwords are included', async () => {
+    setup();
+    await screen.findByRole('checkbox', { name: 'Prod' });
+    // Always present, so ticking the box never resizes the dialog or moves Export.
+    expect((screen.getByLabelText('Export Passphrase') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Confirm Export Passphrase') as HTMLInputElement).disabled).toBe(true);
+    await userEvent.click(screen.getByRole('checkbox', { name: /Include passwords/ }));
+    expect((screen.getByLabelText('Export Passphrase') as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByLabelText('Confirm Export Passphrase') as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it('holds one dialog height, so the passphrase fields appearing or a result replacing the form does not resize it', async () => {
+    setup();
+    await screen.findByRole('checkbox', { name: 'Prod' });
+    const height = () => screen.getByRole('dialog').style.height;
+    const before = height();
+    expect(before).toContain('440px');
+    await userEvent.click(screen.getByRole('checkbox', { name: /Include passwords/ }));
+    expect(height()).toBe(before);
+    await userEvent.click(screen.getByRole('checkbox', { name: /Include passwords/ }));
+    await userEvent.click(exportButton());
+    await screen.findByRole('status');
+    expect(height()).toBe(before);
+  });
+
+  it('opens on the first Connection checkbox, not on Close', async () => {
+    setup();
+    const first = await screen.findByRole('checkbox', { name: 'Prod' });
+    await waitFor(() => expect(document.activeElement).toBe(first));
   });
 
   it('sends only the ticked ids', async () => {

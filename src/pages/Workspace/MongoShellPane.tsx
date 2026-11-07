@@ -310,17 +310,17 @@ export function MongoShellPane({ connectionId, connectionName, dbName, height, o
       }}
     >
       <Group
-        gap={8}
+        gap={T.gapSm}
         wrap="nowrap"
         style={{
           padding: '4px 10px',
           borderBottom: `1px solid ${T.border}`,
-          fontSize: 11,
+          fontSize: T.fsXs,
           color: T.textMuted,
           flexShrink: 0,
         }}
       >
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: themeVars.gapXs }}>
           {I.terminal}
           <span style={{ fontWeight: 600, color: T.text }}>mongosh</span>
         </span>
@@ -377,7 +377,7 @@ export function MongoShellPane({ connectionId, connectionName, dbName, height, o
           overflowY: 'auto',
           background: T.bg,
           color: T.text,
-          fontSize: 12,
+          fontSize: T.fsSm,
           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
@@ -402,7 +402,7 @@ export function MongoShellPane({ connectionId, connectionName, dbName, height, o
           style={{
             color: T.textMuted,
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            fontSize: 12,
+            fontSize: T.fsSm,
             marginRight: 6,
           }}
         >
@@ -448,7 +448,7 @@ export function MongoShellPane({ connectionId, connectionName, dbName, height, o
             outline: 'none',
             color: T.text,
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            fontSize: 12,
+            fontSize: T.fsSm,
           }}
         />
       </div>

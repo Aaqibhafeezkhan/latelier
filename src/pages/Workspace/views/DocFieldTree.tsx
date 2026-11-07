@@ -35,7 +35,7 @@ export function TypeBadge({ type }: { type: DisplayType }) {
   return (
     <span
       style={{
-        fontSize: 9,
+        fontSize: 'var(--atelier-fs-xs)',
         padding: '1px 5px',
         borderRadius: 'var(--atelier-radius-xs)',
         background: colors.bg,
@@ -237,11 +237,11 @@ function FieldNodeImpl({
           display: 'grid',
           gridTemplateColumns: DOC_FIELD_TREE_GRID_TEMPLATE,
           alignItems: 'center',
-          gap: 12,
+          gap: 'var(--atelier-gap-md)',
           padding: '3px 12px',
           paddingLeft: 12 + depth * 16,
           minHeight: 24,
-          fontSize: 11,
+          fontSize: 'var(--atelier-fs-xs)',
           cursor: rowClickable ? 'pointer' : 'grab',
           userSelect: 'none',
           background: isCopied ? 'var(--atelier-accent)' : undefined,
@@ -278,7 +278,7 @@ function FieldNodeImpl({
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 4,
+                gap: 'var(--atelier-gap-xs)',
                 color: 'var(--atelier-text-muted)',
                 fontFamily: '"JetBrains Mono", monospace',
                 overflow: 'hidden',
@@ -316,7 +316,7 @@ function FieldNodeImpl({
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 6,
+                gap: 'var(--atelier-gap-xs)',
                 minWidth: 0,
                 overflow: 'hidden',
                 position: 'relative',
@@ -682,9 +682,9 @@ export function DocFieldTree({
         style={{
           display: 'grid',
           gridTemplateColumns: DOC_FIELD_TREE_GRID_TEMPLATE,
-          gap: 12,
+          gap: 'var(--atelier-gap-md)',
           padding: '4px 12px',
-          fontSize: 9,
+          fontSize: 'var(--atelier-fs-xs)',
           fontWeight: 700,
           textTransform: 'uppercase',
           letterSpacing: 0.6,

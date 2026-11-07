@@ -11,7 +11,7 @@ import { ejsonStringify } from '../../../utils/ejson';
 import { docKey, isRecord } from '../../../utils/displayValue';
 import { tokenizeJson, type Token, type TokenKind } from '../../../utils/jsonHighlight';
 import { copyToClipboard } from '../../../utils/clipboard';
-import { anchorForRow, anchorFromRect, isContextMenuKey, isEditKey } from '../../../utils/contextMenuKey';
+import { anchorForRow, anchorFromRect, isContextMenuKey, isDeleteKey, isEditKey } from '../../../utils/contextMenuKey';
 import { useRovingFocus } from '../../../hooks/useRovingFocus';
 import { useCollectionWorkspace } from '../context';
 import { useResultSelection } from '../resultSelection';
@@ -43,10 +43,10 @@ function redactHidden(doc: unknown, hidden: Set<string>): unknown {
 
 function tokenColor(kind: TokenKind): string {
   switch (kind) {
-    case 'key':     return 'var(--atelier-accent)';
-    case 'string':  return '#2e7d32';
+    case 'key':     return 'var(--atelier-accent-ink)';
+    case 'string':  return 'var(--atelier-color-string)';
     case 'number':  return 'var(--atelier-color-number)';
-    case 'boolean': return '#e65100';
+    case 'boolean': return 'var(--atelier-color-boolean)';
     case 'null':    return 'var(--atelier-text-ghost)';
     case 'punct':   return 'var(--atelier-text-muted)';
     default:        return 'var(--atelier-text)';
@@ -114,11 +114,13 @@ function JsonTreeNodes({
   docKey,
   collapsedKeys,
   onToggle,
+  tabIndex,
 }: {
   nodes: JsonNode[];
   docKey: string;
   collapsedKeys: Set<string>;
   onToggle: (key: string) => void;
+  tabIndex: number;
 }) {
   return (
     <>
@@ -134,7 +136,7 @@ function JsonTreeNodes({
           <React.Fragment key={i}>
             <span
               role="button"
-              tabIndex={0}
+              tabIndex={tabIndex}
               onClick={toggle}
               onKeyDown={(e) => {
                 // ⌘/Ctrl+Enter is Run (PanelBody's handler), not a toggle.
@@ -159,6 +161,7 @@ function JsonTreeNodes({
                 docKey={docKey}
                 collapsedKeys={collapsedKeys}
                 onToggle={onToggle}
+                tabIndex={tabIndex}
               />
             )}
             <JsonToken token={node.close} />
@@ -178,11 +181,14 @@ export function HighlightedJson({
   docKey,
   collapsedKeys,
   onToggle,
+  tabIndex = 0,
 }: {
   json: string;
   docKey: string;
   collapsedKeys: Set<string>;
   onToggle: (key: string) => void;
+  /** `-1` takes the collapse toggles out of the Tab order (a JSON card that is not the roving row). */
+  tabIndex?: number;
 }) {
   const tree = React.useMemo(() => buildJsonTree(tokenizeJson(json)), [json]);
 
@@ -191,14 +197,20 @@ export function HighlightedJson({
       style={{
         margin: 0,
         fontFamily: 'monospace',
-        fontSize: 11,
+        fontSize: 'var(--atelier-fs-xs)',
         lineHeight: 1.5,
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-all',
         color: 'var(--atelier-text)',
       }}
     >
-      <JsonTreeNodes nodes={tree} docKey={docKey} collapsedKeys={collapsedKeys} onToggle={onToggle} />
+      <JsonTreeNodes
+        nodes={tree}
+        docKey={docKey}
+        collapsedKeys={collapsedKeys}
+        onToggle={onToggle}
+        tabIndex={tabIndex}
+      />
     </pre>
   );
 }
@@ -211,6 +223,10 @@ interface DocCardProps {
   // The row the list's roving focus names while the list has focus — a
   // different channel from selection, so a card can be either or both.
   isActive: boolean;
+  // The roving row, which unlike `isActive` survives the list losing focus.
+  // Only this card's buttons stay in the Tab order, so a page of cards is one
+  // tab stop plus one card's controls.
+  isTabStop: boolean;
   rowId: string;
   onActivate: (idx: number) => void;
   collapsedKeys: Set<string>;
@@ -235,6 +251,7 @@ function DocCard({
   isSelected,
   isCopied,
   isActive,
+  isTabStop,
   rowId,
   onActivate,
   collapsedKeys,
@@ -247,6 +264,7 @@ function DocCard({
   onOpenRowMenu,
 }: DocCardProps) {
   const isView = !!useCollectionWorkspace().meta.isView;
+  const buttonTabIndex = isTabStop ? undefined : -1;
   const json = React.useMemo(() => {
     const visible = redactHidden(doc, hiddenFields);
     try {
@@ -305,8 +323,13 @@ function DocCard({
         outlineOffset: isActive ? '-2px' : undefined,
       }}
     >
-      <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4 }}>
-        <SelectToggle selected={isSelected} docLabel={getDocId(doc)} onToggle={() => onToggle(idx)} />
+      <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 'var(--atelier-gap-xs)' }}>
+        <SelectToggle
+          selected={isSelected}
+          docLabel={getDocId(doc)}
+          onToggle={() => onToggle(idx)}
+          tabIndex={buttonTabIndex}
+        />
         <Tooltip label="Copy JSON" withArrow openDelay={400}>
           <ActionIcon
             variant="default"
@@ -316,6 +339,7 @@ function DocCard({
               e.stopPropagation();
               onCopy(doc, idx);
             }}
+            tabIndex={buttonTabIndex}
             aria-label={`Copy JSON for document ${getDocId(doc)}`}
           >
             {isCopied ? I.check : I.copy}
@@ -330,6 +354,7 @@ function DocCard({
               e.stopPropagation();
               onEdit(doc);
             }}
+            tabIndex={buttonTabIndex}
             aria-label={`${isView ? 'View' : 'Edit'} document ${getDocId(doc)}`}
           >
             {I.edit}
@@ -345,6 +370,7 @@ function DocCard({
                 e.stopPropagation();
                 onDelete(doc);
               }}
+              tabIndex={buttonTabIndex}
               aria-label={`Delete document ${getDocId(doc)}`}
             >
               {I.trash}
@@ -364,6 +390,7 @@ function DocCard({
                 focusMenuOnOpen: viaKeyboard,
               });
             }}
+            tabIndex={buttonTabIndex}
             aria-label={`More actions for document ${getDocId(doc)}`}
           >
             {I.more}
@@ -375,6 +402,7 @@ function DocCard({
         docKey={docKey(doc, idx)}
         collapsedKeys={collapsedKeys}
         onToggle={onToggleCollapse}
+        tabIndex={buttonTabIndex ?? 0}
       />
     </div>
   );
@@ -388,6 +416,8 @@ interface JsonRowProps {
   copiedIdx: number | null;
   /** Roving `highlightIndex`: `-1` while the list doesn't have focus. */
   activeIndex: number;
+  /** Roving `activeIndex`, which keeps naming a card while the list lacks focus. */
+  tabStopIndex: number;
   rowId: (index: number) => string;
   setActiveIndex: (index: number) => void;
   collapsedKeys: Set<string>;
@@ -407,6 +437,7 @@ function JsonRow({
   selectedIndices,
   copiedIdx,
   activeIndex,
+  tabStopIndex,
   rowId,
   setActiveIndex,
   collapsedKeys,
@@ -427,6 +458,7 @@ function JsonRow({
         isSelected={selectedIndices.has(index)}
         isCopied={copiedIdx === index}
         isActive={index === activeIndex}
+        isTabStop={index === tabStopIndex}
         rowId={rowId(index)}
         onActivate={setActiveIndex}
         collapsedKeys={collapsedKeys}
@@ -446,6 +478,7 @@ export function JsonView({ documents }: JsonViewProps) {
   const { state, actions, meta } = useCollectionWorkspace();
   const onEditDoc = actions.openEdit;
   const onDeleteDoc = actions.openDelete;
+  const canDelete = !meta.isView && !meta.isReadOnly;
   const onDuplicateDoc = actions.openDuplicate;
   // Fields control: same top-level `columnConfig.hidden` Table already
   // reads (`tableColumns.ts`'s `resolveColumns`) — display-only, so Copy/Edit/
@@ -538,6 +571,13 @@ export function JsonView({ documents }: JsonViewProps) {
         onEditDoc(doc);
         return;
       }
+      if (isDeleteKey(e)) {
+        // Views and read-only snapshots offer no delete, so the key is left alone.
+        if (!canDelete) return;
+        e.preventDefault();
+        onDeleteDoc(doc);
+        return;
+      }
       // Enter and Space only (re)name the active card, which a card has
       // nothing to expand. Space would otherwise page-scroll the list.
       if (e.key === ' ') e.preventDefault();
@@ -545,7 +585,7 @@ export function JsonView({ documents }: JsonViewProps) {
     // `roving` itself is a fresh object every render; depend on the members
     // this actually reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [roving.onKeyDown, roving.activeIndex, roving.rowId, documents, listRef, handleOpenRowMenu, onEditDoc],
+    [roving.onKeyDown, roving.activeIndex, roving.rowId, documents, listRef, handleOpenRowMenu, onEditDoc, onDeleteDoc, canDelete],
   );
 
   // Memoize so react-window receives a stable rowProps reference. A fresh
@@ -557,6 +597,7 @@ export function JsonView({ documents }: JsonViewProps) {
       selectedIndices,
       copiedIdx,
       activeIndex: roving.highlightIndex,
+      tabStopIndex: roving.activeIndex,
       rowId: roving.rowId,
       setActiveIndex: roving.setActiveIndex,
       collapsedKeys,
@@ -573,6 +614,7 @@ export function JsonView({ documents }: JsonViewProps) {
       selectedIndices,
       copiedIdx,
       roving.highlightIndex,
+      roving.activeIndex,
       roving.rowId,
       roving.setActiveIndex,
       collapsedKeys,
@@ -592,7 +634,7 @@ export function JsonView({ documents }: JsonViewProps) {
         <div
           style={{
             padding: '4px 12px 0',
-            fontSize: 11,
+            fontSize: 'var(--atelier-fs-xs)',
             color: 'var(--atelier-text-muted)',
           }}
         >
@@ -619,6 +661,8 @@ export function JsonView({ documents }: JsonViewProps) {
           flex: 1,
           minHeight: 0,
           padding: '8px 12px',
+          // Rows keep their place when the list starts or stops fitting.
+          scrollbarGutter: 'stable',
         }}
       />
       {docMenu && (

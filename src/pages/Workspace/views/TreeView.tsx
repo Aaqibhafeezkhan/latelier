@@ -8,7 +8,7 @@ import {
 } from 'react-window';
 import { useRovingFocus } from '../../../hooks/useRovingFocus';
 import { useMenuFocus } from '../../../hooks/useMenuFocus';
-import { anchorFromRect, isEditKey } from '../../../utils/contextMenuKey';
+import { anchorFromRect, isDeleteKey, isEditKey } from '../../../utils/contextMenuKey';
 import { I } from '../../../icons';
 import { isRecord, toDisplayValue, valueToClipboardText } from '../../../utils/displayValue';
 import type { ReferenceRule } from '@shared/types';
@@ -86,7 +86,7 @@ const CollapsedRowPreview = React.memo(function CollapsedRowPreview({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'flex-end',
-        gap: 10,
+        gap: 'var(--atelier-gap-sm)',
         overflow: 'hidden',
         flexWrap: 'nowrap',
         minWidth: 0,
@@ -104,8 +104,8 @@ const CollapsedRowPreview = React.memo(function CollapsedRowPreview({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 4,
-              fontSize: 11,
+              gap: 'var(--atelier-gap-xs)',
+              fontSize: 'var(--atelier-fs-xs)',
               color: 'var(--atelier-text-muted)',
               minWidth: 0,
               overflow: 'hidden',
@@ -143,6 +143,13 @@ interface DocRowProps {
    * selected, both, or neither, and each combination reads distinctly.
    */
   activeIndex: number;
+  /**
+   * The row whose action buttons stay in the Tab order: the roving index
+   * itself, which unlike `activeIndex` above keeps naming a row while the
+   * tree lacks focus. Tabbing from the tree then reaches only this row's
+   * actions, so a 50-row page is one tab stop plus one row, not 250.
+   */
+  tabStopIndex: number;
   deepPaths: Set<string>;
   copiedPath: string | null;
   previewFields?: string[] | null;
@@ -182,6 +189,7 @@ function DocRowImpl({
   expandedRows,
   indices,
   activeIndex,
+  tabStopIndex,
   deepPaths,
   copiedPath,
   previewFields,
@@ -208,6 +216,13 @@ function DocRowImpl({
   const isExpanded = !!ownGet(expandedRows, docId);
   const isSelected = indices.has(index);
   const isActive = index === activeIndex;
+  // Same rule as the Table view's actions: shown on hover, on the active row or
+  // with focus inside. Hidden by opacity alone, so their space stays reserved and
+  // Tab still reaches them; a mouse over one has already hovered the row.
+  const [rowHovered, setRowHovered] = React.useState(false);
+  const [actionsFocused, setActionsFocused] = React.useState(false);
+  const actionsVisible = rowHovered || isActive || actionsFocused;
+  const buttonTabIndex = index === tabStopIndex ? undefined : -1;
 
   const handleRowClick = (e: React.MouseEvent) => {
     setActiveIndex(index);
@@ -252,6 +267,8 @@ function DocRowImpl({
           just clicked. */}
       <div
         onClick={handleRowClick}
+        onMouseEnter={() => setRowHovered(true)}
+        onMouseLeave={() => setRowHovered(false)}
         id={rowId(index)}
         role="treeitem"
         aria-expanded={isExpanded}
@@ -259,10 +276,10 @@ function DocRowImpl({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 'var(--atelier-gap-sm)',
           padding: '10px 12px',
           cursor: 'pointer',
-          fontSize: 12,
+          fontSize: 'var(--atelier-fs-sm)',
           minHeight: 44,
           userSelect: 'none',
           // #60 — sighted-visible counterpart to `aria-activedescendant`.
@@ -276,6 +293,7 @@ function DocRowImpl({
         <SelectToggle
           selected={isSelected}
           docLabel={getDocId(doc)}
+          tabIndex={buttonTabIndex}
           onToggle={() => {
             onToggleSelect(index);
             setActiveIndex(index);
@@ -285,6 +303,7 @@ function DocRowImpl({
           variant="subtle"
           color="gray"
           size={28}
+          tabIndex={buttonTabIndex}
           c="var(--atelier-text-ghost)"
           onClick={(e) => {
             e.stopPropagation();
@@ -303,8 +322,8 @@ function DocRowImpl({
         <span
           style={{
             fontFamily: 'monospace',
-            fontSize: 11,
-            color: 'var(--atelier-accent)',
+            fontSize: 'var(--atelier-fs-xs)',
+            color: 'var(--atelier-accent-ink)',
             fontWeight: 600,
             flexShrink: 0,
             minWidth: 68,
@@ -318,10 +337,17 @@ function DocRowImpl({
           previewFields={previewFields}
         />
 
-        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+        <div
+          data-testid="tree-row-actions"
+          onFocus={() => setActionsFocused(true)}
+          onBlur={() => setActionsFocused(false)}
+          style={{ display: 'flex', gap: 'var(--atelier-gap-xs)', flexShrink: 0, opacity: actionsVisible ? 1 : 0 }}
+        >
           <Tooltip label={isView ? 'View document' : 'Edit document'} withArrow openDelay={400}>
             <ActionIcon
               variant="default"
+              size={26}
+              tabIndex={buttonTabIndex}
               c="var(--atelier-text-muted)"
               onClick={(e) => {
                 e.stopPropagation();
@@ -336,6 +362,8 @@ function DocRowImpl({
             <Tooltip label="Delete document" withArrow openDelay={400}>
               <ActionIcon
                 variant="default"
+                size={26}
+                tabIndex={buttonTabIndex}
                 c="var(--atelier-red)"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -350,6 +378,8 @@ function DocRowImpl({
           <Tooltip label="More actions" withArrow openDelay={400}>
             <ActionIcon
               variant="default"
+              size={26}
+              tabIndex={buttonTabIndex}
               c="var(--atelier-text-muted)"
               onClick={(e) => {
                 e.stopPropagation();
@@ -441,6 +471,7 @@ export function TreeView({
   }, [hasFieldConfig, documents, columnConfig?.order, columnConfig?.hidden]);
   const onEditDoc = actions.openEdit;
   const onDeleteDoc = actions.openDelete;
+  const canDelete = !meta.isView && !meta.isReadOnly;
   const onDuplicateDoc = actions.openDuplicate;
   // Falls back to local state when rendered standalone (no provider mounted).
   const selection = useResultSelection(documents);
@@ -544,6 +575,13 @@ export function TreeView({
         onEditDoc(documents[roving.activeIndex]);
         return;
       }
+      if (isDeleteKey(e)) {
+        // Views and read-only snapshots offer no delete, so the key is left alone.
+        if (documents.length === 0 || !canDelete) return;
+        e.preventDefault();
+        onDeleteDoc(documents[roving.activeIndex]);
+        return;
+      }
       // ⌘/Ctrl+Enter is Run (PanelBody's handler), never this row's action.
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) return;
       if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -556,7 +594,7 @@ export function TreeView({
     // `roving` is a fresh object every render — depend on the members this
     // actually reads instead (same as `TableView`'s `handleGridKeyDown`).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [roving.onKeyDown, roving.activeIndex, documents, expandedRows, onRowExpand, onEditDoc],
+    [roving.onKeyDown, roving.activeIndex, documents, expandedRows, onRowExpand, onEditDoc, onDeleteDoc, canDelete],
   );
 
   // Memoize so react-window receives a stable rowProps reference. A fresh
@@ -568,6 +606,7 @@ export function TreeView({
       expandedRows,
       indices: selection.indices,
       activeIndex: roving.highlightIndex,
+      tabStopIndex: roving.activeIndex,
       deepPaths,
       copiedPath,
       previewFields,
@@ -593,6 +632,7 @@ export function TreeView({
       selection.indices,
       selection.toggle,
       roving.highlightIndex,
+      roving.activeIndex,
       deepPaths,
       copiedPath,
       previewFields,
@@ -698,6 +738,8 @@ export function TreeView({
             flex: 1,
             minHeight: 0,
             overflowX: 'hidden',
+            // Rows keep their place when the list starts or stops fitting.
+            scrollbarGutter: 'stable',
           }}
         />
         {stickyHeaderOffset !== null && (
@@ -713,9 +755,9 @@ export function TreeView({
               borderLeft: '3px solid transparent',
               display: 'grid',
               gridTemplateColumns: DOC_FIELD_TREE_GRID_TEMPLATE,
-              gap: 12,
+              gap: 'var(--atelier-gap-md)',
               padding: '4px 12px',
-              fontSize: 9,
+              fontSize: 'var(--atelier-fs-xs)',
               fontWeight: 700,
               textTransform: 'uppercase',
               letterSpacing: 0.6,

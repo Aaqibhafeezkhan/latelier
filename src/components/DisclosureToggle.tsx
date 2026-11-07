@@ -34,7 +34,7 @@ export function DisclosureToggle({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
+        gap: themeVars.gapXs,
         minWidth: 0,
         maxWidth: '100%',
         font: 'inherit',

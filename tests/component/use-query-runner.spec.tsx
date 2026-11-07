@@ -467,7 +467,7 @@ describe('useQueryRunner', () => {
     expect(aTotalPatch?.[1].totalCount).toBe(7);
   });
 
-  it('error path: writes lastRun.error and keeps previous documents visible', async () => {
+  it('error path: writes lastRun.error and drops the previous result', async () => {
     const findSpy = vi.fn<IpcApi['query']['find']>(async () => {
       throw Object.assign(new Error('boom'), { code: 'INTERNAL' });
     });
@@ -499,8 +499,38 @@ describe('useQueryRunner', () => {
     const errCall = patch.mock.calls.find((c) => c[1].lastRun?.error);
     expect(errCall).toBeDefined();
     expect(errCall?.[1].lastRun.error.code).toBe('INTERNAL');
-    // Stale docs remain visible per W06 §5.
-    expect(errCall?.[1].lastRun.documents).toBe(previousDocs);
+    // Rows left under an error would read as that query's answer, and the
+    // count and the selection would go on describing them.
+    expect(errCall?.[1].lastRun.documents).toEqual([]);
+    expect(errCall?.[1].lastRunHasMore).toBe(false);
+    expect(errCall?.[1]).toHaveProperty('totalCount', undefined);
+  });
+
+  it('remembers the query the server answered, and not one it refused', async () => {
+    const builder = { projection: [], sort: '{"a":1}', limit: '' };
+    const find = vi
+      .fn<IpcApi['query']['find']>()
+      .mockResolvedValueOnce({ documents: [], durationMs: 1, hasMore: false })
+      .mockRejectedValueOnce(Object.assign(new Error('refused'), { code: 'VALIDATION' }));
+    installAtelierMock({ query: { find, count: async () => ({ count: 0 }) } });
+    const patch = vi.fn();
+    const { result } = renderHook(() =>
+      useQueryRunner({ active: makeTarget({ queryRaw: '{"a":1}', builder }), patchCollectionState: patch, loadingDelayMs: 0 }),
+    );
+
+    await act(async () => {
+      await result.current.run();
+    });
+    const remembered = patch.mock.calls.filter((c) => c[1].lastValidQuery);
+    expect(remembered).toHaveLength(1);
+    expect(remembered[0]![1].lastValidQuery).toEqual({ queryRaw: '{"a":1}', builder });
+
+    patch.mockClear();
+    await act(async () => {
+      await result.current.run({ queryRaw: '{"$badOp":1}' });
+    });
+    expect(patch.mock.calls.some((c) => c[1].lastRun?.error)).toBe(true);
+    expect(patch.mock.calls.some((c) => c[1].lastValidQuery)).toBe(false);
   });
 
   it('cancel aborts the in-flight find via api.query.cancel and returns to idle without touching lastRun', async () => {

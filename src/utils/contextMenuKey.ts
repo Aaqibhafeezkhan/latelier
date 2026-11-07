@@ -18,6 +18,14 @@ export function isEditKey(e: { key: string; metaKey: boolean; ctrlKey: boolean; 
   return (e.key === 'e' || e.key === 'E') && !e.metaKey && !e.ctrlKey && !e.altKey;
 }
 
+/**
+ * `D` on a focused result row deletes it, through the same confirmation the
+ * row's Delete button opens. Unmodified only, like `isEditKey`.
+ */
+export function isDeleteKey(e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean }): boolean {
+  return (e.key === 'd' || e.key === 'D') && !e.metaKey && !e.ctrlKey && !e.altKey;
+}
+
 /** A `DOMRect`-shaped input — deliberately structural, not `DOMRect` itself,
  * so this stays testable with a plain object and no DOM. */
 export interface RectLike {

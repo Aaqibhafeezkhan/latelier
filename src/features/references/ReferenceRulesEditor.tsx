@@ -268,7 +268,7 @@ export function ReferenceRulesEditor({
       closeOnClickOutside={false}
     >
       <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
-        <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 10 }}>
+        <div style={{ fontSize: T.fsXs, color: T.textMuted, marginBottom: 10 }}>
           {dbName}.{collection}
         </div>
 
@@ -278,7 +278,7 @@ export function ReferenceRulesEditor({
               role="alert"
               style={{
                 color: T.warn,
-                fontSize: 12,
+                fontSize: T.fsSm,
                 padding: '8px 10px',
                 border: `1px solid ${T.warn}`,
                 borderRadius: T.rs,
@@ -289,9 +289,10 @@ export function ReferenceRulesEditor({
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <div style={{ display: 'flex', gap: T.gapSm, marginBottom: 12 }}>
             <Button
               ref={newRuleRef}
+              data-autofocus
               size="compact-xs"
               variant="filled"
               leftSection={I.plus}
@@ -316,7 +317,7 @@ export function ReferenceRulesEditor({
             >
               <div
                 style={{
-                  fontSize: 11,
+                  fontSize: T.fsXs,
                   color: T.textMuted,
                   textTransform: 'uppercase',
                   letterSpacing: '0.06em',
@@ -331,9 +332,9 @@ export function ReferenceRulesEditor({
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 8,
+                    gap: T.gapSm,
                     padding: '4px 0',
-                    fontSize: 12,
+                    fontSize: T.fsSm,
                   }}
                 >
                   <span style={{ fontFamily: 'monospace', color: T.text }}>
@@ -345,7 +346,7 @@ export function ReferenceRulesEditor({
                   </span>
                   <span style={{ flex: 1 }} />
                   {c.alreadyConfigured ? (
-                    <span style={{ color: T.textMuted, fontSize: 11 }}>
+                    <span style={{ color: T.textMuted, fontSize: T.fsXs }}>
                       already configured
                     </span>
                   ) : (
@@ -358,18 +359,18 @@ export function ReferenceRulesEditor({
             </div>
           )}
           {candidates && candidates.length === 0 && (
-            <div style={{ marginBottom: 12, color: T.textMuted, fontSize: 12 }}>
+            <div style={{ marginBottom: 12, color: T.textMuted, fontSize: T.fsSm }}>
               No *_id / *Id fields with matching collections found.
             </div>
           )}
 
           {loading ? (
-            <div style={{ color: T.textMuted, fontSize: 12 }}>Loading…</div>
+            <div style={{ color: T.textMuted, fontSize: T.fsSm }}>Loading…</div>
           ) : rules.length === 0 ? (
             <div
               style={{
                 color: T.textMuted,
-                fontSize: 12,
+                fontSize: T.fsSm,
                 fontStyle: 'italic',
                 padding: '12px 0',
               }}
@@ -384,10 +385,10 @@ export function ReferenceRulesEditor({
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 8,
+                    gap: T.gapSm,
                     padding: '8px 12px',
                     borderBottom: `1px solid ${T.border}`,
-                    fontSize: 12,
+                    fontSize: T.fsSm,
                   }}
                 >
                   <span style={{ fontFamily: 'monospace', color: T.text, minWidth: 120 }}>
@@ -398,11 +399,11 @@ export function ReferenceRulesEditor({
                     {r.targetCollection}.{r.targetField}
                   </span>
                   {!r.enabled && (
-                    <span style={{ fontSize: 10, color: T.textGhost }}>disabled</span>
+                    <span style={{ fontSize: T.fsXs, color: T.textGhost }}>disabled</span>
                   )}
                   {confirmDeleteId === r.id ? (
                     <>
-                      <span style={{ fontSize: 11, color: T.red }}>Delete?</span>
+                      <span style={{ fontSize: T.fsXs, color: T.red }}>Delete?</span>
                       <SubmitButton
                         onClick={() => void handleDelete(r.id)}
                         aria-label="Confirm delete"
@@ -494,11 +495,11 @@ function RuleForm({
 }: RuleFormProps) {
   const T = themeVars;
   const labelStyle: React.CSSProperties = {
-    fontSize: 11,
+    fontSize: T.fsXs,
     color: T.textMuted,
     display: 'flex',
     flexDirection: 'column',
-    gap: 4,
+    gap: T.gapXs,
   };
   const inputStyle: React.CSSProperties = {
     padding: '6px 10px',
@@ -506,7 +507,7 @@ function RuleForm({
     borderRadius: T.rs,
     background: T.surfaceRaised,
     color: T.text,
-    fontSize: 12,
+    fontSize: T.fsSm,
     fontFamily: 'monospace',
   };
   const editing = !!form.id;
@@ -541,10 +542,10 @@ function RuleForm({
         borderRadius: T.rs,
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: 600, color: T.text, marginBottom: 10 }}>
+      <div style={{ fontSize: T.fsSm, fontWeight: 600, color: T.text, marginBottom: 10 }}>
         {editing ? 'Edit rule' : 'New rule'}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: themeVars.gapSm }}>
         <label style={labelStyle}>
           Source field
           <FieldAutocompleteInput
@@ -614,9 +615,9 @@ function RuleForm({
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          gap: 6,
+          gap: themeVars.gapXs,
           marginTop: 12,
-          fontSize: 12,
+          fontSize: T.fsSm,
           color: T.textMuted,
         }}
       >
@@ -627,7 +628,7 @@ function RuleForm({
         />
         Enabled
       </label>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: T.gapSm, marginTop: 14 }}>
         <Button size="compact-xs" variant="subtle" onClick={onCancel} disabled={saving}>
           Cancel
         </Button>

@@ -10,6 +10,7 @@ import type {
 } from '@shared/types';
 import { api, getErrorMessage, isIpcError } from '../../../api/atelier';
 import { notifyConnectionsChanged } from '../../../state/connections';
+import { fixedModalStyles } from '../../../components/fixedModal';
 import { useDialogFocusReturn } from '../../../hooks/useDialogFocusReturn';
 import { SourceStep } from './SourceStep';
 import { MappingStep } from './MappingStep';
@@ -144,8 +145,11 @@ export function ImportWizard({ initial, onClose }: ImportWizardProps) {
         if (e.key === 'Escape') e.stopPropagation();
       }}
       overlayProps={{ onClick: (e) => e.stopPropagation() }}
+      // One height for every step, so Cancel, Back and Import hold their place
+      // as the wizard moves on; long lists scroll inside their step.
+      styles={fixedModalStyles(540)}
     >
-      <Stack gap="sm">
+      <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
         {step === 'source' && (
           <>
             <SourceStep initial={initial} busy={busy} error={error} onFile={() => void pickFile()} onUris={(u) => void pasteUris(u)} />
@@ -154,8 +158,14 @@ export function ImportWizard({ initial, onClose }: ImportWizardProps) {
         )}
         {/* Kept mounted (hidden) under the review so Back finds the user's choices intact. */}
         {collections && token && (step === 'mapping' || step === 'review') && (
-          <div style={step === 'mapping' ? undefined : { display: 'none' }}>
-            <Stack gap="sm">
+          <div
+            style={
+              step === 'mapping'
+                ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }
+                : { display: 'none' }
+            }
+          >
+            <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
               <MappingStep
                 key={token}
                 collections={collections}

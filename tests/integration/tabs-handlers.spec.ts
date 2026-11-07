@@ -289,6 +289,22 @@ describe('tabs:update — the filter draft, via router and SQLite', () => {
     }
     expect(storedState().filterDraft).toEqual(DRAFT);
   });
+
+  it('persists the last valid query, clears it, and refuses one of the wrong shape', async () => {
+    const lastValidQuery = { queryRaw: '{"a":1}', builder: { root: DRAFT.root } };
+    expect((await update({ lastValidQuery })).ok).toBe(true);
+    expect(storedState().lastValidQuery).toEqual(lastValidQuery);
+
+    for (const bad of [{ builder: {} }, { queryRaw: 1, builder: {} }, { queryRaw: '{}' }, { queryRaw: '{}', builder: 'x' }, 'x']) {
+      const env = await update({ lastValidQuery: bad });
+      expect(env.ok).toBe(false);
+      if (!env.ok) expect(env.error.code).toBe('VALIDATION');
+    }
+    expect(storedState().lastValidQuery).toEqual(lastValidQuery);
+
+    expect((await update({ lastValidQuery: undefined })).ok).toBe(true);
+    expect('lastValidQuery' in storedState()).toBe(false);
+  });
 });
 
 /**

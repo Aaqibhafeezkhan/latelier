@@ -81,11 +81,11 @@ export function ValidationSection({ connectionId, dbName, collection, details, o
     }
   };
 
-  const mono: React.CSSProperties = { fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5 };
+  const mono: React.CSSProperties = { fontFamily: 'JetBrains Mono, monospace', fontSize: T.fsSm };
   const selectStyle: React.CSSProperties = {
     marginLeft: 6,
     padding: '2px 6px',
-    fontSize: 12,
+    fontSize: T.fsSm,
     border: `1px solid ${T.border}`,
     borderRadius: T.rs,
     background: T.surfaceRaised,
@@ -101,11 +101,11 @@ export function ValidationSection({ connectionId, dbName, collection, details, o
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: themeVars.gapSm,
           padding: '10px 16px',
           borderBottom: `1px solid ${T.border}`,
           background: T.surface,
-          fontSize: 12,
+          fontSize: T.fsSm,
         }}
       >
         <div style={{ flex: 1, fontWeight: 600, color: T.text }}>Validation</div>
@@ -116,7 +116,7 @@ export function ValidationSection({ connectionId, dbName, collection, details, o
         )}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 16px', fontSize: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: T.gapSm, padding: '10px 16px', fontSize: T.fsSm }}>
         {editing ? (
           <>
             <textarea
@@ -137,7 +137,7 @@ export function ValidationSection({ connectionId, dbName, collection, details, o
                 color: T.text,
               }}
             />
-            <div style={{ display: 'flex', gap: 16, alignItems: 'center', color: T.textMuted }}>
+            <div style={{ display: 'flex', gap: T.gapLg, alignItems: 'center', color: T.textMuted }}>
               <label>
                 Validation level
                 <select
@@ -182,7 +182,7 @@ export function ValidationSection({ connectionId, dbName, collection, details, o
             ) : (
               <div style={{ color: T.textMuted }}>No validation rules</div>
             )}
-            <div style={{ display: 'flex', gap: 16, color: T.textMuted }}>
+            <div style={{ display: 'flex', gap: T.gapLg, color: T.textMuted }}>
               <span>Level: {level}</span>
               <span>Action: {action}</span>
             </div>

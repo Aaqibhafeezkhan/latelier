@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen } from '../helpers/render';
+import { render, screen, fireEvent } from '../helpers/render';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 
 const notifyError = vi.fn();
@@ -23,6 +23,7 @@ async function mountModal(status: () => Promise<{ columnKeyProtected: boolean }>
       <SettingsModal onClose={() => {}} />
     </HintsProvider>,
   );
+  fireEvent.click(await screen.findByRole('tab', { name: 'Data and support' }));
 }
 
 describe('SettingsModal: local data protection', () => {

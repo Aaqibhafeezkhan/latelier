@@ -169,7 +169,7 @@ function HintPopover({
         }}
       >
         <Group align="flex-start" gap="xs" wrap="nowrap">
-          <Stack gap={4} style={{ flex: 1 }}>
+          <Stack gap="var(--atelier-gap-xs)" style={{ flex: 1 }}>
             <Text size="sm" fw={600}>
               {copy.title}
             </Text>

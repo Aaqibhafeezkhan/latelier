@@ -2,6 +2,7 @@ import React from 'react';
 import { ActionIcon, Button, Group, Menu, Select, SegmentedControl, Tooltip, UnstyledButton } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
+import { useElementWidth } from '../../hooks/useElementWidth';
 import type { ResultViewMode } from '@shared/types';
 import { useCollectionWorkspace } from './context';
 import { api } from '../../api/atelier';
@@ -15,6 +16,7 @@ import { summarizeExplain } from '../../utils/explainSummary';
 import { ImportDialog } from './ImportDialog';
 import { compileFindOptions, findProblem } from './builder';
 import { LIMIT_EXPLANATION, limitChipText } from './queryCaps';
+import { resultBarLayout } from './toolbarLayout';
 
 const VIEWS: ResultViewMode[] = ['Tree', 'JSON', 'Table'];
 
@@ -85,6 +87,12 @@ export function ResultBar() {
     : planSummary?.usesIndex
       ? (planSummary.indexName ?? 'index')
       : null;
+  const [barRef, barWidth] = useElementWidth<HTMLDivElement>();
+  const layout = resultBarLayout(barWidth);
+  // A stale count is the total and "· not current", at any width: the longer forms
+  // leave that no room. This stays inside the count's slot, so no control moves.
+  const countForm = isStale ? 'total' : layout.count;
+
   // The limit that actually applies (a coerced one shows as what it runs as).
   const limitChip = limitChipText(compileFindOptions(state.builder).limit);
 
@@ -104,6 +112,16 @@ export function ResultBar() {
     (totalPages !== null ? page < totalPages - 1 : !!hasMore);
   const canFirst = canPrev;
   const canLast = totalPages !== null && page < totalPages - 1 && !isLoading;
+
+  const totalLabel = `${(totalCount ?? docCount ?? 0).toLocaleString()}${hasMore && totalCount === undefined ? '+' : ''}`;
+  const rangeLabel =
+    start !== null && end !== null && docCount !== 0
+      ? `${start.toLocaleString()}–${end.toLocaleString()}`
+      : null;
+  // The merged forms drop words, never facts: the rest stays one hover away.
+  const countDetail = `${totalLabel} results${duration !== null ? ` · ${duration} ms` : ''}${
+    rangeLabel ? ` · showing ${rangeLabel}` : ''
+  }`;
 
   // Pagination through context: patch + re-run with the same override so
   // `run` doesn't close over a stale `page` from before the patch.
@@ -133,32 +151,27 @@ export function ResultBar() {
 
   return (
     <Group
-      gap={10}
-      wrap="nowrap"
+      ref={barRef}
+      data-testid="result-bar"
+      gap={layout.iconControls ? 6 : 8}
+      wrap={layout.wrap ? 'wrap' : 'nowrap'}
       style={{
-        padding: '4px 14px',
+        minHeight: 44,
+        boxSizing: 'border-box',
+        padding: layout.wrap ? '4px 14px' : '0 14px',
         borderBottom: `1px solid ${T.border}`,
         background: T.surface,
         flexShrink: 0,
-        fontSize: 11,
+        fontSize: T.fsSm,
         color: T.textMuted,
-        // None of this row's own text (page number, result counts, ms,
-        // range) sets its own `white-space`, so a tight flex squeeze can
-        // wrap any one span onto a second line instead of shrinking a
-        // neighbour. That grows this bar's own height, which — one flex
-        // column up — shrinks the table's available height under its
-        // virtualized list, turning a cosmetic width squeeze into a
-        // scroll-settle bug several layers away (a virtualized row landing
-        // a sub-pixel short of fully in view because its scroll container
-        // is fractionally shorter than the settle math expects). Setting it
-        // once here, inherited by every descendant, keeps this row's height
-        // independent of how tight the available width gets, rather than
-        // chasing it span by span.
+        // Set once here and inherited, so no text in this row wraps onto a
+        // second line. That would grow the bar, which one flex column up shrinks
+        // the virtualized list and turns a width squeeze into a scroll-settle bug.
         whiteSpace: 'nowrap',
       }}
     >
       {/* Pager — first · prev · P/T · next · last */}
-      <Group gap={2} wrap="nowrap">
+      <Group gap={themeVars.gapXs} wrap="nowrap" style={{ flexShrink: 0 }}>
         <ActionIcon
           variant="subtle"
           color="gray"
@@ -179,7 +192,16 @@ export function ResultBar() {
         >
           {I.chevL}
         </ActionIcon>
-        <span style={{ padding: '0 6px', color: T.text, fontVariantNumeric: 'tabular-nums' }}>
+        {/* Room for "2400 / 2400", the widest this page count reaches, so Next and Last hold still. */}
+        <span
+          data-testid="page-label"
+          style={{
+            minWidth: `max(48px, ${2 * String(totalPages ?? '').length + 3}ch)`,
+            textAlign: 'center',
+            color: T.text,
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
           {page + 1}
           {totalPages !== null ? ` / ${totalPages}` : ''}
         </span>
@@ -220,229 +242,289 @@ export function ResultBar() {
         allowDeselect={false}
         withCheckIcon={false}
         comboboxProps={{ keepMounted: false }}
-        style={{ width: 62, flexShrink: 0 }}
+        rightSectionWidth={18}
+        // A compact control here, beside 26 px buttons, not the theme's 36 px input.
+        styles={{ input: { height: 26, minHeight: 26, fontSize: T.fsSm, paddingInline: '6px 18px' } }}
+        style={{ width: 52, flexShrink: 0 }}
       />
 
-      {/* Counts + range */}
-      <Group gap={6} wrap="nowrap">
-        {docCount !== null ? (
+      {/* The one flexible part of the bar: everything that depends on the query
+          lives here and truncates, so nothing to its right ever moves. */}
+      <div
+        data-testid="result-count-slot"
+        style={{
+          flex: layout.wrap ? '1 1 0' : 1,
+          minWidth: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: T.gapXs,
+          overflow: 'hidden',
+        }}
+      >
+        {lastRun?.error && docCount === 0 ? (
+          <span data-testid="result-count-failed" style={{ color: T.redText, fontWeight: 600 }}>
+            Query failed
+          </span>
+        ) : docCount !== null ? (
           <>
-            <span style={{ color: T.textGhost }}>·</span>
-            <span>
-              <strong
-                style={{ color: isStale ? T.textGhost : T.text, fontWeight: 600 }}
-              >
-                {totalCount !== undefined ? totalCount.toLocaleString() : docCount.toLocaleString()}
-                {hasMore && totalCount === undefined ? '+' : ''}
-              </strong>{' '}
-              results
+            <span
+              title={countForm === 'full' ? undefined : countDetail}
+              style={{ flex: '0 0 auto', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            >
+              {countForm === 'full' && (
+                <>
+                  <CountFigure stale={isStale}>{totalLabel}</CountFigure> results
+                  {duration !== null && (
+                    <>
+                      {' · '}
+                      <CountFigure>{duration}</CountFigure> ms
+                    </>
+                  )}
+                  {/* An empty page has no range: "1–0" reads as a bug. */}
+                  {' · '}
+                  <span>{rangeLabel ? `showing ${rangeLabel}` : 'nothing to show'}</span>
+                </>
+              )}
+              {countForm === 'range' && (
+                rangeLabel ? (
+                  <>
+                    <CountFigure stale={isStale}>{rangeLabel}</CountFigure> of {totalLabel}
+                  </>
+                ) : (
+                  <>
+                    <CountFigure stale={isStale}>{totalLabel}</CountFigure> results
+                  </>
+                )
+              )}
+              {/* Short of room, a stale count spends it on "not current", not the noun. */}
+              {countForm === 'total' && (
+                <>
+                  <CountFigure stale={isStale}>{totalLabel}</CountFigure>
+                  {!isStale && ' results'}
+                </>
+              )}
             </span>
             {/* Plain text, not a live region: the QueryBar's `role="alert"`
                 already announces the reason, and two announcements for one
-                keystroke is worse than none. */}
+                keystroke is worse than none. This gives way before the number
+                does, because the number is what the bar is for. */}
             {isStale && (
               <span
                 data-testid="result-count-stale"
-                style={{ color: T.warn, fontWeight: 600 }}
+                title="The query above has changed and cannot run as written"
+                style={{ flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', color: T.warn, fontWeight: 600 }}
               >
-                (not current — fix the query above)
+                · not current
               </span>
             )}
             {limitChip !== null && (
               <>
-                <span>·</span>
-                <span data-testid="result-limit-cap" title={LIMIT_EXPLANATION}>
+                <span style={{ flexShrink: 0 }}>·</span>
+                <span
+                  data-testid="result-limit-cap"
+                  title={LIMIT_EXPLANATION}
+                  style={{ flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
                   {limitChip}
                 </span>
               </>
             )}
-            {duration !== null && (
-              <>
-                <span>·</span>
-                <span>
-                  <strong style={{ color: T.text, fontWeight: 600 }}>{duration}</strong> ms
-                </span>
-              </>
-            )}
-            {start !== null && end !== null && (
-              <>
-                <span>·</span>
-                {/* An empty page has no range: "1–0" reads as a bug. */}
-                <span>
-                  {docCount === 0 ? 'nothing to show' : `showing ${start.toLocaleString()}–${end.toLocaleString()}`}
-                </span>
-              </>
-            )}
           </>
-        ) : (
-          <>
-            <span style={{ color: T.textGhost }}>·</span>
-            {isReadOnly ? (
-              <span style={{ color: T.textMuted }}>No run yet</span>
-            ) : (
-              <Tooltip label={runProblem ?? 'Run (Cmd+Enter)'} withArrow>
-                <Button
-                  variant="subtle"
-                  color="gray"
-                  size="compact-xs"
-                  leftSection={I.play}
-                  onClick={() => canRunHere && actions.run()}
-                  disabled={!canRunHere}
-                  data-testid="resultbar-run-cta"
-                >
-                  Run (Cmd+Enter)
-                </Button>
-              </Tooltip>
-            )}
-          </>
-        )}
-      </Group>
-
-      <span style={{ flex: 1 }} />
-
-      {planLabel !== null && (
-        <UnstyledButton
-          type="button"
-          data-testid="plan-badge"
-          aria-label={`Query plan: ${planLabel}${isStale ? ' (not current)' : ''}`}
-          title={planLabel}
-          onClick={() => setPlanOpen(true)}
-          style={{
-            fontSize: 10,
-            padding: '1px 6px',
-            maxWidth: 220,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-            borderRadius: T.rs,
-            ...(isStale
-              ? { background: T.surface, color: T.textGhost, border: `1px solid ${T.border}` }
-              : planSummary?.collscan
-                ? { background: T.warnSoft, color: T.warnText, border: `1px solid ${T.warnBorder}` }
-                : { background: T.surfaceRaised, color: T.text, border: `1px solid ${T.border}` }),
-          }}
-        >
-          {planLabel}
-        </UnstyledButton>
-      )}
-
-      {/* Fields control — one control for all three views; each view reads
-          the same per-tab `columnConfig`. */}
-      <FieldsControl />
-
-      {/* Insert — primary create action, moved here from the header so it
-          sits with the other document-level controls. Same handler as
-          before (`actions.openInsert`, wired to `useDocumentDialogs`'s
-          `openInsertModal`); the aria-label is unchanged so existing e2e
-          selectors looking for `/Insert document/` still match. Hidden for
-          read-only consumers (ScriptTab's snapshot provider), same as the
-          Documents menu below. */}
-      {!isReadOnly && !isView && (
-        <Tooltip label="Insert a new document into this collection" withArrow>
-          <Button
-            variant="filled"
-            size="compact-xs"
-            leftSection={I.plus}
-            onClick={() => actions.openInsert()}
-            aria-label="Insert document"
-          >
-            Insert
-          </Button>
-        </Tooltip>
-      )}
-
-      {/* Document-level actions — bulk/destructive operations on the result
-          set. A labelled menu rather than a bare overflow icon: this is the
-          shared home for document actions (update all matching, delete all
-          matching, export, import), so it needs a name a
-          user can point at, not just a dots glyph next to the view switch.
-          Placed left of the view switch, not beside it, so a destructive item
-          doesn't share a hover target with a benign view-mode toggle. Hidden
-          for read-only consumers (ScriptTab's snapshot provider) so there's
-          nothing to short-circuit at the leaf. */}
-      {!isReadOnly && (
-        <Menu position="bottom-end" shadow="md" width={210}>
-          <Menu.Target>
+        ) : isReadOnly ? (
+          <span style={{ color: T.textMuted }}>No run yet</span>
+        ) : layout.count === 'full' ? (
+          <Tooltip label={runProblem ?? 'Run (Cmd+Enter)'} withArrow>
             <Button
-              variant="default"
+              variant="subtle"
+              color="gray"
               size="compact-xs"
-              rightSection={I.chevD}
+              leftSection={I.play}
+              onClick={() => canRunHere && actions.run()}
+              disabled={!canRunHere}
+              data-testid="resultbar-run-cta"
             >
-              Documents
+              Run (Cmd+Enter)
             </Button>
-          </Menu.Target>
-          <Menu.Dropdown>
-            {!isView && (
-              <Menu.Item
-                leftSection={I.edit}
-                onClick={() => actions.openUpdateAll()}
-              >
-                Update all matching…
-              </Menu.Item>
-            )}
-            <Menu.Item
-              leftSection={I.download}
-              disabled={docCount === null || docCount === 0}
-              onClick={() => setExportOpen(true)}
+          </Tooltip>
+        ) : (
+          <Tooltip label={runProblem ?? 'Run (Cmd+Enter)'} withArrow>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size={26}
+              onClick={() => canRunHere && actions.run()}
+              disabled={!canRunHere}
+              data-testid="resultbar-run-cta"
+              aria-label="Run (Cmd+Enter)"
             >
-              Export…
-            </Menu.Item>
-            {!isView && (
-              <Menu.Item
-                leftSection={I.upload}
-                onClick={() => setImportOpen(true)}
+              {I.play}
+            </ActionIcon>
+          </Tooltip>
+        )}
+
+        {planLabel !== null && layout.planBadge && (
+          <UnstyledButton
+            type="button"
+            data-testid="plan-badge"
+            aria-label={`Query plan: ${planLabel}${isStale ? ' (not current)' : ''}`}
+            title={planLabel}
+            onClick={() => setPlanOpen(true)}
+            style={{
+              fontSize: T.fsXs,
+              padding: '1px 6px',
+              flex: '0 1 auto',
+              minWidth: 44,
+              maxWidth: 140,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              borderRadius: T.rs,
+              ...(isStale
+                ? { background: T.surface, color: T.textGhost, border: `1px solid ${T.border}` }
+                : planSummary?.collscan
+                  ? { background: T.warnSoft, color: T.warnText, border: `1px solid ${T.warnBorder}` }
+                  : { background: T.surfaceRaised, color: T.text, border: `1px solid ${T.border}` }),
+            }}
+          >
+            {planLabel}
+          </UnstyledButton>
+        )}
+      </div>
+
+      <Group gap={layout.iconControls ? 6 : 8} wrap="nowrap" style={{ flexShrink: 0 }}>
+        {/* Fields control — one control for all three views; each view reads
+            the same per-tab `columnConfig`. */}
+        <FieldsControl iconOnly={layout.iconControls} />
+
+        {/* Insert — primary create action, moved here from the header so it
+            sits with the other document-level controls. Same handler as
+            before (`actions.openInsert`, wired to `useDocumentDialogs`'s
+            `openInsertModal`); the aria-label is unchanged so existing e2e
+            selectors looking for `/Insert document/` still match. Hidden for
+            read-only consumers (ScriptTab's snapshot provider), same as the
+            Documents menu below. */}
+        {!isReadOnly && !isView && (
+          <Tooltip label="Insert a new document into this collection" withArrow>
+            {layout.iconControls ? (
+              <ActionIcon variant="filled" size={26} onClick={() => actions.openInsert()} aria-label="Insert document">
+                {I.plus}
+              </ActionIcon>
+            ) : (
+              <Button
+                variant="filled"
+                size="compact-xs"
+                leftSection={I.plus}
+                onClick={() => actions.openInsert()}
+                aria-label="Insert document"
               >
-                Import documents…
-              </Menu.Item>
+                Insert
+              </Button>
             )}
-            {!isView && (
+          </Tooltip>
+        )}
+
+        {/* Document-level actions — bulk/destructive operations on the result
+            set. A labelled menu rather than a bare overflow icon: this is the
+            shared home for document actions (update all matching, delete all
+            matching, export, import), so it needs a name a
+            user can point at, not just a dots glyph next to the view switch.
+            Placed left of the view switch, not beside it, so a destructive item
+            doesn't share a hover target with a benign view-mode toggle. Hidden
+            for read-only consumers (ScriptTab's snapshot provider) so there's
+            nothing to short-circuit at the leaf. */}
+        {!isReadOnly && (
+          <Menu position="bottom-end" shadow="md" width={210}>
+            <Tooltip label="Documents: update, export, import, delete" withArrow disabled={!layout.iconControls}>
+              <Menu.Target>
+                {layout.iconControls ? (
+                  <ActionIcon variant="default" size={26} aria-label="Documents">
+                    {I.doc}
+                  </ActionIcon>
+                ) : (
+                  <Button variant="default" size="compact-xs" rightSection={I.chevD}>
+                    Documents
+                  </Button>
+                )}
+              </Menu.Target>
+            </Tooltip>
+            <Menu.Dropdown>
+              {!isView && (
+                <Menu.Item
+                  leftSection={I.edit}
+                  onClick={() => actions.openUpdateAll()}
+                >
+                  Update all matching…
+                </Menu.Item>
+              )}
               <Menu.Item
-                color="red"
-                leftSection={I.trash}
-                onClick={() => actions.openDeleteAll()}
+                leftSection={I.download}
+                disabled={docCount === null || docCount === 0}
+                onClick={() => setExportOpen(true)}
               >
-                Delete all matching…
+                Export…
               </Menu.Item>
-            )}
-          </Menu.Dropdown>
-        </Menu>
-      )}
+              {!isView && (
+                <Menu.Item
+                  leftSection={I.upload}
+                  onClick={() => setImportOpen(true)}
+                >
+                  Import documents…
+                </Menu.Item>
+              )}
+              {!isView && (
+                <Menu.Item
+                  color="red"
+                  leftSection={I.trash}
+                  onClick={() => actions.openDeleteAll()}
+                >
+                  Delete all matching…
+                </Menu.Item>
+              )}
+            </Menu.Dropdown>
+          </Menu>
+        )}
 
-      {planOpen && (
-        <ExplainDrawer
-          onClose={() => setPlanOpen(false)}
-          initialPlan={lastRun?.plan}
-          initialVerbosity="queryPlanner"
-          runExplain={runExplain}
-          stale={isStale}
-          // A suggestion built from the query now on screen would not be about
-          // the plan being read.
-          onCreateIndex={isStale ? undefined : onCreateIndex}
+        {planOpen && (
+          <ExplainDrawer
+            onClose={() => setPlanOpen(false)}
+            initialPlan={lastRun?.plan}
+            initialVerbosity="queryPlanner"
+            runExplain={runExplain}
+            stale={isStale}
+            // A suggestion built from the query now on screen would not be about
+            // the plan being read.
+            onCreateIndex={isStale ? undefined : onCreateIndex}
+          />
+        )}
+
+        {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
+        {importOpen && (
+          <ImportDialog
+            connectionId={meta.connectionId}
+            dbName={meta.dbName}
+            collection={meta.collection}
+            onClose={() => setImportOpen(false)}
+            onImported={(report) => {
+              if (report.inserted > 0) actions.run();
+            }}
+            onPartialImport={() => actions.run()}
+          />
+        )}
+
+        {/* View switch */}
+        <SegmentedControl
+          size="xs"
+          value={view}
+          onChange={(v) => actions.patch({ view: v as ResultViewMode })}
+          data={VIEWS.map((v) => ({ label: v, value: v }))}
+          style={{ flexShrink: 0 }}
         />
-      )}
-
-      {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
-      {importOpen && (
-        <ImportDialog
-          connectionId={meta.connectionId}
-          dbName={meta.dbName}
-          collection={meta.collection}
-          onClose={() => setImportOpen(false)}
-          onImported={(report) => {
-            if (report.inserted > 0) actions.run();
-          }}
-          onPartialImport={() => actions.run()}
-        />
-      )}
-
-      {/* View switch */}
-      <SegmentedControl
-        size="xs"
-        value={view}
-        onChange={(v) => actions.patch({ view: v as ResultViewMode })}
-        data={VIEWS.map((v) => ({ label: v, value: v }))}
-      />
+      </Group>
     </Group>
   );
+}
+
+function CountFigure({ stale = false, children }: { stale?: boolean; children: React.ReactNode }) {
+  const T = themeVars;
+  return <strong style={{ color: stale ? T.textGhost : T.text, fontWeight: 600 }}>{children}</strong>;
 }

@@ -35,7 +35,7 @@ export function SourceStep({ initial, busy, error, onFile, onUris }: SourceStepP
         : null;
 
   return (
-    <Stack gap="sm">
+    <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
       <Group gap="xs">
         {/* `data-autofocus` as well: inside a Modal, Mantine's FocusTrap moves focus after
             mount to `[data-autofocus]`, else to the header's close button, overriding `autoFocus`. */}

@@ -20,6 +20,8 @@ export interface ThemeVars {
   textGhost: string;
   accent: string;
   accentText: string;
+  /** Accent as text colour; `accent` itself is for fills, borders and outlines. */
+  accentInk: string;
   accentSoft: string;
   accentBorder: string;
   greenDot: string;
@@ -39,6 +41,17 @@ export interface ThemeVars {
   rx: string;
   shadow: string;
   shadowLg: string;
+  /** Type scale: 11, 12, 13 and 16 px. Nothing smaller. */
+  fsXs: string;
+  fsSm: string;
+  fsMd: string;
+  fsLg: string;
+  /** Gap scale: 4, 8, 12, 16 and 24 px. */
+  gapXs: string;
+  gapSm: string;
+  gapMd: string;
+  gapLg: string;
+  gapXl: string;
 }
 
 export const themeVars: ThemeVars = {
@@ -53,6 +66,7 @@ export const themeVars: ThemeVars = {
   textGhost: 'var(--atelier-text-ghost)',
   accent: 'var(--atelier-accent)',
   accentText: 'var(--atelier-accent-text)',
+  accentInk: 'var(--atelier-accent-ink)',
   accentSoft: 'var(--atelier-accent-soft)',
   accentBorder: 'var(--atelier-accent-border)',
   greenDot: 'var(--atelier-green-dot)',
@@ -72,4 +86,13 @@ export const themeVars: ThemeVars = {
   rx: 'var(--atelier-radius-xs)',
   shadow: 'var(--atelier-shadow)',
   shadowLg: 'var(--atelier-shadow-lg)',
+  fsXs: 'var(--atelier-fs-xs)',
+  fsSm: 'var(--atelier-fs-sm)',
+  fsMd: 'var(--atelier-fs-md)',
+  fsLg: 'var(--atelier-fs-lg)',
+  gapXs: 'var(--atelier-gap-xs)',
+  gapSm: 'var(--atelier-gap-sm)',
+  gapMd: 'var(--atelier-gap-md)',
+  gapLg: 'var(--atelier-gap-lg)',
+  gapXl: 'var(--atelier-gap-xl)',
 };

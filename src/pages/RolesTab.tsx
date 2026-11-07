@@ -142,7 +142,7 @@ export function RolesTab({
     return (
       <div style={{ padding: 20, color: T.warn }}>
         {dbError}
-        <Button variant="subtle" size="compact-xs" c={T.accent} ml={8} onClick={() => void loadDatabases()}>
+        <Button variant="subtle" size="compact-xs" c={T.accentInk} ml={8} onClick={() => void loadDatabases()}>
           Retry
         </Button>
       </div>
@@ -159,7 +159,7 @@ export function RolesTab({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: themeVars.gapSm,
           padding: '10px 16px',
           borderBottom: `1px solid ${T.border}`,
           background: T.surface,
@@ -174,7 +174,7 @@ export function RolesTab({
             borderRadius: T.rs,
             background: T.surfaceRaised,
             padding: '4px 8px',
-            fontSize: 12,
+            fontSize: T.fsSm,
             color: T.text,
             minWidth: 160,
           }}
@@ -214,11 +214,11 @@ export function RolesTab({
         style={{ flex: 1, overflowY: 'auto' }}
       >
         {loading && !roles && (
-          <div style={{ padding: 20, color: T.textMuted, fontSize: 13 }}>Loading roles…</div>
+          <div style={{ padding: 20, color: T.textMuted, fontSize: T.fsMd }}>Loading roles…</div>
         )}
 
         {error && (
-          <Alert role="alert" color="orange" variant="light" m="sm" styles={{ message: { fontSize: 12 } }}>
+          <Alert role="alert" color="orange" variant="light" m="sm" styles={{ message: { fontSize: T.fsSm } }}>
             <Text size="xs">
               {error.code === 'UNAUTHORIZED'
                 ? `This connection lacks the privilege to read roles on ${picked}.`
@@ -231,7 +231,7 @@ export function RolesTab({
         )}
 
         {!error && visible && visible.length === 0 && (
-          <div style={{ padding: 20, color: T.textMuted, fontSize: 13, textAlign: 'center' }}>
+          <div style={{ padding: 20, color: T.textMuted, fontSize: T.fsMd, textAlign: 'center' }}>
             {showBuiltin ? `No roles on ${picked}.` : `No custom roles on ${picked}.`}
           </div>
         )}
@@ -241,9 +241,9 @@ export function RolesTab({
             striped
             withTableBorder
             styles={{
-              table: { fontSize: 12 },
+              table: { fontSize: T.fsSm },
               th: {
-                fontSize: 10,
+                fontSize: T.fsXs,
                 textTransform: 'uppercase',
                 letterSpacing: '0.06em',
                 fontWeight: 600,
@@ -267,7 +267,7 @@ export function RolesTab({
                 return (
                   <Table.Tr key={`${r.db}.${r.role}`}>
                     <Table.Td>
-                      <Group gap={6} wrap="nowrap">
+                      <Group gap={themeVars.gapXs} wrap="nowrap">
                         <span style={{ fontFamily: 'monospace', color: T.text }}>{r.role}</span>
                         {r.isBuiltin && (
                           <Badge size="xs" variant="light" color="gray" style={{ textTransform: 'none' }}>
@@ -286,7 +286,7 @@ export function RolesTab({
                     </Table.Td>
                     <Table.Td>
                       {!r.isBuiltin && (
-                        <Group gap={4} justify="flex-end" wrap="nowrap">
+                        <Group gap={T.gapXs} justify="flex-end" wrap="nowrap">
                           <ActionIcon
                             aria-label={`Edit role ${r.role}`}
                             variant="subtle"
@@ -468,7 +468,7 @@ function RoleDrawer({
         body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
       }}
     >
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: themeVars.gapLg }}>
         {!editing && (
           <TextInput
             label="Role name"
@@ -500,12 +500,12 @@ function RoleDrawer({
           styles={{ input: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' } }}
         />
         {error && (
-          <Alert role="alert" color="orange" variant="light" styles={{ message: { fontSize: 12 } }}>
+          <Alert role="alert" color="orange" variant="light" styles={{ message: { fontSize: themeVars.fsSm } }}>
             {error}
           </Alert>
         )}
       </div>
-      <Group justify="flex-end" gap={8} pt={12} style={{ borderTop: `1px solid ${themeVars.border}` }}>
+      <Group justify="flex-end" gap={themeVars.gapSm} pt={12} style={{ borderTop: `1px solid ${themeVars.border}` }}>
         <Button variant="subtle" size="compact-xs" onClick={() => void requestClose()} disabled={submitting}>
           Cancel
         </Button>

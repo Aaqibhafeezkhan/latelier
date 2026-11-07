@@ -30,7 +30,7 @@ const EXPLAIN_HIGHLIGHT_KEYS = new Set([
 
 function metricChipStyle(T: typeof themeVars): React.CSSProperties {
   return {
-    fontSize: 10,
+    fontSize: T.fsXs,
     padding: '2px 6px',
     borderRadius: T.rs,
     background: T.surface,
@@ -222,7 +222,7 @@ export function ExplainDrawer({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
-            gap: 8,
+            gap: T.gapSm,
             padding: '10px 14px',
             borderBottom: `1px solid ${T.border}`,
           }}
@@ -235,7 +235,7 @@ export function ExplainDrawer({
             }}
             aria-label="Verbosity"
             style={{
-              fontSize: 11,
+              fontSize: T.fsXs,
               padding: '4px 8px',
               border: `1px solid ${T.border}`,
               borderRadius: T.rs,
@@ -250,7 +250,7 @@ export function ExplainDrawer({
           <Button
             variant="default"
             size="compact-xs"
-            fz={11}
+            fz={T.fsXs}
             c={T.textMuted}
             onClick={() => setViewMode((m) => (m === 'tree' ? 'raw' : 'tree'))}
             aria-label={viewMode === 'tree' ? 'Switch to raw view' : 'Switch to tree view'}
@@ -263,7 +263,7 @@ export function ExplainDrawer({
           <div
             style={{
               padding: '6px 14px',
-              fontSize: 11,
+              fontSize: T.fsXs,
               color: T.warn,
               background: 'rgba(200,160,0,0.08)',
               borderBottom: `1px solid ${T.border}`,
@@ -277,9 +277,9 @@ export function ExplainDrawer({
           style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 14, background: T.bg }}
         >
           {loading ? (
-            <div style={{ color: T.textMuted, fontSize: 12 }}>Running explain…</div>
+            <div style={{ color: T.textMuted, fontSize: T.fsSm }}>Running explain…</div>
           ) : err ? (
-            <div role="alert" style={{ color: T.red, fontSize: 12, whiteSpace: 'pre-wrap' }}>
+            <div role="alert" style={{ color: T.red, fontSize: T.fsSm, whiteSpace: 'pre-wrap' }}>
               {err}
             </div>
           ) : plan === null ? null : (
@@ -298,18 +298,18 @@ export function ExplainDrawer({
                   <div
                     style={{
                       fontFamily: '"JetBrains Mono", monospace',
-                      fontSize: 11,
+                      fontSize: T.fsXs,
                       color: T.text,
                       marginBottom: 6,
                     }}
                   >
                     {summary.stages.join(' → ')}
                   </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: themeVars.gapXs, flexWrap: 'wrap' }}>
                     {summary.collscan ? (
                       <span
                         style={{
-                          fontSize: 10,
+                          fontSize: T.fsXs,
                           padding: '2px 6px',
                           borderRadius: T.rs,
                           background: T.warnSoft,
@@ -327,7 +327,7 @@ export function ExplainDrawer({
                         size="compact-xs"
                         h={20}
                         px={8}
-                        fz={10}
+                        fz={T.fsXs}
                         c={T.text}
                         onClick={() => {
                           close();
@@ -340,7 +340,7 @@ export function ExplainDrawer({
                     {!summary.collscan && summary.usesIndex ? (
                       <span
                         style={{
-                          fontSize: 10,
+                          fontSize: T.fsXs,
                           padding: '2px 6px',
                           borderRadius: T.rs,
                           background: T.greenSoft,
@@ -377,7 +377,7 @@ export function ExplainDrawer({
                   style={{
                     margin: 0,
                     fontFamily: 'JetBrains Mono, monospace',
-                    fontSize: 11,
+                    fontSize: T.fsXs,
                     color: T.text,
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-all',
@@ -395,7 +395,7 @@ export function ExplainDrawer({
         <div
           style={{
             display: 'flex',
-            gap: 8,
+            gap: T.gapSm,
             padding: '8px 14px',
             borderTop: `1px solid ${T.border}`,
             justifyContent: 'flex-end',
@@ -404,7 +404,7 @@ export function ExplainDrawer({
           <Button
             variant="default"
             size="compact-xs"
-            fz={11}
+            fz={T.fsXs}
             c={json ? T.textMuted : undefined}
             onClick={onCopy}
             disabled={!json}
@@ -414,7 +414,7 @@ export function ExplainDrawer({
           <Button
             variant="default"
             size="compact-xs"
-            fz={11}
+            fz={T.fsXs}
             c={json ? T.textMuted : undefined}
             onClick={() => void onDownload()}
             disabled={!json}

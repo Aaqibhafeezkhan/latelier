@@ -69,7 +69,7 @@ export function MappingStep({ collections, ambiguousCollections, busy = false, o
   };
 
   return (
-    <Stack gap="sm">
+    <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
       {collections.length > 1 && (
         <NativeSelect
           size="xs"
@@ -98,7 +98,9 @@ export function MappingStep({ collections, ambiguousCollections, busy = false, o
           dot in it beside a nested key, so which is meant can&apos;t be told.
         </Text>
       )}
-      <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+      {/* Takes whatever height the dialog has left, so a long list scrolls here
+          and the dialog never grows. */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         <Table fz="xs" verticalSpacing={4} aria-label="Fields in the file">
           <Table.Thead>
             <Table.Tr>

@@ -59,6 +59,13 @@ function renderBar(overrides: BarStateOverride = {}) {
   return { actions };
 }
 
+describe('ResultBar - page label', () => {
+  it('reserves room for the widest page this count reaches, so Next and Last hold still', () => {
+    renderBar({ page: 0, pageSize: 50, totalCount: 120_000, docCount: 50 });
+    expect(screen.getByTestId('page-label').style.minWidth).toBe('max(48px, 11ch)');
+  });
+});
+
 describe('ResultBar - pagination canNext', () => {
   it('disables Next on the last page when totalPages is known, even if hasMore=true', () => {
     // Reproduces the bug: a find whose last page is exactly full reports

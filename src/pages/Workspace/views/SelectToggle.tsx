@@ -8,6 +8,8 @@ interface SelectToggleProps {
    * distinguishable to assistive tech. */
   docLabel: string;
   onToggle: () => void;
+  /** `-1` takes the button out of the Tab order while keeping it clickable. */
+  tabIndex?: number;
 }
 
 /**
@@ -20,12 +22,13 @@ interface SelectToggleProps {
  * `"treeitem"` container that already holds other buttons (Copy/Edit/
  * Delete) without becoming a form control nested in one.
  */
-export function SelectToggle({ selected, docLabel, onToggle }: SelectToggleProps) {
+export function SelectToggle({ selected, docLabel, onToggle, tabIndex }: SelectToggleProps) {
   const label = `${selected ? 'Deselect' : 'Select'} document ${docLabel}`;
   return (
     <Tooltip label={label} withArrow openDelay={400}>
       <ActionIcon
         type="button"
+        tabIndex={tabIndex}
         variant="default"
         size="sm"
         c={selected ? 'var(--atelier-accent)' : 'var(--atelier-text-ghost)'}

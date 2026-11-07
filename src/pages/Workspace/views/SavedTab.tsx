@@ -100,12 +100,12 @@ export function SavedTab({
           This view used to early-return a bare centered message, so anyone
           switching here while it loaded got an unlabelled blank panel. */}
       <Group
-        gap={6}
+        gap={themeVars.gapXs}
         wrap="nowrap"
         px={10}
         pt={10}
         pb={6}
-        fz={10}
+        fz={T.fsXs}
         fw={700}
         c={T.textMuted}
         style={{ letterSpacing: 0.6, textTransform: 'uppercase' }}
@@ -116,7 +116,7 @@ export function SavedTab({
           size="compact-xs"
           h={18}
           px={6}
-          fz={10}
+          fz={T.fsXs}
           c={loading ? undefined : T.textMuted}
           onClick={() => void load()}
           submitting={loading}
@@ -127,19 +127,19 @@ export function SavedTab({
       </Group>
 
       {loading && (
-        <Text fz={12} c={T.textMuted} px={10} pt={4} pb={10}>
+        <Text fz={T.fsSm} c={T.textMuted} px={10} pt={4} pb={10}>
           Loading…
         </Text>
       )}
 
       {!loading && err && (
-        <Text fz={12} c={T.warn} px={10} pt={4} pb={10}>
+        <Text fz={T.fsSm} c={T.warn} px={10} pt={4} pb={10}>
           {err}
         </Text>
       )}
 
       {!loading && !err && items.length === 0 && (
-        <Text fz={12} c={T.textMuted} px={10} pt={4} pb={10}>
+        <Text fz={T.fsSm} c={T.textMuted} px={10} pt={4} pb={10}>
           Nothing saved yet. Use Save in the toolbar above to keep one here.
         </Text>
       )}
@@ -147,11 +147,11 @@ export function SavedTab({
       {!loading && !err && items.map((item) => (
         <Group
           key={item.id}
-          gap={6}
+          gap={themeVars.gapXs}
           wrap="nowrap"
           px={10}
           py={7}
-          fz={12}
+          fz={T.fsSm}
           style={{ borderBottom: `1px solid ${T.border}` }}
         >
           {/* Kind label. `Badge` with this size/variant/color is the
@@ -164,14 +164,14 @@ export function SavedTab({
             {KIND_LABEL[item.kind]}
           </Badge>
           <Box style={{ flex: 1, overflow: 'hidden' }}>
-            <Text fw={600} c={T.text} truncate="end" fz={12}>
+            <Text fw={600} c={T.text} truncate="end" fz={T.fsSm}>
               {item.name}
             </Text>
-            <Text fz={10} c={T.textGhost} mt={1}>
+            <Text fz={T.fsXs} c={T.textGhost} mt={1}>
               {new Date(item.updatedAt).toLocaleDateString()}
             </Text>
             {item.description && (
-              <Text title={item.description} fz={10} c={T.textGhost} mt={1} truncate="end">
+              <Text title={item.description} fz={T.fsXs} c={T.textGhost} mt={1} truncate="end">
                 {item.description}
               </Text>
             )}
@@ -182,7 +182,7 @@ export function SavedTab({
               size="compact-xs"
               h={20}
               px={7}
-              fz={10}
+              fz={T.fsXs}
               leftSection={item.kind === 'find' ? I.play : undefined}
               onClick={() => void handlePrimary(item)}
               aria-label={

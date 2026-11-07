@@ -12,7 +12,7 @@ import {
 import userEvent from '@testing-library/user-event';
 import { TreeView } from '../../src/pages/Workspace/views/TreeView';
 import { CollectionWorkspaceProvider } from '../../src/pages/Workspace/CollectionWorkspaceProvider';
-import type { CollectionWorkspaceActions } from '../../src/pages/Workspace/context';
+import type { CollectionWorkspaceActions, CollectionWorkspaceMeta } from '../../src/pages/Workspace/context';
 import type { CollectionTabState, TableColumnConfig } from '@shared/types';
 
 const noop = () => {};
@@ -36,12 +36,13 @@ function renderTree(documents: unknown[], opts: {
   onRowExpand?: (id: string, expanded: boolean) => void;
   onSelect?: (doc: unknown) => void;
   actions?: Partial<CollectionWorkspaceActions>;
+  meta?: Partial<CollectionWorkspaceMeta>;
 } = {}) {
   return render(
       <CollectionWorkspaceProvider
         state={emptyState(opts.columnConfig)}
         actions={emptyWorkspaceActions(opts.actions)}
-        meta={emptyWorkspaceMeta()}
+        meta={emptyWorkspaceMeta(opts.meta)}
       >
         <TreeView
           documents={documents}
@@ -250,6 +251,61 @@ describe('TreeView — rendering and interaction', () => {
       expect(openEdit).toHaveBeenCalledWith(threeDocs[1]);
     });
 
+    it('D on the tree opens the delete confirmation for the active row', () => {
+      const openDelete = vi.fn();
+      const { container } = renderTree(threeDocs, { actions: { openDelete } });
+      const tree = container.querySelector('[role="tree"]')!;
+
+      fireEvent.keyDown(tree, { key: 'ArrowDown' });
+      fireEvent.keyDown(tree, { key: 'D' });
+
+      expect(openDelete).toHaveBeenCalledTimes(1);
+      expect(openDelete).toHaveBeenCalledWith(threeDocs[1]);
+    });
+
+    it('D does nothing with a modifier or from a nested control', () => {
+      const openDelete = vi.fn();
+      const { container } = renderTree(threeDocs, { actions: { openDelete } });
+      const tree = container.querySelector('[role="tree"]')!;
+
+      fireEvent.keyDown(tree, { key: 'd', ctrlKey: true });
+      fireEvent.keyDown(tree, { key: 'd', metaKey: true });
+      fireEvent.keyDown(screen.getAllByRole('button', { name: /^Edit document/ })[0], { key: 'd' });
+
+      expect(openDelete).not.toHaveBeenCalled();
+    });
+
+    it.each([{ isView: true }, { isReadOnly: true }])('D does nothing, and is not swallowed, when %o', (meta) => {
+      const openDelete = vi.fn();
+      const { container } = renderTree(threeDocs, { actions: { openDelete }, meta });
+
+      const notPrevented = fireEvent.keyDown(container.querySelector('[role="tree"]')!, { key: 'd' });
+
+      expect(openDelete).not.toHaveBeenCalled();
+      expect(notPrevented).toBe(true);
+    });
+
+    // One tab stop per list (X19): Tab from the tree reaches only the active
+    // row's actions, so a page of rows is not a page of tab stops.
+    it('only the active row keeps its buttons in the Tab order, and the stop follows the arrows', () => {
+      const { container } = renderTree(threeDocs);
+      const tree = container.querySelector('[role="tree"]')!;
+      const tabStops = () =>
+        screen.getAllByRole('button').filter((b) => b.getAttribute('tabindex') !== '-1').map((b) => b.getAttribute('aria-label'));
+
+      expect(tabStops()).toEqual([
+        'Select document 99439011',
+        'Expand document',
+        'Edit document 99439011',
+        'Delete document 99439011',
+        'More actions for document 99439011',
+      ]);
+
+      fireEvent.keyDown(tree, { key: 'ArrowDown' });
+      expect(tabStops().every((label) => label?.includes('99439012') || label === 'Expand document')).toBe(true);
+      expect(tabStops()).toHaveLength(5);
+    });
+
     // Mirrors the existing per-row guard test above, at the container level:
     // Enter bubbling from a nested button must not also expand the row.
     it('Enter bubbling up from a nested button does not double-expand', async () => {
@@ -416,5 +472,53 @@ describe('TreeView — rendering and interaction', () => {
       expect(queryByRole('group', { name: 'Document actions' })).toBeNull();
       expect(getByRole('group', { name: 'Field actions' })).toBeTruthy();
     });
+  });
+});
+
+describe('TreeView row actions', () => {
+  const DOCS = [
+    { _id: { $oid: '507f1f77bcf86cd799439011' }, name: 'alpha' },
+    { _id: { $oid: '507f1f77bcf86cd799439012' }, name: 'beta' },
+  ];
+  const rowActions = (container: HTMLElement) =>
+    [...container.querySelectorAll<HTMLElement>('[data-testid="tree-row-actions"]')];
+
+  it('are hidden at rest with their space kept, so a row never shifts', () => {
+    const { container } = renderTree(DOCS);
+    const [first] = rowActions(container);
+    expect(first!.style.opacity).toBe('0');
+    // Still mounted: hiding them must not take the width away, or Tab's reach.
+    expect(within(first!).getByRole('button', { name: /^Edit document/ })).toBeTruthy();
+    expect(within(first!).getByRole('button', { name: /^Delete document/ })).toBeTruthy();
+    expect(within(first!).getByRole('button', { name: /^More actions/ })).toBeTruthy();
+  });
+
+  it('show on hover and hide again', () => {
+    const { container } = renderTree(DOCS);
+    const row = container.querySelectorAll('[role="treeitem"]')[1]!;
+    const actions = rowActions(container)[1]!;
+    fireEvent.mouseEnter(row);
+    expect(actions.style.opacity).toBe('1');
+    fireEvent.mouseLeave(row);
+    expect(actions.style.opacity).toBe('0');
+  });
+
+  it('show with focus inside the row, so a keyboard user sees what Tab reached', () => {
+    const { container } = renderTree(DOCS);
+    const actions = rowActions(container)[1]!;
+    fireEvent.focus(within(actions).getByRole('button', { name: /^Edit document/ }));
+    expect(actions.style.opacity).toBe('1');
+    fireEvent.blur(within(actions).getByRole('button', { name: /^Edit document/ }));
+    expect(actions.style.opacity).toBe('0');
+  });
+
+  it('show on the active row, for as long as the tree holds focus', () => {
+    const { container } = renderTree(DOCS);
+    const tree = container.querySelector('[role="tree"]') as HTMLElement;
+    act(() => tree.focus());
+    expect(rowActions(container)[0]!.style.opacity).toBe('1');
+    fireEvent.keyDown(tree, { key: 'ArrowDown' });
+    expect(rowActions(container)[0]!.style.opacity).toBe('0');
+    expect(rowActions(container)[1]!.style.opacity).toBe('1');
   });
 });

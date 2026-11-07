@@ -1,21 +1,29 @@
 /**
- * Builder-panel geometry, in percent of the horizontal split.
+ * Builder-panel geometry. The split sizes are percent of the horizontal split;
+ * the collapsed rail is pixels.
  *
  * Extracted because these numbers have to agree in two places that sit
  * ~1800 lines apart in `Workspace.tsx`: the `<Panel>` props, and the layout
  * handler that decides whether a size is worth persisting. As bare literals,
  * `collapsedSize={4}` and a guard testing `pct < 1` disagreed with each other
  * and nothing said so.
+ *
+ * react-resizable-panels reads a plain number as pixels and only a string as
+ * percent, so a percent goes to a `<Panel>` size prop through `asPercent`.
  */
+
+/** A percent for a `<Panel>` size prop, which would read the bare number as pixels. */
+export const asPercent = (pct: number): string => `${pct}%`;
 
 /** Smallest width a user can drag the builder to. */
 export const BUILDER_MIN_PCT = 15;
 
 /**
- * Width of the collapsed rail. Non-zero so the expand notch has somewhere to
- * live — which is exactly why `pct === 0` is not a usable test for "collapsed".
+ * Width of the collapsed rail, in pixels: 4 px is what the expand notch needs,
+ * and 4% would be tens of pixels too wide. Non-zero so the notch has somewhere
+ * to live, which is exactly why `pct === 0` is not a usable test for "collapsed".
  */
-export const BUILDER_COLLAPSED_PCT = 4;
+export const BUILDER_COLLAPSED_PX = 4;
 
 /** Fallback split when nothing is stored: 26 ≈ 348 / 1344. */
 export const BUILDER_DEFAULT_PCT = 26;

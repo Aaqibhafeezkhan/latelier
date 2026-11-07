@@ -208,4 +208,41 @@ describe('ReferenceDrawer (multi-doc array source)', () => {
     expect(pushed.value).toEqual({ $oid: 'b' });
     expect(pushed.label).toBe('Babbage');
   });
+
+  it('opens a picked row without resolving again, whatever the shape of targetField', async () => {
+    const resolve = vi.fn(async () => ({
+      ruleId: RULE.id,
+      found: true,
+      documents: [
+        { _id: { $oid: 'a' }, name: 'Ada' },
+        { _id: { $oid: 'b' }, name: 'Babbage' },
+      ],
+      durationMs: 2,
+    }));
+    installAtelierMock({ refs: { resolve: resolve as never, list: async () => [] } });
+    const rule: ReferenceRule = { ...RULE, targetField: 'n.k' };
+    const first: ReferenceFrame = { id: 'frame-list', rule, value: [1, 2], label: 'item_ids' };
+    function Stack() {
+      const [stack, setStack] = React.useState([first]);
+      return (
+        <ReferenceDrawer
+          stack={stack}
+          pinned={false}
+          width={380}
+          onPush={(frame) => setStack((s) => [...s, frame])}
+          onPop={() => {}}
+          onClose={() => {}}
+          onTogglePin={() => {}}
+        />
+      );
+    }
+    render(<Stack />);
+
+    fireEvent.click(await screen.findByText('Babbage'));
+
+    await waitFor(() => expect(screen.queryByText(/2 matches in contacts/i)).toBeNull());
+    expect(screen.getAllByText(/Babbage/).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Ada')).toBeNull();
+    expect(resolve).toHaveBeenCalledOnce();
+  });
 });

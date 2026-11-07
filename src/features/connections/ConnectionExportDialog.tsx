@@ -2,7 +2,9 @@ import React from 'react';
 import { Alert, Button, Checkbox, Group, List, Modal, PasswordInput, Stack, Text } from '@mantine/core';
 import type { ConnectionExportResult, ConnectionSummary, ExportSecretField } from '@shared/types';
 import { api, getErrorMessage } from '../../api/atelier';
+import { fixedModalStyles } from '../../components/fixedModal';
 import { useDialogFocusReturn } from '../../hooks/useDialogFocusReturn';
+import { useOpenFocus } from '../../hooks/useOpenFocus';
 import { SubmitButton } from '../../components/SubmitButton';
 import { MIN_EXPORT_PASSPHRASE_LENGTH, plural } from './transferCopy';
 
@@ -52,6 +54,10 @@ export function ConnectionExportDialog({ onClose, ids }: {
     };
   }, [ids]);
 
+  // With the checked rows already chosen there is nothing to load, so the
+  // first field is there at mount; otherwise it arrives with the list.
+  const bodyRef = useOpenFocus(ids !== undefined || connections !== null);
+
   const tooShort = passphrase.length < MIN_EXPORT_PASSPHRASE_LENGTH;
   const mismatch = confirm !== passphrase;
   const valid = ticked.size > 0 && (!includeSecrets || (!tooShort && !mismatch));
@@ -75,15 +81,25 @@ export function ConnectionExportDialog({ onClose, ids }: {
   };
 
   return (
-    <Modal opened onClose={submitting ? () => {} : close} title="Export Connections" centered size="md">
-      <Stack gap="sm">
+    <Modal
+      opened
+      onClose={submitting ? () => {} : close}
+      title="Export Connections"
+      centered
+      size="md"
+      // One height for every state: the checklist scrolls inside it, and the
+      // passphrase fields are always there (disabled until ticked), so ticking
+      // "Include passwords" never resizes the dialog or moves Export.
+      styles={fixedModalStyles(440)}
+    >
+      <Stack gap="sm" ref={bodyRef} style={{ flex: 1, minHeight: 0 }}>
         {result ? (
-          <>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
             <Text size="sm" role="status">
               {plural(result.written, 'Connection')} written.
             </Text>
             {result.omittedSecrets.length > 0 && (
-              <List size="xs" spacing={2} aria-label="Secrets not included">
+              <List size="xs" spacing={2} mt="sm" aria-label="Secrets not included">
                 {result.omittedSecrets.map((o) => (
                   <List.Item key={`${o.name}/${o.field}`}>
                     {o.name}: {FIELD_LABEL[o.field]} not included, it couldn&apos;t be read.
@@ -91,46 +107,49 @@ export function ConnectionExportDialog({ onClose, ids }: {
                 ))}
               </List>
             )}
-          </>
+          </div>
         ) : (
           <>
-            {ids ? (
-              <Text size="sm">{plural(ids.length, 'checked Connection')}.</Text>
-            ) : (
-            <Checkbox.Group
-              label="Connections to export"
-              value={[...ticked]}
-              onChange={(ids) => setTicked(new Set(ids))}
-            >
-              <Stack gap={4} mt={4}>
-                {(connections ?? []).map((c) => (
-                  <Checkbox
-                    key={c.id}
-                    value={c.id}
-                    label={c.name}
-                    size="xs"
-                  />
-                ))}
-              </Stack>
-            </Checkbox.Group>
-            )}
-            <Checkbox
-              size="xs"
-              label="Include passwords"
-              description="Encrypted with an Export Passphrase. Without it the file carries no secrets."
-              checked={includeSecrets}
-              onChange={(e) => setIncludeSecrets(e.currentTarget.checked)}
-            />
-            {includeSecrets && (
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              {ids ? (
+                <Text size="sm">{plural(ids.length, 'checked Connection')}.</Text>
+              ) : (
+                <Checkbox.Group
+                  label="Connections to export"
+                  value={[...ticked]}
+                  onChange={(ids) => setTicked(new Set(ids))}
+                >
+                  <Stack gap="var(--atelier-gap-xs)" mt={4}>
+                    {(connections ?? []).map((c) => (
+                      <Checkbox
+                        key={c.id}
+                        value={c.id}
+                        label={c.name}
+                        size="xs"
+                      />
+                    ))}
+                  </Stack>
+                </Checkbox.Group>
+              )}
+            </div>
+            <Stack gap="sm" style={{ flex: 'none' }}>
+              <Checkbox
+                size="xs"
+                label="Include passwords"
+                description="Encrypted with an Export Passphrase. Without it the file carries no secrets."
+                checked={includeSecrets}
+                onChange={(e) => setIncludeSecrets(e.currentTarget.checked)}
+              />
               <Stack gap="xs">
                 <PasswordInput
                   label="Export Passphrase"
                   size="xs"
                   autoComplete="new-password"
+                  disabled={!includeSecrets}
                   value={passphrase}
                   onChange={(e) => setPassphrase(e.currentTarget.value)}
                   error={
-                    passphrase !== '' && tooShort
+                    includeSecrets && passphrase !== '' && tooShort
                       ? `At least ${MIN_EXPORT_PASSPHRASE_LENGTH} characters.`
                       : undefined
                   }
@@ -139,26 +158,28 @@ export function ConnectionExportDialog({ onClose, ids }: {
                   label="Confirm Export Passphrase"
                   size="xs"
                   autoComplete="new-password"
+                  disabled={!includeSecrets}
                   value={confirm}
                   onChange={(e) => setConfirm(e.currentTarget.value)}
-                  error={confirm !== '' && mismatch ? 'Does not match.' : undefined}
+                  error={includeSecrets && confirm !== '' && mismatch ? 'Does not match.' : undefined}
                 />
               </Stack>
-            )}
+            </Stack>
           </>
         )}
         {error && (
-          <Alert color="red" variant="light" role="alert">
+          <Alert color="red" variant="light" role="alert" style={{ flex: 'none' }}>
             {error}
           </Alert>
         )}
-        <Group justify="flex-end" gap="xs">
+        <Group justify="flex-end" gap="xs" style={{ flex: 'none' }}>
           <Button variant="subtle" size="compact-xs" onClick={close} disabled={submitting}>
             {result ? 'Close' : 'Cancel'}
           </Button>
           {!result && (
             <SubmitButton
               size="compact-xs"
+              miw={84}
               submitting={submitting}
               disabled={!valid}
               onClick={() => void submit()}

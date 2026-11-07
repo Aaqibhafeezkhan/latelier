@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { DEFAULT_THEME, mergeMantineTheme } from '@mantine/core';
+import { cssVariablesResolver, mantineTheme } from '../../src/theme/mantineTheme';
 import {
   parseColor,
   relativeLuminance,
@@ -57,7 +59,10 @@ const THEMES = {
 
 const TOKENS = {
   muted: { varName: '--atelier-text-muted', minRatio: 4.5 },
-  ghost: { varName: '--atelier-text-ghost', minRatio: 3 },
+  ghost: { varName: '--atelier-text-ghost', minRatio: 4.5 },
+  'json number': { varName: '--atelier-color-number', minRatio: 4.5 },
+  'json string': { varName: '--atelier-color-string', minRatio: 4.5 },
+  'json boolean': { varName: '--atelier-color-boolean', minRatio: 4.5 },
 } as const;
 
 describe('theme token contrast (WCAG AA, worst-case surface)', () => {
@@ -77,6 +82,20 @@ describe('theme token contrast (WCAG AA, worst-case surface)', () => {
       }
     }
 
+    // Accent as text: `--atelier-accent-ink` over each surface, and over the selected-row
+    // tint (`--atelier-accent-soft`) painted on each of them.
+    const ink = parseColor(readVar(theme.block, '--atelier-accent-ink'));
+    const soft = parseColor(readVar(theme.block, '--atelier-accent-soft'));
+    for (const surfaceVar of theme.surfaces) {
+      const surface = parseColor(readVar(theme.block, surfaceVar));
+      it(`${themeName} accent ink over ${surfaceVar} clears 4.5:1`, () => {
+        expect(contrastRatio(ink, surface)).toBeGreaterThanOrEqual(4.5);
+      });
+      it(`${themeName} accent ink over accent-soft on ${surfaceVar} clears 4.5:1`, () => {
+        expect(contrastRatio(ink, blend(soft, surface))).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+
     it(`${themeName}: muted alpha is higher than ghost alpha`, () => {
       const mutedAlpha = parseColor(readVar(theme.block, TOKENS.muted.varName)).a;
       const ghostAlpha = parseColor(readVar(theme.block, TOKENS.ghost.varName)).a;
@@ -87,6 +106,14 @@ describe('theme token contrast (WCAG AA, worst-case surface)', () => {
       expect(readVar(theme.block, '--mantine-color-dimmed')).toBe('var(--atelier-text-muted)');
     });
   }
+
+  // Mantine's own rule outranks index.css, so these reach the page only through the resolver.
+  it('routes Mantine dimmed and placeholder text to the tokens measured above', () => {
+    const resolved = cssVariablesResolver(mergeMantineTheme(DEFAULT_THEME, mantineTheme));
+    expect(resolved.light['--mantine-color-dimmed']).toBe('var(--atelier-text-muted)');
+    expect(resolved.light['--mantine-color-placeholder']).toBe('var(--atelier-text-ghost)');
+    expect(resolved.dark['--mantine-color-placeholder']).toBe('var(--atelier-text-ghost)');
+  });
 });
 
 describe('contrast.ts helpers', () => {

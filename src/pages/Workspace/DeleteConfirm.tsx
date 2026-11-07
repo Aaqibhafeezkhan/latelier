@@ -56,8 +56,9 @@ export function DeleteConfirm({
   onClose,
   onDeleted,
 }: DeleteConfirmProps) {
-  // Dismiss paths only — `submit`'s own `onClose()` below stays raw, because a
-  // completed delete hands off to the refreshed grid.
+  // Also used after a completed delete: focus returns to the opener only if it
+  // survived the refresh (the list that `D` was typed in does; a clicked
+  // Delete button on a removed row does not, and its `focus()` is then a no-op).
   const close = useDialogFocusReturn(onClose);
   const [confirm, setConfirm] = React.useState('');
   const [err, setErr] = React.useState<string | null>(null);
@@ -172,7 +173,7 @@ export function DeleteConfirm({
       onDeleted(auditId, message);
       // The write is reported either way; only a dialog still on screen is
       // ours to close.
-      if (mountedRef.current) onClose();
+      if (mountedRef.current) close();
     } catch (e) {
       // A deleteMany that fails can stop part-way, so the sample is dropped
       // here too; harmless if the request was refused before touching data.
@@ -249,7 +250,7 @@ export function DeleteConfirm({
         )}
 
         {isMulti && (
-          <Stack gap={6}>
+          <Stack gap="var(--atelier-gap-xs)">
             <Text size="xs" c="dimmed">
               Type <strong>{collection}</strong> to confirm
             </Text>
@@ -258,6 +259,7 @@ export function DeleteConfirm({
               onChange={(e) => setConfirm(e.currentTarget.value)}
               placeholder={collection}
               aria-label={`Type ${collection} to confirm`}
+              data-autofocus
               size="xs"
             />
           </Stack>
@@ -270,7 +272,9 @@ export function DeleteConfirm({
         )}
 
         <Group justify="flex-end" gap="xs">
-          <Button variant="subtle" size="compact-xs" onClick={close}>
+          {/* A single document has no field to type in, so the dialog opens on
+              Cancel: the safe end of a destructive prompt, not on Close. */}
+          <Button variant="subtle" size="compact-xs" onClick={close} data-autofocus={isMulti ? undefined : true}>
             Cancel
           </Button>
           <SubmitButton

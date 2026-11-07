@@ -81,12 +81,14 @@ export function ReviewStep({ source, review, busy, error, passphraseError, onBac
     });
 
   return (
-    <Stack gap="sm">
+    <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
       <Text size="xs" c="dimmed">
         Nothing is written until you import. Renames, SSH and TLS files, and per-Connection Read-only are changed in
         the form afterwards.
       </Text>
-      <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+      {/* Takes whatever height the dialog has left, so a long list scrolls here
+          and the dialog never grows. */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         <Table fz="xs" verticalSpacing={4} aria-label="Connections to import">
           <Table.Thead>
             <Table.Tr>

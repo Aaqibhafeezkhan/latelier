@@ -61,7 +61,7 @@ export function ConnectionDeleteDialog({ name, count = 1, tabCount, onCancel, on
             ? ` It also closes ${tabCount} open tab${tabCount === 1 ? '' : 's'}.`
             : ''}
         </Text>
-        <Stack gap={6}>
+        <Stack gap="var(--atelier-gap-xs)">
           <Text size="xs" c="dimmed">
             {count > 1 ? <>Type <b>{name}</b> to confirm:</> : 'Type the connection name to confirm:'}
           </Text>

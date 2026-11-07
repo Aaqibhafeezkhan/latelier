@@ -268,10 +268,11 @@ export function CreateCollectionDrawer({
           value={name}
           onChange={(e) => setName(e.currentTarget.value)}
           autoFocus
+          data-autofocus
           size="xs"
         />
 
-        <Stack gap={6}>
+        <Stack gap="var(--atelier-gap-xs)">
           <Checkbox
             label="Capped collection"
             aria-label="Capped"
@@ -310,7 +311,7 @@ export function CreateCollectionDrawer({
           )}
         </Stack>
 
-        <Stack gap={6}>
+        <Stack gap="var(--atelier-gap-xs)">
           <Checkbox
             label="Time series"
             aria-label="Time series"
@@ -348,7 +349,7 @@ export function CreateCollectionDrawer({
           )}
         </Stack>
 
-        <Stack gap={6}>
+        <Stack gap="var(--atelier-gap-xs)">
           <Checkbox
             label="Clustered collection (MongoDB 5.3+)"
             aria-label="Clustered"
@@ -374,7 +375,7 @@ export function CreateCollectionDrawer({
           )}
         </Stack>
 
-        <Stack gap={6}>
+        <Stack gap="var(--atelier-gap-xs)">
           <Checkbox
             label="Collation (EJSON)"
             aria-label="Collation"
@@ -388,12 +389,12 @@ export function CreateCollectionDrawer({
               value={collation}
               onChange={(e) => setCollation(e.currentTarget.value)}
               minRows={2}
-              styles={{ input: { fontFamily: 'monospace', fontSize: 11 } }}
+              styles={{ input: { fontFamily: 'monospace', fontSize: 'var(--atelier-fs-xs)' } }}
             />
           )}
         </Stack>
 
-        <Stack gap={6}>
+        <Stack gap="var(--atelier-gap-xs)">
           <Checkbox
             label="Validator (EJSON)"
             aria-label="Validator"
@@ -408,7 +409,7 @@ export function CreateCollectionDrawer({
                 value={validator}
                 onChange={(e) => setValidator(e.currentTarget.value)}
                 minRows={3}
-                styles={{ input: { fontFamily: 'monospace', fontSize: 11 } }}
+                styles={{ input: { fontFamily: 'monospace', fontSize: 'var(--atelier-fs-xs)' } }}
               />
               <Group gap="xs">
                 <Select
