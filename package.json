@@ -47,6 +47,8 @@
     "test:component": "vitest run --project component",
     "test": "node scripts/run-tests.mjs",
     "test:e2e": "bash scripts/run-e2e.sh",
+    "perf:palette": "ATELIER_PALETTE_PERF=1 bash scripts/run-e2e.sh tests/e2e/palette-perf.e2e.ts",
+    "perf:rank": "ATELIER_RANK_PERF=1 vitest run --project unit tests/unit/commands-rank.perf.spec.ts",
     "test:mutation": "stryker run",
     "audit:ipc": "node scripts/audit-ipc.mjs",
     "fonts:fetch": "node scripts/fetch-fonts.mjs"

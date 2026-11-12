@@ -33,6 +33,17 @@ function ContextProbe() {
   return <div data-testid="palette-connection">{ctx.connectionId ?? 'none'}</div>;
 }
 
+/** Opens the palette on `query`: a Connection is listed once the user types. */
+function openPalette(query: string) {
+  fireEvent.click(screen.getByText('toggle'));
+  fireEvent.change(screen.getByLabelText('Search commands'), { target: { value: query } });
+}
+
+const optionTitles = () =>
+  within(screen.getByRole('dialog', { name: 'Command palette' }))
+    .queryAllByRole('option')
+    .map((o) => o.querySelector('[data-title]')?.getAttribute('data-title'));
+
 function ToggleButton() {
   const palette = usePaletteApi();
   return <button onClick={palette.toggle}>toggle</button>;
@@ -55,8 +66,7 @@ function app() {
 
 /**
  * Routed variant — `ConnectionPaletteCommands` is registered globally, so its
- * `connection.delete:<id>` / `connection.edit:<id>` rows fire from any route,
- * not just `/workspace`. Mirrors `app()` in
+ * Connection actions fire from any route, not just `/workspace`. Mirrors `app()` in
  * `tests/component/connection-palette-switch.spec.tsx`.
  */
 function routedApp(initialEntries: string[]) {
@@ -83,22 +93,14 @@ afterEach(() => {
 });
 
 /**
- * X16.5 — `connection.delete` used to be a single command gated on
- * `PaletteContext.connectionId` (the Focused Tab's Connection). After
- * After the tab-state rework, "a Connection is open but has no tab" is the normal state, so
- * that gate hid the command exactly when it was needed. It's now one
- * `connection.delete:<id>` / `connection.edit:<id>` per saved Connection,
- * registered by `ConnectionPaletteCommands` the same way `connection.open:<id>`
- * already is — the id is baked into `perform` at creation time, which is what
- * keeps a command's gate and its target from disagreeing (a bug class this avoids).
+ * Each saved Connection is one Connection object (X07 §13.4) whose actions are
+ * Open · Edit · Disconnect (while connected) · Delete…, registered by
+ * `ConnectionPaletteCommands`. The id is baked into each action at creation
+ * time, which is what keeps an action's gate and its target from disagreeing:
+ * a Connection open with no tab (the normal state) keeps its actions.
  */
-describe('Workspace palette connection commands', () => {
-  it('offers Delete and Edit for a Connection with no tabs open', async () => {
-    // X16.5 — the opposite of the old "does not offer Delete when
-    // there is no Focused Tab" test. A Connection can be open (status
-    // 'connected') with no tab pointing at it at all — a Switcher row click
-    // connects and opens no tab on purpose (spec §4.6) — and that is exactly
-    // the case the palette must not go blind in.
+describe('Workspace palette Connection objects', () => {
+  it('lists no row per Connection on an empty query, and one row once its name is typed', async () => {
     installAtelierMock({
       conn: { list: async () => [conn()] },
       tabs: { list: async () => [] },
@@ -107,13 +109,46 @@ describe('Workspace palette connection commands', () => {
     render(app());
 
     fireEvent.click(screen.getByText('toggle'));
-    expect(await screen.findByText('Delete connection → Prod')).toBeTruthy();
-    expect(await screen.findByText('Edit connection → Prod')).toBeTruthy();
-    // AC also names Refresh — untouched by this ticket (it's a whole-list
-    // `conn.list()` refetch, not scoped to any one Connection, so it's still
-    // gated on the route rather than baked per-id), but still owed coverage
-    // that it's offered from the Data View at all.
-    expect(screen.getByText('Refresh connection')).toBeTruthy();
+    await act(async () => {});
+    expect(optionTitles()).not.toContain('Prod');
+    fireEvent.change(screen.getByLabelText('Search commands'), { target: { value: 'prod' } });
+    await waitFor(() => expect(optionTitles()).toEqual(['Prod']));
+    const footer = document.querySelector('[data-palette-footer]')!;
+    expect(footer.textContent).toContain('Open');
+    expect(footer.textContent).toContain('Actions');
+    expect(footer.textContent).not.toContain('Open in new tab');
+  });
+
+  it('lists Edit, Disconnect and Delete… for a connected Connection with no tabs open', async () => {
+    installAtelierMock({
+      conn: { list: async () => [conn()] },
+      tabs: { list: async () => [] },
+    });
+
+    render(app());
+
+    openPalette('prod');
+    await waitFor(() => expect(optionTitles()).toEqual(['Prod']));
+    fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter', altKey: true });
+    expect(optionTitles()).toEqual(['Open', 'Edit', 'Disconnect', 'Delete…']);
+    // Refresh is a whole-list refetch, still a command gated on the route.
+    fireEvent.keyDown(screen.getByLabelText('Filter actions'), { key: 'Escape' });
+    fireEvent.change(screen.getByLabelText('Search commands'), { target: { value: 'refresh connection' } });
+    expect(optionTitles()).toContain('Refresh connection');
+  });
+
+  it('offers no Disconnect for a Connection that is not connected', async () => {
+    installAtelierMock({
+      conn: { list: async () => [conn({ status: 'disconnected' })] },
+      tabs: { list: async () => [] },
+    });
+
+    render(app());
+
+    openPalette('prod');
+    await waitFor(() => expect(optionTitles()).toEqual(['Prod']));
+    fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter', altKey: true });
+    expect(optionTitles()).toEqual(['Open', 'Edit', 'Delete…']);
   });
 
   // Two Connections, tabs on both, Focused Tab on Staging (c2) — not the
@@ -134,50 +169,78 @@ describe('Workspace palette connection commands', () => {
     await waitFor(() => expect(screen.getByTestId('palette-connection').textContent).toBe('c2'));
   }
 
-  // X16.1, spec §4.5 — the Focused Tab here is Staging (c2), not the
-  // first Connection in the list. A reading that read `ctx.connectionId` at
-  // call time (the old bug class) or that only offered the Focused Tab's
-  // Connection would hand a "Delete Prod" pick to Staging, or hide "Delete
-  // Prod" outright. Both are wrong: every Connection gets its own command,
-  // baked-in id and all, regardless of what's focused.
-  it('names and acts on the Connection the command says, not the Focused Tab', async () => {
+  /** Types `query` and performs the first row with Enter. */
+  async function perform(query: string, title: string) {
+    openPalette(query);
+    await waitFor(() => expect(optionTitles()[0]).toBe(title));
+    fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter' });
+  }
+
+  // X16.1, spec §4.5 — the Focused Tab here is Staging (c2). An action that
+  // read `ctx.connectionId` at call time, or a palette that only offered the
+  // Focused Tab's Connection, would hand a "delete Prod" pick to Staging.
+  it('names and acts on the Connection the action says, not the Focused Tab', async () => {
     await renderTwoConnectionsFocusedOnStaging();
 
-    // The Focused Tab's own Connection (Staging) still works…
-    fireEvent.click(screen.getByText('toggle'));
-    fireEvent.click(await screen.findByText('Delete connection → Staging'));
+    await perform('delete staging', 'Staging');
     expect(await screen.findByRole('dialog', { name: 'Delete "Staging"?' })).toBeTruthy();
 
-    // …but so does a Connection that is NOT the Focused Tab's (Prod) — proof
-    // the id is baked into `perform` at creation time, not read from
-    // `PaletteContext` when the command runs.
-    fireEvent.click(screen.getByText('toggle'));
-    fireEvent.click(await screen.findByText('Delete connection → Prod'));
+    await perform('drop prod', 'Prod');
     expect(await screen.findByRole('dialog', { name: 'Delete "Prod"?' })).toBeTruthy();
   });
 
   it('cancelling from the palette-triggered dialog reaches the same ConnectionDeleteDialog', async () => {
     await renderTwoConnectionsFocusedOnStaging();
 
-    fireEvent.click(screen.getByText('toggle'));
-    fireEvent.click(await screen.findByText('Delete connection → Staging'));
+    await perform('delete staging', 'Staging');
     const dialog = await screen.findByRole('dialog', { name: 'Delete "Staging"?' });
 
-    // No special-casing for the palette route — Cancel behaves exactly like
-    // any other trigger of the same shared dialog.
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'Delete "Staging"?' })).toBeNull(),
     );
   });
 
-  // The command is registered globally, so it can fire from OUTSIDE
+  it('Disconnect reaches the Workspace confirm dialog, which counts the open tabs', async () => {
+    await renderTwoConnectionsFocusedOnStaging();
+
+    await perform('disconnect prod', 'Prod');
+    const dialog = await screen.findByRole('dialog', { name: 'Disconnect "Prod"?' });
+    expect(dialog.textContent).toMatch(/1 (open )?tab/);
+  });
+
+  // The object is registered globally, so its action can fire from OUTSIDE
   // /workspace and land on a fresh Workspace mount whose own `connections`
   // hasn't resolved yet. `openDeleteConnectionModal` looks the id up in
   // `connections` and no-ops on a miss — acting (and clearing the nav state)
-  // before that first load lands would drop the intent silently. Mirrors the
-  // resolution-order test in connection-palette-switch.spec.tsx for
-  // `openConnectionId`.
+  // before that first load lands would drop the intent silently.
+  // `openDeleteConnectionModal` refuses while the tabs are loading (it counts
+  // them for its copy): an intent acted on before they land is dropped (#746).
+  it('a delete triggered from outside /workspace survives tabs that resolve late', async () => {
+    let resolveTabs: (v: unknown[]) => void = () => {};
+    const tabsPromise = new Promise<unknown[]>((resolve) => {
+      resolveTabs = resolve;
+    });
+    installAtelierMock({
+      conn: { list: async () => [conn()] },
+      tabs: { list: () => tabsPromise as never },
+    });
+
+    render(routedApp(['/connections/c1']));
+    await perform('delete prod', 'Prod');
+
+    await waitFor(() => expect(screen.queryByText('connection detail screen')).toBeNull());
+    await act(async () => {});
+    expect(screen.queryByRole('dialog', { name: 'Delete "Prod"?' })).toBeNull();
+
+    await act(async () => {
+      resolveTabs([]);
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole('dialog', { name: 'Delete "Prod"?' })).toBeTruthy();
+  });
+
   it('a delete triggered from outside /workspace survives the fresh mount, even if connections resolve late', async () => {
     let connCallCount = 0;
     let resolveSecondConnList: (v: ConnectionSummary[]) => void = () => {};
@@ -188,8 +251,7 @@ describe('Workspace palette connection commands', () => {
     const connList = vi.fn(async () => {
       connCallCount += 1;
       // Call #1 is ConnectionPaletteCommands' own subscription (mounted from
-      // the start) — resolve immediately so the palette command is
-      // clickable. Call #2 is Workspace's fresh-mount subscription — held
+      // the start). Call #2 is Workspace's fresh-mount subscription — held
       // open so this test controls when it resolves relative to the intent.
       if (connCallCount === 1) return connections;
       return secondConnListPromise;
@@ -202,11 +264,8 @@ describe('Workspace palette connection commands', () => {
     render(routedApp(['/connections/c1']));
     expect(screen.getByText('connection detail screen')).toBeTruthy();
 
-    fireEvent.click(screen.getByText('toggle'));
-    fireEvent.click(await screen.findByText('Delete connection → Prod'));
+    await perform('delete prod', 'Prod');
 
-    // Landed on Workspace, but its own `connections` is still empty — the
-    // dialog must not have fired (and dropped the intent) against that.
     await waitFor(() => expect(screen.queryByText('connection detail screen')).toBeNull());
     expect(screen.queryByRole('dialog', { name: 'Delete "Prod"?' })).toBeNull();
 

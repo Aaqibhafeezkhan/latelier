@@ -25,8 +25,8 @@ afterEach(() => {
 // unmounts with the palette) and so, on a close, to <body>.
 describe('dialogs opened from the command palette return focus to the opener', () => {
   it.each([
-    ['Keyboard shortcuts…', 'Keyboard shortcuts'],
-    ['Show activity log', 'Activity log'],
+    ['Show keyboard shortcuts', 'Keyboard shortcuts'],
+    ['Open activity log', 'Activity log'],
     ['Open audit log', 'Audit log'],
     ['Open settings', 'Settings'],
   ])('%s: Escape lands focus back on the control that opened the palette', async (row, name) => {

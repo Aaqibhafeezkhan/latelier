@@ -1,7 +1,6 @@
 import React from 'react';
 import { AppShell } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
-import { isKnownNotConnected } from '../../state/connections';
 import { confirmDestructive } from '../../utils/confirm';
 import { getErrorMessage } from '../../api/atelier';
 import { notify } from '../../theme/notifications';
@@ -10,9 +9,15 @@ import type { WorkspaceTabsState } from '../../state/workspaceTabs';
 import { ConnectionSwitcher, type ConnectionSwitcherProps } from '../../features/connections/ConnectionSwitcher';
 import { TitleBar } from './TitleBar';
 import { TabStrip } from './TabStrip';
+import { activateTab, closeTabGuarded } from './tabActions';
 import { ResizeHandle } from './ResizeHandle';
 import { DividerNotch } from './DividerNotch';
-import { DbCollectionNavigator, type NavigatorOpenInput } from './DbCollectionNavigator';
+import {
+  DbCollectionNavigator,
+  type NavigatorDialogRequest,
+  type NavigatorOpenInput,
+  type NavigatorRevealInput,
+} from './DbCollectionNavigator';
 import { useSettings } from '../SettingsContext';
 import { usePaletteApi } from '../../commands/CommandPalette';
 import { useHints } from '../../hints/HintsContext';
@@ -43,6 +48,15 @@ export interface ShellSectionProps {
   navigatorData: NavigatorData;
   /** Opens the reference-rules drawer for the Focused Tab's collection. */
   onOpenReferences: () => void;
+  /** A collection dialog to open from outside the navigator, and its reset. */
+  navigatorDialogRequest: NavigatorDialogRequest | null;
+  onNavigatorDialogHandled: () => void;
+  /**
+   * The row the navigator is to reveal, owned by Workspace so the palette's
+   * Reveal in navigator can ask for one too; null once it has landed.
+   */
+  navigatorRevealRequest: NavigatorRevealInput | null;
+  setNavigatorRevealRequest: (request: NavigatorRevealInput | null) => void;
 }
 
 export function ShellSection({
@@ -65,21 +79,17 @@ export function ShellSection({
   connectionDialogs,
   navigatorData,
   onOpenReferences,
+  navigatorDialogRequest,
+  onNavigatorDialogHandled,
+  navigatorRevealRequest,
+  setNavigatorRevealRequest,
 }: ShellSectionProps) {
   const T = themeVars;
   const { sidebarCollapsed, toggleSidebar, leftWidth, setLeftWidth, commitLeftWidth } = panelPrefs;
   const { openEditConnectionModal, requestDisconnect } = connectionDialogs;
-  const [revealRequest, setRevealRequest] = React.useState<NavigatorOpenInput | null>(null);
 
   const activate = (id: string) => {
-    if (id !== tabs.activeId) hints.recordSessionEvent('tabSwitch', '*');
-    // Clicking a dormant tab is the wake gesture: connect its Connection, same as clicking the navigator root.
-    const target = tabs.tabs.find((t) => t.id === id);
-    if (target) {
-      const conn = connections.find((c) => c.id === target.connectionId);
-      if (isKnownNotConnected(conn)) openConnection(target.connectionId);
-    }
-    void tabs.setActive(id);
+    void activateTab({ tabs, connections, recordSessionEvent: hints.recordSessionEvent, openConnection }, id);
   };
 
   // One prompt for the lot, naming how many pipelines would be lost. If the
@@ -142,7 +152,7 @@ export function ShellSection({
       dbName: t.dbName,
       value: true,
     });
-    setRevealRequest({ connectionId: t.connectionId, dbName: t.dbName, collection: t.collection });
+    setNavigatorRevealRequest({ connectionId: t.connectionId, dbName: t.dbName, collection: t.collection });
   };
 
   return (
@@ -171,20 +181,7 @@ export function ShellSection({
             void tabs.openScript({ connectionId: scratchConnectionId });
           }}
           onActivate={activate}
-          onClose={(id) => {
-            const t = tabs.tabs.find((x) => x.id === id);
-            if (t?.kind === 'collection' && t.state.aggregation?.dirty) {
-              void confirmDestructive({
-                title: 'Discard unsaved pipeline changes?',
-                body: 'This tab has pipeline edits that have not been saved. Closing it discards them.',
-                confirmLabel: 'Discard and close',
-              }).then((proceed) => {
-                if (proceed) void tabs.close(id);
-              });
-              return;
-            }
-            void tabs.close(id);
-          }}
+          onClose={(id) => void closeTabGuarded(tabs, id)}
           onReorder={(ids) => void tabs.reorder(ids)}
           onTogglePin={(id) => {
             const t = tabs.tabs.find((x) => x.id === id);
@@ -241,8 +238,10 @@ export function ShellSection({
                 }}
                 onOpenReferences={onOpenReferences}
                 data={navigatorData}
-                revealRequest={revealRequest}
-                onRevealHandled={() => setRevealRequest(null)}
+                revealRequest={navigatorRevealRequest}
+                onRevealHandled={() => setNavigatorRevealRequest(null)}
+                dialogRequest={navigatorDialogRequest}
+                onDialogRequestHandled={onNavigatorDialogHandled}
               />
               <div
                 style={{

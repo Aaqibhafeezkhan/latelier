@@ -6,7 +6,7 @@ import {
   Separator as PanelResizeHandle,
   type PanelImperativeHandle,
 } from 'react-resizable-panels';
-import { getErrorMessage, isIpcError } from '../../api/atelier';
+import { getErrorMessage } from '../../api/atelier';
 import { notify } from '../../theme/notifications';
 import { themeVars } from '../../theme/themeVars';
 import { I } from '../../icons';
@@ -39,6 +39,7 @@ import type { IndexCreateRequest } from '../IndexesTab';
 import { QueryBar } from './QueryBar';
 import { ResultViewer } from './ResultViewer';
 import { BuilderPane } from './BuilderPane';
+import { openSavedPipeline, renameOpenPipelines } from './savedActions';
 import { ResizeHandle } from './ResizeHandle';
 import { DividerNotch } from './DividerNotch';
 import { MongoShellPane } from './MongoShellPane';
@@ -239,9 +240,12 @@ export interface PanelBodyProps {
   structureInitialCreate?: IndexCreateRequest | null;
   onStructureInitialCreateConsumed?: () => void;
   connectErrors: Record<string, ConnectErrorInfo>;
+  /** Loads that replace the query from outside (the palette's saved Open/Run), counted with this pane's own. */
+  externalLoadGen?: number;
 }
 
 export function PanelBody({
+  externalLoadGen = 0,
   panelPrefs,
   collectionTabActions,
   documentDialogs,
@@ -292,7 +296,8 @@ export function PanelBody({
   // it too: such a load re-derives the advanced row's open state, which a
   // same-tab `hasAdvanced` change alone misses when the row already had
   // values and was collapsed.
-  const [loadGen, bumpLoadGen] = React.useReducer((n: number) => n + 1, 0);
+  const [ownLoadGen, bumpLoadGen] = React.useReducer((n: number) => n + 1, 0);
+  const loadGen = ownLoadGen + externalLoadGen;
   const {
     prefsReady,
     refDrawerWidth, setRefDrawerWidth, commitRefDrawerWidth,
@@ -529,6 +534,7 @@ export function PanelBody({
                       darkMode={dark}
                       sourceCount={null}
                       onPatch={patchAggregation}
+                      tabId={collection.tab.id}
                     />
                   </Tabs.Panel>
                   <Tabs.Panel value="structure" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
@@ -608,30 +614,12 @@ export function PanelBody({
                           onLoaded={bumpLoadGen}
                           onOpenInTab={(saved) => {
                             if (saved.kind === 'aggregation') {
-                              // Main loads the stored stages and refuses a pipeline
-                              // that was deleted since the list loaded; say so rather
-                              // than leave the click doing nothing.
-                              tabs
-                                .openAggregation({
-                                  connectionId: saved.connectionId,
-                                  dbName: saved.dbName,
-                                  collection: saved.collection,
-                                  savedId: saved.id,
-                                  name: saved.name,
-                                })
-                                .catch((e: unknown) =>
-                                  notify.error(
-                                    // Main's NOT_FOUND text names the row by its id.
-                                    isIpcError(e) && e.code === 'NOT_FOUND'
-                                      ? 'It no longer exists.'
-                                      : getErrorMessage(e, String(e)),
-                                    { title: `Could not open “${saved.name}”` },
-                                  ),
-                                );
+                              void openSavedPipeline(tabs, saved);
                             } else if (saved.kind === 'script') {
                               void tabs.openScript({ connectionId: saved.connectionId });
                             }
                           }}
+                          onSavedRenamed={(saved, name) => renameOpenPipelines(tabs, saved.id, name)}
                           onOpenAsPipeline={(stages) => {
                             tabs
                               .openAggregation({

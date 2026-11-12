@@ -1,4 +1,30 @@
-import type { Command } from './types';
+import { prepareCommand, prunePrepared } from './rank';
+import type { Command, PaletteObject } from './types';
+
+/**
+ * The row an object is listed as: its name is the title and the match text, it
+ * is listed once the user types (or as Recent), and Enter performs its default
+ * action. Throws on an object the palette could not offer safely.
+ */
+export function objectRow(obj: PaletteObject): Command {
+  const [first] = obj.actions;
+  if (!first) throw new Error(`palette object "${obj.id}" has no actions`);
+  if (first.destructive) throw new Error(`palette object "${obj.id}": a destructive action is never the default`);
+  const alternates = obj.actions.filter((a) => a.alternate);
+  if (alternates.length > 1 || alternates.some((a) => a.destructive)) {
+    throw new Error(`palette object "${obj.id}": at most one alternate, never a destructive one`);
+  }
+  return {
+    id: obj.id,
+    title: obj.name,
+    subtitle: obj.subtitle,
+    keywords: obj.keywords,
+    group: obj.kind === 'connection' ? 'connection' : 'workspace',
+    hideWhenEmptyQuery: true,
+    object: obj,
+    perform: (ctx) => first.perform(ctx),
+  };
+}
 
 type Listener = () => void;
 
@@ -13,6 +39,7 @@ class Registry {
   private listeners = new Set<Listener>();
   private warnedIds = new Set<string>();
   private cachedList: Command[] | null = null;
+  private prunePending = false;
 
   list(): Command[] {
     // Cached so `useSyncExternalStore` sees a stable identity when nothing
@@ -34,6 +61,8 @@ class Registry {
         }
         this.warnedIds.add(cmd.id);
       }
+      // Text that does not change between keystrokes is prepared once, here.
+      prepareCommand(cmd);
       this.entries.set(cmd.id, { cmd, token });
     }
     this.notify();
@@ -45,6 +74,11 @@ class Registry {
       }
       this.notify();
     };
+  }
+
+  /** Objects go in as rows (`objectRow`), under the same rules as commands. */
+  addObjects(objects: PaletteObject[]): () => void {
+    return this.add(objects.map(objectRow));
   }
 
   subscribe(cb: Listener): () => void {
@@ -61,7 +95,22 @@ class Registry {
     this.notify();
   }
 
+  /**
+   * Forgets the cached preparations of ids no longer registered. Deferred to a
+   * microtask: a re-registration unregisters the old batch and adds the new one
+   * in the same commit, and pruning in between would throw the work away.
+   */
+  private schedulePrune(): void {
+    if (this.prunePending) return;
+    this.prunePending = true;
+    queueMicrotask(() => {
+      this.prunePending = false;
+      prunePrepared((id) => this.entries.has(id));
+    });
+  }
+
   private notify(): void {
+    this.schedulePrune();
     this.cachedList = null;
     for (const cb of this.listeners) cb();
   }

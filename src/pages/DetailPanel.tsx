@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { themeVars } from '../theme/themeVars';
 import { I } from '../icons';
 import { Button, Table, UnstyledButton, VisuallyHidden } from '@mantine/core';
@@ -559,6 +559,15 @@ export function DetailPanel({ selected, loading, onDelete, onDisconnect }: {
   const T = themeVars;
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = React.useState<Tab>('Overview');
+  // A tab asked for on arrival (the palette's Open monitor, users, roles),
+  // again on each new arrival, as clicking that tab does.
+  const location = useLocation();
+  const askedTab = (location.state as { detailTab?: unknown } | null)?.detailTab;
+  React.useEffect(() => {
+    // Acts on an arrival's one-shot request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (TABS.includes(askedTab as Tab)) setActiveTab(askedTab as Tab);
+  }, [askedTab, location.key]);
   const [runtime, setRuntime] = React.useState<ConnectionRuntime | null>(null);
 
   React.useEffect(() => {

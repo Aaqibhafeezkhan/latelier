@@ -90,13 +90,13 @@ describe('PaletteContext connectionId fallback', () => {
 
   // The tests above prove the fallback mechanism in isolation; this proves
   // the real wiring — a genuine registered command, not a stand-in — is
-  // actually reachable from the Data View. `connection.edit` is one of the
-  // commands identified as at risk of silently disappearing.
-  it('a real connectionId-gated command (connection.edit) is offered from the Data View', () => {
+  // actually reachable with a Connection focused. `nav.workspace` is gated on
+  // `connectionId`, so it is among the commands at risk of silently disappearing.
+  it('a real connectionId-gated command (nav.workspace) is offered with a Connection focused', () => {
     installAtelierMock({});
     act(() => setFocusedConnectionId('conn-1'));
     render(
-      <MemoryRouter initialEntries={['/workspace']}>
+      <MemoryRouter initialEntries={['/connections']}>
         <PaletteContextProvider>
           <SettingsProvider>
             <CommandPaletteRoot>
@@ -108,6 +108,6 @@ describe('PaletteContext connectionId fallback', () => {
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByText('toggle'));
-    expect(screen.getByText('Edit selected connection')).toBeTruthy();
+    expect(screen.getByText('Go to workspace')).toBeTruthy();
   });
 });

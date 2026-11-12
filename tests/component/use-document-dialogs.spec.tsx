@@ -98,7 +98,7 @@ function mountDialogs(
   const view = renderHook(
     (props: { activeTabId: string | null }) => {
       renders += 1;
-      const queryRunner: UseQueryRunnerResult = { run, cancel: () => {}, isLoading: false };
+      const queryRunner: UseQueryRunnerResult = { run, cancel: () => {}, isLoading: false, isRunning: () => false };
       return useDocumentDialogs({
         activeCollectionRef,
         queryRunner,
@@ -689,7 +689,7 @@ describe('useDocumentDialogs', () => {
     }) {
       const d = useDocumentDialogs({
         activeCollectionRef: activeRef,
-        queryRunner: { run, cancel: () => {}, isLoading: false },
+        queryRunner: { run, cancel: () => {}, isLoading: false, isRunning: () => false },
         activeTabId,
         resolveRunnerTarget: (tabId) => {
           const t = openTabs.find((x) => x.id === tabId);

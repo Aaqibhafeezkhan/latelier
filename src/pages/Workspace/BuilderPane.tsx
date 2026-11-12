@@ -45,6 +45,7 @@ import {
   carryDisabled,
   isGroupNode,
   nodeAt,
+  andAtRoot,
   type GroupNode,
   type CondNode,
   type RawNode,
@@ -52,9 +53,11 @@ import {
   type NodeProblem,
 } from './filterTree';
 import { initHistory, pushHistory, undo, redo, canUndo, canRedo, type History } from './filterHistory';
+import { clearFilterStep, peekFilterStep } from './filterStep';
+import { peekFilterRequest, subscribeTabRequests, takeFilterRequest } from './tabRequest';
 import { SavedTab } from './views/SavedTab';
 import { RecentTab } from './views/RecentTab';
-import { legacyCompileFilter, type LegacyBuilderState, type LegacySavedFindPayload } from './legacyBuilder';
+import { hydrateFindPayload, type LegacySavedFindPayload } from './legacyBuilder';
 import { useSuggestions } from '../../features/fieldSuggestions/useSuggestions';
 import { SuggestionPopover } from '../../features/fieldSuggestions/SuggestionPopover';
 import { DEFAULT_FIELD_SOURCES, fieldOperatorSource } from '../../features/fieldSuggestions/sources';
@@ -86,6 +89,8 @@ interface BuilderPaneProps {
   savedRefreshKey: number;
   /** Opens an aggregation or script saved item as its own top-level tab. */
   onOpenInTab: (saved: SavedQuerySummary) => void;
+  /** Called once the Saved list has renamed one of its entries. */
+  onSavedRenamed: (saved: SavedQuerySummary, name: string) => void;
   /** Opens this query, as stages, in the collection's Aggregation view. */
   onOpenAsPipeline: (stages: Stage[]) => void;
   /**
@@ -364,12 +369,29 @@ function insertRowKeepingFocus(
 
 /** Puts the caret in the field box of the row at `path` once it has rendered. */
 function focusRowFieldAfterRender(path: NodePath): void {
-  const key = pathKey(path);
-  requestAnimationFrame(() => {
-    document
-      .querySelector<HTMLElement>(`[data-row-path="${key}"] input[placeholder="field"]`)
-      ?.focus();
-  });
+  requestAnimationFrame(() => focusRowInput(path, 'field'));
+}
+
+/**
+ * Puts the caret in the row's field box, or its value box. A row whose value
+ * has no text box (a boolean's switch, a null) takes it in the field box.
+ */
+function focusRowInput(path: NodePath, which: 'field' | 'value'): void {
+  const row = document.querySelector(`[data-row-path="${pathKey(path)}"]`);
+  const value =
+    which === 'value'
+      ? row?.querySelector<HTMLElement>('input[placeholder="value"], input[placeholder="add a value, Enter"]')
+      : null;
+  (value ?? row?.querySelector<HTMLElement>('input[placeholder="field"]'))?.focus();
+}
+
+/** The filter's first field box, or `+ Condition` when it has no row (the palette's Query…). */
+function focusFirstField(): void {
+  const drawer = document.querySelector('[data-group-path="root"]');
+  (
+    drawer?.querySelector<HTMLElement>('[data-row-path] input[placeholder="field"]') ??
+    drawer?.querySelector<HTMLElement>('button[aria-label="Add condition"]')
+  )?.focus();
 }
 
 /**
@@ -1644,7 +1666,20 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
   const [seed] = React.useState(() => seedTree(queryRaw, filterDraft));
   // Undo / redo history of the tree (§5.7): in memory only, so a remount (tab
   // switch, Reset, a Saved or Recent load) starts it afresh.
-  const [history, setHistory] = React.useState<History<GroupNode>>(() => initHistory(seed.root));
+  // A filter the palette replaced while this drawer was closed arrives as one
+  // step: what the tab held before, then the new tree.
+  const [history, setHistory] = React.useState<History<GroupNode>>(() => {
+    const step = peekFilterStep(meta.tabId, queryRaw);
+    return step
+      ? pushHistory(initHistory(seedTree(step.from.queryRaw, step.from.filterDraft).root), seed.root)
+      : initHistory(seed.root);
+  });
+  // Consumed by the render that read it, so it cannot reach a later drawer.
+  // Only that render: one that ran before the replacement landed, with the
+  // old text, would otherwise drop the step it is about to need.
+  React.useEffect(() => {
+    if (peekFilterStep(meta.tabId, queryRaw)) clearFilterStep(meta.tabId);
+  });
   const [readOnly, setReadOnly] = React.useState(seed.readOnly);
   const root = history.present;
   const [problems, setProblems] = React.useState<NodeProblem[]>(seed.problems);
@@ -1720,7 +1755,9 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
     const fresh = seedTree(queryRaw, undefined);
     setLastPrinted(queryRaw);
     setSyncedText(fresh.syncedText);
-    setHistory(initHistory(fresh.root));
+    setHistory(
+      peekFilterStep(meta.tabId, queryRaw) ? pushHistory(history, fresh.root) : initHistory(fresh.root),
+    );
     setReadOnly(fresh.readOnly);
     setFrozenOnDraft(false);
     setProblems([]);
@@ -1738,8 +1775,11 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
     } else if (parsed.ok) {
       setSyncedText(queryRaw);
       // The text moved under the drawer, so steps recorded against the old
-      // tree no longer apply: start the history again from the new one.
-      setHistory(initHistory(parsed.root));
+      // tree no longer apply: start the history again from the new one,
+      // unless the palette replaced the filter as one undoable step.
+      setHistory(
+        peekFilterStep(meta.tabId, queryRaw) ? pushHistory(history, parsed.root) : initHistory(parsed.root),
+      );
       setReadOnly(false);
       setProblems([]);
       // The outside text replaced the drawer's tree, rows the text can't
@@ -1787,6 +1827,45 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
     setReadOnly(false);
     commitRoot(nextRoot);
   };
+
+  // The palette's Query… and Filter by field… (X07 §13.6), taken as an edit
+  // of this drawer's own: one condition appended at the root, one step of
+  // its undo history, the filter already here kept, and nothing run.
+  //
+  // The caret goes to the new row once the commit that holds it has run, not
+  // on the next frame: an edit made from an effect renders in a scheduled
+  // task, which can land after that frame, and a frame that finds no row
+  // focuses nothing (the palette's own focus return then takes the caret).
+  const filterRequest = React.useSyncExternalStore(subscribeTabRequests, () => peekFilterRequest(meta.tabId));
+  const pendingFocusRef = React.useRef<{ path: NodePath; which: 'field' | 'value' } | null>(null);
+  React.useLayoutEffect(() => {
+    const pending = pendingFocusRef.current;
+    if (!pending) return;
+    pendingFocusRef.current = null;
+    focusRowInput(pending.path, pending.which);
+  }, [root]);
+  React.useEffect(() => {
+    if (!filterRequest) return;
+    const request = takeFilterRequest(meta.tabId);
+    if (!request) return;
+    if (!request.node) {
+      // Nothing to add: the drawer is already in the DOM.
+      focusFirstField();
+      return;
+    }
+    if (readOnly) {
+      notify.error("Nothing added — the filter bar's text isn't valid JSON.");
+      return;
+    }
+    const next = andAtRoot(root, request.node);
+    pendingFocusRef.current = { path: [next.children.length - 1], which: request.focus };
+    // The request comes from outside React (the palette's store) and may be
+    // waiting when this drawer mounts, so it lands here, once.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    applyEdit(next);
+    // Once per request: the edit reads this render's tree.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterRequest]);
 
   // Undo and redo commit through the same path as any edit, so the tree
   // they land on is printed, checked and written back like one.
@@ -1925,6 +2004,7 @@ function FilterDrawer({ queryRaw, filterDraft, onCommit, suggestionContext }: Fi
 function BuilderPaneInner({
   savedRefreshKey,
   onOpenInTab,
+  onSavedRenamed,
   onOpenAsPipeline,
   loadGen,
   onLoaded,
@@ -2064,83 +2144,9 @@ function BuilderPaneInner({
     });
   };
 
-  /**
-   * Hydrate a stored find payload (saved or recent) into a builder patch —
-   * the single call site for the W13-2 shim (spec §8). `queryRaw` when
-   * present, else the pre-W13 filter compiled from `builder.conditions` via
-   * the frozen `legacyCompileFilter`. Sort/limit/projection are copied
-   * explicitly into the shrunk `BuilderState` shape (§8.4) rather than
-   * passed through wholesale — the legacy `builder` also carries
-   * `conditions`/`logic`, which the live type no longer has room for.
-   *
-   * `payload` is typed against `LegacySavedFindPayload`, not the live
-   * `SavedFindPayload`, on purpose: if the live type's `queryRaw` is ever
-   * made required, an annotation borrowed from that type would let
-   * TypeScript "prove" the `??` fallback below unreachable and invite
-   * deleting it — reintroducing the exact data loss this shim exists to
-   * prevent for every find saved before `queryRaw` existed. On the wire,
-   * writes are checked per kind and reads are not, so a
-   * pre-`queryRaw` row really can arrive shaped like `LegacySavedFindPayload`
-   * despite the live `SavedQuery`/`RecentQuery` types claiming otherwise —
-   * that mismatch is exactly what this cast bridges.
-   */
-  const hydrateFindPayload = (
-    payload: LegacySavedFindPayload,
-  ): { builder: BuilderState; queryRaw: string } => {
-    // `payload.builder` is typed required, but this reads data straight off
-    // the wire (writes are checked per kind, reads are not, §8.3)
-    // — a row missing it entirely isn't ruled out. Fall back to an empty
-    // legacy builder (no conditions → `legacyCompileFilter` produces '{}')
-    // rather than throwing inside a click handler with no feedback.
-    const legacyBuilder: LegacyBuilderState = payload.builder ?? {
-      conditions: [],
-      logic: 'AND',
-      sort: state.builder.sort,
-      limit: state.builder.limit,
-      projection: state.builder.projection,
-    };
-    const { sort, limit, projection } = legacyBuilder;
-    // `projectionRaw` (W15 §9(b)) is saved and round-trips through SQLite,
-    // so it has to be read here too, not dropped: dropping it means "Run
-    // here" on a query saved with `{_id: 0}` runs with every field instead —
-    // the §11 fail-open, from a saved query. `LegacyBuilderState` is frozen
-    // and has no room for it, so TypeScript can't catch a drop here on its
-    // own — the cast reads it off the wire shape the same way the
-    // `queryRaw` fallback above does.
-    //
-    // Written explicitly, including when there is none: `onPatch` replaces
-    // the whole builder, so a payload with no raw projection has to *clear*
-    // one already on the tab, and clearing by omission is what caused this.
-    const projectionRaw = payload.builder
-      ? (payload.builder as { projectionRaw?: string }).projectionRaw
-      : state.builder.projectionRaw;
-    // W14 §9's find options, for the same reason: a collation changes which
-    // documents match, so dropping it reruns a different query. A payload
-    // without them clears the tab's, and so does a row with no builder at
-    // all, unlike the raw projection above: such a row predates the options,
-    // so the query it saved never had any.
-    const options = (payload.builder ?? {}) as Pick<
-      BuilderState,
-      'collation' | 'hint' | 'maxTimeMS' | 'readPreference'
-    >;
-    return {
-      builder: {
-        sort,
-        limit,
-        projection,
-        projectionRaw,
-        collation: options.collation,
-        hint: options.hint,
-        maxTimeMS: options.maxTimeMS,
-        readPreference: options.readPreference,
-      },
-      queryRaw: payload.queryRaw ?? legacyCompileFilter(legacyBuilder),
-    };
-  };
-
   const handleSavedRunHere = (saved: SavedQuery) => {
     if (saved.payload.kind === 'find') {
-      const patch = hydrateFindPayload(saved.payload as unknown as LegacySavedFindPayload);
+      const patch = hydrateFindPayload(saved.payload as unknown as LegacySavedFindPayload, state.builder);
       // The draft belongs to the filter being replaced: drop it with it.
       onPatch({ ...patch, filterDraft: undefined });
       onRun(patch);
@@ -2150,7 +2156,7 @@ function BuilderPaneInner({
 
   const handleRecentRunHere = (recent: RecentQuery) => {
     if (recent.payload.kind === 'find') {
-      const patch = hydrateFindPayload(recent.payload as unknown as LegacySavedFindPayload);
+      const patch = hydrateFindPayload(recent.payload as unknown as LegacySavedFindPayload, state.builder);
       onPatch({ ...patch, filterDraft: undefined });
       onRun(patch);
       onLoaded();
@@ -2268,6 +2274,8 @@ function BuilderPaneInner({
             refreshKey={savedRefreshKey}
             onRunHere={handleSavedRunHere}
             onOpenInTab={onOpenInTab}
+            tabId={meta.tabId}
+            onRenamed={onSavedRenamed}
           />
         </Tabs.Panel>
 

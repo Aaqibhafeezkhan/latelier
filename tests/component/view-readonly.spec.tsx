@@ -147,7 +147,7 @@ describe('useDocumentDialogs on a view', () => {
     return renderHook(() =>
       useDocumentDialogs({
         activeCollectionRef: ref,
-        queryRunner: { run: () => Promise.resolve(), cancel: () => {}, isLoading: false },
+        queryRunner: { run: () => Promise.resolve(), cancel: () => {}, isLoading: false, isRunning: () => false },
         activeTabId: 't1',
         resolveRunnerTarget: () => null,
         readOnly: false,

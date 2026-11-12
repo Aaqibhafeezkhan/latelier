@@ -57,6 +57,8 @@ export interface UseQueryRunnerResult {
    * error banner and never overwrites what was already on screen.
    */
   cancel: (target?: RunnerTarget) => void;
+  /** Whether a find is in flight for tab `id` right now, with no loading delay. */
+  isRunning: (id: string) => boolean;
 }
 
 export function useQueryRunner({
@@ -455,6 +457,7 @@ export function useQueryRunner({
   }, [run]);
 
   const isLoading = active ? loadingIds.has(active.id) : false;
+  const isRunning = useCallback((id: string) => runningIdsRef.current.has(id), []);
 
-  return { run, cancel, isLoading };
+  return { run, cancel, isLoading, isRunning };
 }

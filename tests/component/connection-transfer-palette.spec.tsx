@@ -27,8 +27,8 @@ function openPalette() {
 
 describe('Connection Export / Import palette commands', () => {
   it.each([
-    ['Export Connections…', 'Export Connections'],
-    ['Import Connections…', 'Import Connections'],
+    ['Export connections…', 'Export Connections'],
+    ['Import connections…', 'Import Connections'],
   ])('%s opens its dialog', async (title, dialogName) => {
     installAtelierMock({});
     render(

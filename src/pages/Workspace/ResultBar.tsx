@@ -10,6 +10,7 @@ import { notify } from '../../theme/notifications';
 import { DEFAULT_PAGE_SIZE_PREF_KEY, PAGE_SIZE_OPTIONS } from '../../state/workspaceTabs';
 import { FieldsControl } from './FieldsControl';
 import { ExportDialog } from './ExportDialog';
+import { consumeTabRequest, tabRequested, subscribeTabRequests } from './tabRequest';
 import { ExplainDrawer } from './Aggregation/ExplainDrawer';
 import { useFindExplain } from './useFindExplain';
 import { summarizeExplain } from '../../utils/explainSummary';
@@ -74,6 +75,17 @@ export function ResultBar() {
   // "No run yet" label. Read-only consumers (ScriptTab's snapshot provider)
   // have no working `run`, so they keep the plain label.
   const canRunHere = !isReadOnly && !isLoading && runProblem === null;
+
+  // The palette's Export… on this tab: the palette has already checked the
+  // tab has documents to export, so this only opens the dialog, once.
+  const requested = React.useSyncExternalStore(subscribeTabRequests, () => tabRequested('export', meta.tabId));
+  React.useEffect(() => {
+    if (!requested) return;
+    consumeTabRequest('export', meta.tabId);
+    // Acts on an external one-shot request, once.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExportOpen(true);
+  }, [requested, meta.tabId]);
 
   // #160 — what the last run's query did: the index it used, or a collection
   // scan. Stale on the same rule as the count: the plan describes the query

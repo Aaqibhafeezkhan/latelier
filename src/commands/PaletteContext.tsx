@@ -33,8 +33,8 @@ function parseConnectionId(pathname: string): string | null {
  * `connectionId` prefers the URL (`/connections/:id`) over the Data View's
  * Connection, not the other way round: on the deep management screen the
  * route id is the Connection being managed, which can differ from whatever
- * Connection the Data View is on — `connection.edit` and `connection.delete`
- * must act on the one you're looking at, not the one that happens to be open
+ * Connection the Data View is on — a command scoped to a Connection must act
+ * on the one you're looking at, not the one that happens to be open
  * elsewhere. Off that screen (notably the Data View home, where the route
  * carries no id) it falls back to the Focused Tab's Connection
  * — without this, every command gated on `connectionId` silently stops being

@@ -1,4 +1,4 @@
-// The palette's `Open: <db>.<coll>` rows, against a real mounted
+// The palette's `<db>.<coll>` collection rows, against a real mounted
 // `<Workspace/>`: what they list, how they are found, and that they read the
 // navigator's own database/collection cache instead of fetching a second copy.
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -22,9 +22,10 @@ import {
 import type { CollectionInfo, DbInfo } from '@shared/ipc';
 import type { ConnectionRuntime } from '@shared/types';
 
+// A name ending in `_view` is listed as a view.
 const coll = (name: string): CollectionInfo => ({
   name,
-  type: 'collection',
+  type: name.endsWith('_view') ? 'view' : 'collection',
   documentCount: 0,
   sizeBytes: 0,
   indexCount: 0,
@@ -54,6 +55,7 @@ function emit(runtime: ConnectionRuntime) {
 function mount(
   server: Record<string, Record<string, string[]>> = SERVER,
   extraTabs: ReturnType<typeof collectionTabFixture>[] = [],
+  { listOpened = false } = {},
 ) {
   statusListeners = [];
   const listDatabases = vi.fn(async ({ connectionId }: { connectionId: string }) =>
@@ -63,9 +65,13 @@ function mount(
     async ({ connectionId, dbName }: { connectionId: string; dbName: string }) =>
       (server[connectionId]?.[dbName] ?? []).map(coll),
   );
-  const openCollection = vi.fn(async (input: { connectionId: string; dbName: string; collection: string }) =>
-    collectionTabFixture({ id: 't-new', ...input, isActive: true }),
-  );
+  // With `listOpened`, the opened tab is listed from then on, as main lists it.
+  const opened: ReturnType<typeof collectionTabFixture>[] = [];
+  const openCollection = vi.fn(async (input: { connectionId: string; dbName: string; collection: string }) => {
+    const tab = collectionTabFixture({ id: 't-new', ...input, isActive: true });
+    if (listOpened) opened.splice(0, opened.length, tab);
+    return tab;
+  });
   installAtelierMock({
     conn: {
       list: async () => [
@@ -80,9 +86,10 @@ function mount(
           connectionId: 'c1',
           dbName: 'shop',
           collection: 'orders',
-          isActive: true,
+          isActive: opened.length === 0,
         }),
         ...extraTabs,
+        ...opened,
       ],
       setActive: async (id: string) => collectionTabFixture({ id }),
       openCollection: openCollection as never,
@@ -129,12 +136,12 @@ function search(q: string) {
   fireEvent.change(screen.getByLabelText('Search commands'), { target: { value: q } });
 }
 
-/** Every `Open: …` row the palette shows right now. */
+/** Every collection row the palette shows right now. */
 function openRows(): string[] {
   return within(screen.getByRole('dialog'))
     .queryAllByRole('option')
-    .map((o) => o.textContent ?? '')
-    .filter((t) => t.startsWith('Open: '));
+    .filter((o) => o.id.includes('-opt-tab.open:'))
+    .map((o) => o.querySelector('[data-title]')?.getAttribute('data-title') ?? '');
 }
 
 /** Waits for the palette sweep to reach every database of `c1`. */
@@ -160,7 +167,7 @@ describe('palette namespace rows', () => {
 
     openPalette();
     search('shop.orders');
-    await waitFor(() => expect(openRows()).toEqual(['Open: shop.orders']));
+    await waitFor(() => expect(openRows()).toEqual(['shop.orders']));
     fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter' });
 
     await waitFor(() =>
@@ -179,7 +186,7 @@ describe('palette namespace rows', () => {
 
     openPalette();
     search('shord');
-    await waitFor(() => expect(openRows()).toEqual(['Open: shop.orders']));
+    await waitFor(() => expect(openRows()).toEqual(['shop.orders']));
   });
 
   it('lists no namespace rows on an empty query', async () => {
@@ -197,12 +204,12 @@ describe('palette namespace rows', () => {
 
     openPalette();
     search('leads');
-    await waitFor(() => expect(openRows()).toEqual(['Open: crm.leads']));
+    await waitFor(() => expect(openRows()).toEqual(['crm.leads']));
     fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
     openPalette();
-    expect(openRows()).toEqual(['Open: crm.leads']);
+    expect(openRows()).toEqual(['crm.leads']);
   });
 
   it('does not count the same namespace on another connection as recent', async () => {
@@ -214,7 +221,7 @@ describe('palette namespace rows', () => {
 
     openPalette();
     search('shop.orders');
-    await waitFor(() => expect(openRows()).toEqual(['Open: shop.orders']));
+    await waitFor(() => expect(openRows()).toEqual(['shop.orders']));
     fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
@@ -223,12 +230,19 @@ describe('palette namespace rows', () => {
     await waitFor(() =>
       expect(listCollections.mock.calls.map(([a]) => a.connectionId)).toContain('c2'),
     );
+    // Both connected, both listed now: one row per Connection.
     openPalette();
     search('shop.orders');
-    await waitFor(() => expect(openRows()).toEqual(['Open: shop.orders']));
+    await waitFor(() => expect(openRows()).toEqual(['shop.orders', 'shop.orders']));
     search('');
 
-    expect(openRows()).toEqual([]);
+    // Only c1's was opened, so only c1's is recent.
+    expect(
+      within(screen.getByRole('dialog'))
+        .queryAllByRole('option')
+        .filter((o) => o.id.includes('-opt-tab.open:'))
+        .map((o) => o.id.slice(o.id.indexOf('tab.open:'))),
+    ).toEqual(['tab.open:c1:shop:orders']);
   });
 
   it('does not match every namespace on the letters of “Open”', async () => {
@@ -243,17 +257,17 @@ describe('palette namespace rows', () => {
     expect(openRows()).toEqual([]);
   });
 
-  it('lists only the focused connection’s namespaces', async () => {
+  it('lists no namespaces of another connection the navigator never listed, and asks it for none', async () => {
     const { listCollections, listDatabases } = mount();
     await settled(listCollections);
 
     openPalette();
-    search('Open:');
+    search('.');
     await waitFor(() =>
       expect(openRows().sort((a, b) => a.localeCompare(b))).toEqual([
-        'Open: crm.leads',
-        'Open: shop.customers',
-        'Open: shop.orders',
+        'crm.leads',
+        'shop.customers',
+        'shop.orders',
       ]),
     );
     expect(listDatabases.mock.calls.map(([a]) => a.connectionId)).not.toContain('c2');
@@ -288,7 +302,7 @@ describe('the palette shares the navigator’s cache', () => {
 
     openPalette();
     search('leads');
-    await waitFor(() => expect(openRows()).toEqual(['Open: crm.leads']));
+    await waitFor(() => expect(openRows()).toEqual(['crm.leads']));
     expect(listDatabases).toHaveBeenCalledTimes(dbCalls);
     expect(listCollections).toHaveBeenCalledTimes(collCalls);
   });
@@ -336,7 +350,7 @@ describe('the palette shares the navigator’s cache', () => {
 
     openPalette();
     search('invoices');
-    await waitFor(() => expect(openRows()).toEqual(['Open: shop.invoices']));
+    await waitFor(() => expect(openRows()).toEqual(['shop.invoices']));
   });
 });
 
@@ -347,7 +361,7 @@ describe('namespace rows follow the focused connection’s status', () => {
 
     emit({ id: 'c1', status: 'disconnected' });
     openPalette();
-    search('Open:');
+    search('.');
     await act(async () => {
       await new Promise((r) => setTimeout(r, 20));
     });
@@ -367,13 +381,13 @@ describe('namespace rows follow the focused connection’s status', () => {
     emit({ id: 'c1', status: 'connected' });
 
     openPalette();
-    search('Open:');
+    search('.');
     await waitFor(() =>
       expect(openRows().sort((a, b) => a.localeCompare(b))).toEqual([
-        'Open: billing.invoices',
-        'Open: crm.contacts',
-        'Open: crm.leads',
-        'Open: shop.orders',
+        'billing.invoices',
+        'crm.contacts',
+        'crm.leads',
+        'shop.orders',
       ]),
     );
   });
@@ -532,6 +546,92 @@ describe('the palette sweep on a server with many databases', () => {
     });
     openPalette();
     search('in_db9');
-    await waitFor(() => expect(openRows()).toEqual(['Open: db9.in_db9']));
+    await waitFor(() => expect(openRows()).toEqual(['db9.in_db9']));
+  });
+});
+
+describe('palette Collection actions', () => {
+  const press = (key: string, init: KeyboardEventInit = {}) =>
+    fireEvent.keyDown(document.activeElement ?? screen.getByLabelText('Search commands'), { key, ...init });
+  const actionTitles = () =>
+    within(screen.getByRole('dialog', { name: 'Command palette' }))
+      .getAllByRole('option')
+      .map((o) => [o.querySelector('[data-title]')?.getAttribute('data-title'), o.getAttribute('aria-disabled') === 'true']);
+
+  it('lists the actions in order, and ⌘↵ opens a second tab', async () => {
+    const { listCollections, openCollection } = mount();
+    await settled(listCollections);
+    openPalette();
+    search('leads');
+    await waitFor(() => expect(openRows()).toEqual(['crm.leads']));
+    fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter', altKey: true });
+    expect(actionTitles()).toEqual([
+      ['Open', false],
+      ['Open in new tab', false],
+      ['Query…', false],
+      ['Filter by field…', false],
+      ['Aggregate', false],
+      ['Schema', false],
+      ['Indexes', false],
+      ['Export…', false],
+      ['Import…', false],
+      ['Rename…', false],
+      ['Drop collection…', false],
+    ]);
+    fireEvent.keyDown(screen.getByLabelText('Filter actions'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter', metaKey: true });
+    await waitFor(() =>
+      expect(openCollection).toHaveBeenCalledWith({ connectionId: 'c1', dbName: 'crm', collection: 'leads' }),
+    );
+  });
+
+  it.each(['Schema', 'Indexes'])('%s on a collection with no tab opens one on Structure', async (action) => {
+    const { listCollections, openCollection } = mount(SERVER, [], { listOpened: true });
+    await settled(listCollections);
+    openPalette();
+    search('leads');
+    await waitFor(() => expect(openRows()).toEqual(['crm.leads']));
+    fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter', altKey: true });
+    fireEvent.change(screen.getByLabelText('Filter actions'), { target: { value: action } });
+    fireEvent.keyDown(screen.getByLabelText('Filter actions'), { key: 'Enter' });
+
+    await waitFor(() => expect(openCollection).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Structure', selected: true })).toBeTruthy());
+  });
+
+  it('disables the writing actions on a view, with a reason', async () => {
+    const { listCollections } = mount({ c1: { shop: ['orders', 'big_view'], crm: ['leads'] } });
+    await settled(listCollections);
+    openPalette();
+    search('big_view');
+    await waitFor(() => expect(openRows()).toEqual(['shop.big_view']));
+    fireEvent.keyDown(screen.getByLabelText('Search commands'), { key: 'Enter', altKey: true });
+    const disabled = actionTitles().filter(([, d]) => d).map(([t]) => t);
+    expect(disabled).toEqual(['Import…', 'Rename…', 'Drop collection…']);
+    expect(screen.getByText("This is a view, so it can't be renamed here")).toBeTruthy();
+  });
+
+  it('`drop <name>` opens the navigator’s own drop confirmation', async () => {
+    const { listCollections } = mount();
+    await settled(listCollections);
+    openPalette();
+    search('drop leads');
+    await waitFor(() => expect(openRows()).toEqual(['crm.leads']));
+    press('Enter');
+    expect(await screen.findByRole('dialog', { name: 'Drop collection "leads"?' })).toBeTruthy();
+  });
+
+  it('Rename… opens the navigator’s rename dialog, opening a collapsed sidebar first', async () => {
+    const { listCollections } = mount();
+    await settled(listCollections);
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse navigator' }));
+    await waitFor(() => expect(screen.queryByTestId('nav-coll-shop-orders')).toBeNull());
+
+    openPalette();
+    search('rename leads');
+    await waitFor(() => expect(openRows()).toEqual(['crm.leads']));
+    press('Enter');
+    expect(await screen.findByRole('dialog', { name: 'Rename "leads"' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Collapse navigator' })).toBeTruthy();
   });
 });

@@ -49,6 +49,7 @@ import { SavePipelineModal } from './SavePipelineModal';
 import { pipelineJsonForCopy } from '../builderToPipeline';
 import { aggregateCode, CODE_LANGS, type CodeLang } from '../../../utils/driverCode';
 import { copyToClipboard } from '../../../utils/clipboard';
+import { consumeTabRequest, subscribeTabRequests, tabRequested } from '../tabRequest';
 
 interface Props {
   connectionId: string;
@@ -58,6 +59,8 @@ interface Props {
   darkMode: boolean;
   sourceCount: number | null;
   onPatch: (patch: Partial<AggregationTabState>) => void;
+  /** The workspace tab it is on, for a Run asked of it from outside (the palette's saved pipeline Run). */
+  tabId?: string;
 }
 
 export function AggregationTab({
@@ -68,6 +71,7 @@ export function AggregationTab({
   darkMode,
   sourceCount,
   onPatch,
+  tabId,
 }: Props) {
   const T = themeVars;
   const stages = state.stages;
@@ -546,6 +550,17 @@ export function AggregationTab({
   const onSaveRef = useLatest(onSave);
   const onExplainRef = useLatest(onExplain);
   const runningRef = useLatest(running);
+
+  // The palette's Run on a saved pipeline: the Run button's own handler, once.
+  const runRequested = React.useSyncExternalStore(
+    subscribeTabRequests,
+    () => tabId !== undefined && tabRequested('runPipeline', tabId),
+  );
+  React.useEffect(() => {
+    if (!runRequested || tabId === undefined) return;
+    consumeTabRequest('runPipeline', tabId);
+    onRunRef.current();
+  }, [runRequested, tabId, onRunRef]);
 
   useRegisterCommands(
     [

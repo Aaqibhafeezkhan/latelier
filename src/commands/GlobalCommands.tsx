@@ -7,6 +7,7 @@ import { AuditLogModal } from '../pages/AuditLogModal';
 import { ActivityLogModal } from '../pages/ActivityLogModal';
 import { ShortcutsModal } from './ShortcutsModal';
 import { useRegisterCommands } from './useRegisterCommands';
+import type { PaletteContext } from './types';
 
 /**
  * Registers commands available from every route: theme toggle, settings,
@@ -17,7 +18,7 @@ import { useRegisterCommands } from './useRegisterCommands';
  */
 export function GlobalCommands() {
   const navigate = useNavigate();
-  const [, toggleTheme] = useTheme();
+  const [isDark, toggleTheme] = useTheme();
   const settings = useSettings();
   const transfer = useConnectionTransfer();
   const [audit, setAudit] = useState<{ connectionId: string | null } | null>(null);
@@ -51,9 +52,10 @@ export function GlobalCommands() {
     [
       {
         id: 'theme.toggle',
-        title: 'Toggle dark mode',
+        title: 'Dark mode',
         group: 'general',
-        keywords: ['theme', 'dark', 'light'],
+        keywords: ['theme', 'light', 'toggle'],
+        toggle: { checked: isDark },
         perform: () => toggleTheme(),
       },
       {
@@ -73,14 +75,14 @@ export function GlobalCommands() {
       },
       {
         id: 'activity.open',
-        title: 'Show activity log',
+        title: 'Open activity log',
         group: 'general',
         keywords: ['notifications', 'errors', 'warnings', 'history'],
         perform: () => setActivityOpen(true),
       },
       {
         id: 'help.shortcuts',
-        title: 'Keyboard shortcuts…',
+        title: 'Show keyboard shortcuts',
         group: 'general',
         keywords: ['keys', 'hotkeys', 'cheat sheet', 'help'],
         shortcut: '⌘/',
@@ -108,37 +110,32 @@ export function GlobalCommands() {
       },
       {
         id: 'connection.export',
-        title: 'Export Connections…',
+        title: 'Export connections…',
         group: 'connection',
         keywords: ['backup', 'file', 'transfer', 'save'],
         perform: () => transfer.openExport(),
       },
       {
         id: 'connection.import',
-        title: 'Import Connections…',
+        title: 'Import connections…',
         group: 'connection',
         keywords: ['restore', 'file', 'transfer', 'load'],
         perform: () => transfer.openImport(),
       },
-      {
-        id: 'connection.edit',
-        title: 'Edit selected connection',
-        group: 'connection',
-        keywords: ['modify'],
-        // `connectionId` falls back to the Focused Tab's Connection off the deep
-        // screen, so this is now also reachable from the Data View —
-        // pass `returnTo` so saving/canceling lands back where the command
-        // was invoked from, not always on the deep screen it used to be the
-        // only way to reach this from.
-        when: (ctx) => ctx.connectionId !== null,
-        perform: (ctx) => {
-          if (ctx.connectionId) {
-            void navigate(`/connections/${ctx.connectionId}/edit`, { state: { returnTo: ctx.pathname } });
-          }
+      // The Connection screen's own tabs, for the Connection in context: the
+      // one being managed, else the focused tab's.
+      ...(['Monitor', 'Users', 'Roles'] as const).map((tab) => ({
+        id: `${tab.toLowerCase()}.open`,
+        title: `Open ${tab.toLowerCase()}`,
+        group: 'connection' as const,
+        keywords: ['connection', 'server'],
+        when: (ctx: PaletteContext) => ctx.connectionId !== null,
+        perform: (ctx: PaletteContext) => {
+          if (ctx.connectionId) void navigate(`/connections/${ctx.connectionId}`, { state: { detailTab: tab } });
         },
-      },
+      })),
     ],
-    [navigate, toggleTheme, settings, transfer],
+    [navigate, isDark, toggleTheme, settings, transfer],
   );
 
   return (

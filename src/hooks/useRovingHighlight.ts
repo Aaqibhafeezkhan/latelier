@@ -9,10 +9,15 @@ export interface RovingHighlight {
   move: (delta: number) => number;
 }
 
-type Stored = { raw: number; key: unknown };
+/**
+ * `epoch` counts the resets: a key the list had before is a new list when it
+ * comes back (a query retyped), so a highlight stored under it no longer
+ * applies.
+ */
+type Stored = { raw: number; key: unknown; epoch: number };
 
-function clampedIndex(stored: Stored, count: number, resetKey: unknown): number {
-  const raw = stored.key === resetKey ? stored.raw : 0;
+function clampedIndex(stored: Stored, count: number, resetKey: unknown, epoch: number): number {
+  const raw = stored.key === resetKey && stored.epoch === epoch ? stored.raw : 0;
   return count === 0 ? 0 : Math.min(raw, count - 1);
 }
 
@@ -41,8 +46,16 @@ function clampedIndex(stored: Stored, count: number, resetKey: unknown): number 
  * alongside its own query handler).
  */
 export function useRovingHighlight(count: number, resetKey?: unknown): RovingHighlight {
-  const [state, setState] = React.useState<Stored>({ raw: 0, key: resetKey });
-  const index = clampedIndex(state, count, resetKey);
+  const [state, setState] = React.useState<Stored>({ raw: 0, key: resetKey, epoch: 0 });
+  // A new key resets the highlight, adjusted while rendering (#745): going
+  // back to an earlier key starts from the top too, not from the row it had.
+  let current = state;
+  if (state.key !== resetKey) {
+    current = { raw: 0, key: resetKey, epoch: state.epoch + 1 };
+    setState(current);
+  }
+  const { epoch } = current;
+  const index = clampedIndex(current, count, resetKey, epoch);
 
   // #126 — the latest value either setter wrote, before React re-renders.
   // Two key events can reach a handler before the first one's render
@@ -54,21 +67,21 @@ export function useRovingHighlight(count: number, resetKey?: unknown): RovingHig
 
   const setIndex = React.useCallback(
     (next: number) => {
-      latest.current = { raw: next, key: resetKey };
+      latest.current = { raw: next, key: resetKey, epoch };
       setState(latest.current);
     },
-    [resetKey],
+    [resetKey, epoch],
   );
 
   const move = React.useCallback(
     (delta: number) => {
       if (count === 0) return 0;
-      const next = (clampedIndex(latest.current, count, resetKey) + delta + count) % count;
-      latest.current = { raw: next, key: resetKey };
+      const next = (clampedIndex(latest.current, count, resetKey, epoch) + delta + count) % count;
+      latest.current = { raw: next, key: resetKey, epoch };
       setState(latest.current);
       return next;
     },
-    [count, resetKey],
+    [count, resetKey, epoch],
   );
 
   return { index, setIndex, move };

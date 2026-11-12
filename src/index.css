@@ -180,6 +180,12 @@ a { text-decoration: none; }
   border-radius: var(--atelier-radius-xs);
 }
 
+/* The command palette's search input: a placeholder colour is a pseudo-element,
+   which an inline style cannot reach. */
+.atelier-palette-input::placeholder {
+  color: var(--atelier-text-ghost);
+}
+
 /* Panel splitters highlight on hover and while dragging, the way the
    navigator's bespoke `ResizeHandle` already does. X12 phase 7 moved the
    builder and shell splits onto react-resizable-panels and left every

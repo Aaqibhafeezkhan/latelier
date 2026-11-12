@@ -5,6 +5,7 @@ import { I } from '../../icons';
 import { ContextMenu } from '../../components/ContextMenu';
 import type { ConnectionSummary, WorkspaceTab } from '@shared/types';
 import { groupTabsByConnection } from './tabGroups';
+import { tabLabel } from './tabActions';
 import { isDormant } from '../../state/connections';
 import { isContextMenuKey, anchorFromRect } from '../../utils/contextMenuKey';
 
@@ -279,10 +280,7 @@ export function TabStrip({
               const active = tab.id === activeId;
               const over =
                 dragOverId === tab.id && dragId !== tab.id && sameGroup(dragId, tab.id);
-              const label =
-                tab.kind === 'script'
-                  ? tab.state.title || 'Script'
-                  : tab.collection || '(empty)';
+              const label = tabLabel(tab);
               const closeLabel = `Close ${
                 tab.kind === 'script'
                   ? tab.state.title || 'script'

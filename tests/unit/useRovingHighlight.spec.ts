@@ -162,6 +162,38 @@ describe('useRovingHighlight', () => {
     expect(result.current.index).toBe(0);
   });
 
+  // #745 — a query retyped is a new list: the highlight starts at the top,
+  // not on the row it had the last time the key was this one.
+  it('a resetKey that comes back starts at 0, for the index and for move()', () => {
+    const { result, rerender } = renderHook(
+      ({ resetKey }) => useRovingHighlight(5, resetKey),
+      { initialProps: { resetKey: 'open' } },
+    );
+    act(() => { result.current.move(1); });
+    expect(result.current.index).toBe(1);
+
+    rerender({ resetKey: '' });
+    rerender({ resetKey: 'open' });
+    expect(result.current.index).toBe(0);
+    act(() => { result.current.move(1); });
+    expect(result.current.index).toBe(1);
+  });
+
+  it('a resetKey that comes back drops a highlight set under it, for setIndex too', () => {
+    const { result, rerender } = renderHook(
+      ({ resetKey }) => useRovingHighlight(5, resetKey),
+      { initialProps: { resetKey: 'a' } },
+    );
+    act(() => { result.current.setIndex(3); });
+    rerender({ resetKey: 'b' });
+    rerender({ resetKey: 'a' });
+    expect(result.current.index).toBe(0);
+    act(() => { result.current.setIndex(2); });
+    expect(result.current.index).toBe(2);
+    act(() => { result.current.move(1); });
+    expect(result.current.index).toBe(3);
+  });
+
   it('without a resetKey, the index survives a re-render with the same count', () => {
     const { result, rerender } = renderHook(({ count }) => useRovingHighlight(count), {
       initialProps: { count: 5 },

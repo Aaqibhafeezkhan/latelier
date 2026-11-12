@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { legacyCompileFilter } from '../../src/pages/Workspace/legacyBuilder';
+import { hydrateFindPayload, legacyCompileFilter } from '../../src/pages/Workspace/legacyBuilder';
+import type { BuilderState } from '@shared/types';
 import type { LegacyBuilderState, LegacyCond, LegacyValType } from '../../src/pages/Workspace/legacyBuilder';
 
 function makeState(overrides: Partial<LegacyBuilderState> = {}): LegacyBuilderState {
@@ -326,5 +327,67 @@ describe('parseJsonArray edge cases', () => {
 
   it('invalid JSON compiles to an empty array', () => {
     expect(condValue({ op: '$in', valType: 'string', value: 'not json' })).toEqual([]);
+  });
+});
+
+describe('hydrateFindPayload', () => {
+  const current: BuilderState = {
+    projection: ['a'],
+    projectionRaw: '{"a":1}',
+    sort: 'a:1',
+    limit: '5',
+    collation: '{"locale":"fr"}',
+    hint: 'a_1',
+    maxTimeMS: '100',
+    readPreference: 'secondary',
+  } as BuilderState;
+
+  it('takes the saved text and builder, and clears what the payload does not carry', () => {
+    const builder = { ...makeState({ sort: 'b:-1', limit: '7', projection: ['b'] }), maxTimeMS: '9' };
+    const out = hydrateFindPayload({ kind: 'find', builder, queryRaw: '{"b":2}' }, current);
+    expect(out).toEqual({
+      queryRaw: '{"b":2}',
+      builder: {
+        sort: 'b:-1',
+        limit: '7',
+        projection: ['b'],
+        projectionRaw: undefined,
+        collation: undefined,
+        hint: undefined,
+        maxTimeMS: '9',
+        readPreference: undefined,
+      },
+    });
+  });
+
+  it('compiles the pre-queryRaw conditions when the payload has no text', () => {
+    const builder = makeState({
+      conditions: [makeCond({ field: 'n', op: '=', valType: 'number', value: '3' })],
+    });
+    const out = hydrateFindPayload({ kind: 'find', builder }, current);
+    expect(out.queryRaw).toBe(legacyCompileFilter(builder));
+    expect(out.queryRaw).not.toBe('{}');
+  });
+
+  it('keeps the tab’s sort, limit and projections for a row with no builder, and drops its options', () => {
+    const out = hydrateFindPayload({ kind: 'find' } as never, current);
+    expect(out).toEqual({
+      queryRaw: '{}',
+      builder: {
+        sort: 'a:1',
+        limit: '5',
+        projection: ['a'],
+        projectionRaw: '{"a":1}',
+        collation: undefined,
+        hint: undefined,
+        maxTimeMS: undefined,
+        readPreference: undefined,
+      },
+    });
+  });
+
+  it('reads a saved raw projection', () => {
+    const builder = { ...makeState(), projectionRaw: '{"_id":0}' };
+    expect(hydrateFindPayload({ kind: 'find', builder, queryRaw: '{}' }, current).builder.projectionRaw).toBe('{"_id":0}');
   });
 });

@@ -1,10 +1,12 @@
 import React from 'react';
-import { ActionIcon, Badge, Box, Button, Group, Text, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Box, Button, Group, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
 import { I } from '../../../icons';
 import { themeVars } from '../../../theme/themeVars';
 import { SubmitButton } from '../../../components/SubmitButton';
-import { api, getErrorMessage } from '../../../api/atelier';
-import { confirmDestructive } from '../../../utils/confirm';
+import { api, getErrorMessage, isIpcError } from '../../../api/atelier';
+import { confirmDeleteSaved } from '../savedActions';
+import { consumeSavedRename, peekSavedRename, subscribeTabRequests } from '../tabRequest';
+import { notify } from '../../../theme/notifications';
 import type { SavedKind, SavedQuery, SavedQuerySummary } from '@shared/types';
 
 const KIND_LABEL: Record<SavedKind, string> = {
@@ -25,6 +27,17 @@ interface SavedTabProps {
    * they can't run in place the way a find query does.
    */
   onOpenInTab: (saved: SavedQuerySummary) => void;
+  /** The tab this list sits in, whose palette rename requests it takes. */
+  tabId?: string;
+  /** Called once a rename has landed, with the stored name. */
+  onRenamed?: (saved: SavedQuerySummary, name: string) => void;
+}
+
+interface Editing {
+  id: string;
+  value: string;
+  error: string | null;
+  saving: boolean;
 }
 
 export function SavedTab({
@@ -34,12 +47,17 @@ export function SavedTab({
   refreshKey,
   onRunHere,
   onOpenInTab,
+  tabId,
+  onRenamed,
 }: SavedTabProps) {
   const T = themeVars;
   const [items, setItems] = React.useState<SavedQuerySummary[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  // Whether a list has landed: a rename request waits for it.
+  const [loaded, setLoaded] = React.useState(false);
+  const [editing, setEditing] = React.useState<Editing | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -47,16 +65,87 @@ export function SavedTab({
     try {
       const list = await api.saved.list({ connectionId, dbName, collection });
       setItems(list);
+      setLoaded(true);
     } catch (e) {
       setErr(getErrorMessage(e, 'Failed to load saved queries'));
+      // A rename asked of a list that could not load is dropped, not kept for a later Refresh.
+      if (tabId) consumeSavedRename(tabId);
     } finally {
       setLoading(false);
     }
-  }, [connectionId, dbName, collection]);
+  }, [connectionId, dbName, collection, tabId]);
 
   React.useEffect(() => {
     queueMicrotask(() => { void load(); });
   }, [load, refreshKey]);
+
+  const startRename = (item: SavedQuerySummary) =>
+    setEditing({ id: item.id, value: item.name, error: null, saving: false });
+
+  // Closing the input hands the focus back to the name it replaced, once that is rendered.
+  const listRef = React.useRef<HTMLDivElement>(null);
+  const refocusRef = React.useRef<string | null>(null);
+  const stopEditing = (id: string) => {
+    refocusRef.current = id;
+    setEditing(null);
+  };
+  React.useLayoutEffect(() => {
+    const id = refocusRef.current;
+    if (!id || editing) return;
+    refocusRef.current = null;
+    listRef.current?.querySelector<HTMLElement>(`[data-saved-name="${CSS.escape(id)}"]`)?.focus();
+  }, [editing]);
+
+  // The palette's Rename… (X07 §13.4): the same inline input, once the list has the entry.
+  const renameRequest = React.useSyncExternalStore(subscribeTabRequests, () =>
+    tabId ? peekSavedRename(tabId) : null,
+  );
+  // The palette lists afresh on each open, this list only on a refresh: an
+  // entry it lacks is looked for once more before it is called gone.
+  const relistedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!tabId || !renameRequest || !loaded || loading) return;
+    const target = items.find((i) => i.id === renameRequest);
+    if (!target && !relistedRef.current) {
+      relistedRef.current = true;
+      void load();
+      return;
+    }
+    relistedRef.current = false;
+    consumeSavedRename(tabId);
+    if (!target) {
+      notify.info('That saved query no longer exists.');
+      return;
+    }
+    // The request comes from outside React (the palette's store) and may be
+    // waiting when this list mounts, so it lands here, once.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    startRename(target);
+  }, [tabId, renameRequest, loaded, loading, items, load]);
+
+  // W09 §8: Enter submits, Escape cancels, a taken name keeps the input open.
+  const commitRename = async () => {
+    if (!editing || editing.saving) return;
+    const item = items.find((i) => i.id === editing.id);
+    const name = editing.value.trim();
+    if (!item || name === '' || name === item.name) {
+      stopEditing(editing.id);
+      return;
+    }
+    setEditing({ ...editing, saving: true, error: null });
+    try {
+      const updated = await api.saved.update({ id: item.id, patch: { name } });
+      setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, name: updated.name, updatedAt: updated.updatedAt } : i)));
+      stopEditing(item.id);
+      onRenamed?.(item, updated.name);
+    } catch (e) {
+      const error =
+        isIpcError(e) && e.code === 'CONFLICT'
+          ? `“${name}” is already saved on ${collection}.`
+          : getErrorMessage(e, 'Rename failed');
+      setEditing((cur) => (cur?.id === item.id ? { ...cur, saving: false, error } : cur));
+    }
+  };
 
   const handlePrimary = async (summary: SavedQuerySummary) => {
     if (summary.kind !== 'find') {
@@ -77,11 +166,7 @@ export function SavedTab({
   // modal manager. `confirmDestructive` is that same manager; Escape, the
   // backdrop and focus trapping come with it rather than being re-implemented.
   const requestDelete = async (target: SavedQuerySummary) => {
-    const proceed = await confirmDestructive({
-      title: `Delete "${target.name}"?`,
-      body: 'This removes the saved query. This action cannot be undone.',
-      confirmLabel: 'Delete',
-    });
+    const proceed = await confirmDeleteSaved(target);
     if (!proceed) return;
     setDeleting(true);
     try {
@@ -95,7 +180,7 @@ export function SavedTab({
   };
 
   return (
-    <div>
+    <div ref={listRef}>
       {/* W15 §13.5 — the header survives loading, error and empty.
           This view used to early-return a bare centered message, so anyone
           switching here while it loaded got an unlabelled blank panel. */}
@@ -164,9 +249,43 @@ export function SavedTab({
             {KIND_LABEL[item.kind]}
           </Badge>
           <Box style={{ flex: 1, overflow: 'hidden' }}>
-            <Text fw={600} c={T.text} truncate="end" fz={T.fsSm}>
-              {item.name}
-            </Text>
+            {editing?.id === item.id ? (
+              <TextInput
+                size="xs"
+                autoFocus
+                aria-label={`New name for "${item.name}"`}
+                value={editing.value}
+                error={editing.error}
+                // Read-only, not disabled, while it saves: a disabled input drops the focus.
+                readOnly={editing.saving}
+                onChange={(e) => {
+                  const value = e.currentTarget.value;
+                  setEditing((cur) => (cur ? { ...cur, value, error: null } : cur));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void commitRename();
+                  } else if (e.key === 'Escape') {
+                    // The list sits in a drawer and a tab that answer Escape too.
+                    e.stopPropagation();
+                    stopEditing(item.id);
+                  }
+                }}
+              />
+            ) : (
+              <UnstyledButton
+                onClick={() => startRename(item)}
+                data-saved-name={item.id}
+                aria-label={`Rename "${item.name}"`}
+                title="Click to rename"
+                style={{ display: 'block', maxWidth: '100%' }}
+              >
+                <Text fw={600} c={T.text} truncate="end" fz={T.fsSm}>
+                  {item.name}
+                </Text>
+              </UnstyledButton>
+            )}
             <Text fz={T.fsXs} c={T.textGhost} mt={1}>
               {new Date(item.updatedAt).toLocaleDateString()}
             </Text>

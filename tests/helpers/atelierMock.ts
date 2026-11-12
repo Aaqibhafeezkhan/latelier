@@ -548,3 +548,50 @@ function makePermissiveStub(): IpcApi {
     },
   };
 }
+
+/**
+ * The `window.atelier` channels that reach a MongoDB server: whole namespaces,
+ * or the named methods of one. `mongo.status` and `mongo.onStatus` read the
+ * app's own record of a Connection, so they are not here.
+ */
+const SERVER_CHANNELS: Record<string, readonly string[] | '*'> = {
+  mongo: ['connect', 'disconnect', 'ping', 'serverInfo'],
+  meta: '*',
+  index: '*',
+  collection: '*',
+  database: '*',
+  user: '*',
+  role: '*',
+  admin: '*',
+  query: '*',
+  doc: '*',
+  data: '*',
+  agg: '*',
+  mshell: '*',
+  script: '*',
+  conn: ['test'],
+  refs: ['resolve', 'autodetect'],
+};
+
+/**
+ * Wraps every server-reaching method of `api` (the installed `window.atelier`)
+ * in place, recording each call as `namespace.method`. `reset()` forgets what
+ * was recorded, so a test can ignore what happened before the step it checks.
+ */
+export function watchServerCalls(api: IpcApi): { calls: string[]; reset: () => void } {
+  const calls: string[] = [];
+  const target = api as unknown as Record<string, Record<string, unknown>>;
+  for (const [ns, methods] of Object.entries(SERVER_CHANNELS)) {
+    const obj = target[ns];
+    if (!obj) throw new Error(`watchServerCalls: window.atelier has no "${ns}"`);
+    for (const name of methods === '*' ? Object.keys(obj) : methods) {
+      const original = obj[name];
+      if (typeof original !== 'function') throw new Error(`watchServerCalls: ${ns}.${name} is not a function`);
+      obj[name] = (...args: unknown[]) => {
+        calls.push(`${ns}.${name}`);
+        return (original as (...a: unknown[]) => unknown)(...args);
+      };
+    }
+  }
+  return { calls, reset: () => void calls.splice(0) };
+}

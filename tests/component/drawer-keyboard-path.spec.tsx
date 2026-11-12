@@ -83,15 +83,14 @@ afterEach(() => {
 });
 
 describe('the query drawer has a palette entry', () => {
-  it('offers a toggle whose title describes the state it will produce', async () => {
+  it('offers a toggle whose switch shows the drawer’s state', async () => {
     renderWorkspace();
     await waitFor(() => expect(screen.getByRole('banner').textContent).toContain('Prod'));
 
     fireEvent.click(screen.getByText('toggle'));
-    // The drawer starts expanded, so the offer is to collapse it. A title
-    // that always said "Expand" would be a lie half the time.
-    expect(screen.getByText('Collapse query drawer')).toBeTruthy();
-    expect(screen.queryByText('Expand query drawer')).toBeNull();
+    // The drawer starts expanded, so the switch is on.
+    const row = screen.getByRole('option', { name: /^Query drawer/ });
+    expect(row.getAttribute('aria-checked')).toBe('true');
   });
 
   it('is withheld in the aggregation view, where the builder is aria-hidden', async () => {
@@ -99,8 +98,7 @@ describe('the query drawer has a palette entry', () => {
     await waitFor(() => expect(screen.getByRole('banner').textContent).toContain('Prod'));
 
     fireEvent.click(screen.getByText('toggle'));
-    expect(screen.queryByText('Collapse query drawer')).toBeNull();
-    expect(screen.queryByText('Expand query drawer')).toBeNull();
+    expect(screen.queryByRole('option', { name: /^Query drawer/ })).toBeNull();
   });
 });
 

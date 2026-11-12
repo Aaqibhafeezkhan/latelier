@@ -47,6 +47,13 @@ export interface NavigatorOpenInput {
   collection: string;
 }
 
+/** A row to reveal: a collection, or a database on its own. */
+export interface NavigatorRevealInput {
+  connectionId: string;
+  dbName: string;
+  collection?: string;
+}
+
 export interface DbCollectionNavigatorProps {
   /** One root per Connection; a Saved one (no live client, no tabs) has no root here. */
   connections: ConnectionSummary[];
@@ -91,17 +98,30 @@ export interface DbCollectionNavigatorProps {
   /** Tree state and loaders owned by the Workspace, so they outlive a collapsed sidebar. */
   data?: NavigatorData;
   /**
-   * "Reveal in sidebar": move the tree's focus to this collection's row as soon
-   * as it is rendered. A new object per request, so revealing the same row
-   * twice still fires.
+   * "Reveal in sidebar": move the tree's focus to this collection's row, or to
+   * the database's row when no collection is named, as soon as it is rendered.
+   * A new object per request, so revealing the same row twice still fires.
    */
-  revealRequest?: NavigatorOpenInput | null;
+  revealRequest?: NavigatorRevealInput | null;
   /**
    * Called once the reveal has landed, or been dropped because its database
-   * settled without the collection, so it never fires later.
+   * settled without the row, so it never fires later.
    */
   onRevealHandled?: () => void;
+  /**
+   * Opens one of the collection dialogs the context menu opens, from outside
+   * the tree (the palette's Rename…, Import…, Drop collection…, Create
+   * collection… and Drop database…). A new
+   * object per request; `onDialogRequestHandled` is called once it is open.
+   */
+  dialogRequest?: NavigatorDialogRequest | null;
+  onDialogRequestHandled?: () => void;
 }
+
+export type NavigatorDialogRequest =
+  | (NavigatorOpenInput & { dialog: 'rename' | 'import' | 'drop' })
+  /** The database menu's Create collection and Drop database. */
+  | { connectionId: string; dbName: string; dialog: 'createCollection' | 'dropDatabase' };
 
 type TreeRow =
   | {
@@ -228,6 +248,8 @@ export function DbCollectionNavigator({
   data,
   revealRequest,
   onRevealHandled,
+  dialogRequest,
+  onDialogRequestHandled,
 }: DbCollectionNavigatorProps) {
   const T = themeVars;
   // Shared with Workspace (and so the palette) when `data` is passed; the
@@ -533,6 +555,25 @@ export function DbCollectionNavigator({
     onDatabaseDropped,
   });
 
+  // The same setters the collection menu's items call, so the dialog is the one
+  // the menu opens. No menu trigger: focus goes back to wherever it was.
+  React.useEffect(() => {
+    if (!dialogRequest) return;
+    const request = dialogRequest;
+    queueMicrotask(() => {
+      setMenuTrigger(null);
+      const db = { connectionId: request.connectionId, dbName: request.dbName };
+      if ('collection' in request) {
+        const target = { ...db, collection: request.collection };
+        if (request.dialog === 'rename') setRenameTarget(target);
+        else if (request.dialog === 'import') setImportTarget(target);
+        else setDropCollTarget(target);
+      } else if (request.dialog === 'createCollection') setCreateCollDb(db);
+      else setDropDbTarget(db);
+      onDialogRequestHandled?.();
+    });
+  }, [dialogRequest, onDialogRequestHandled, setMenuTrigger, setRenameTarget, setImportTarget, setDropCollTarget, setCreateCollDb, setDropDbTarget]);
+
   const disconnect = React.useCallback((id: string) => {
     void disconnectConnection(id);
   }, []);
@@ -700,7 +741,7 @@ export function DbCollectionNavigator({
   // clears it. It also re-lists the database's collections (sharing a load
   // already in flight): once that settles without the collection — dropped, or
   // the listing failed — the request is spent, so it never fires later.
-  const pendingRevealRef = React.useRef<{ req: NavigatorOpenInput; listed: boolean } | null>(null);
+  const pendingRevealRef = React.useRef<{ req: NavigatorRevealInput; listed: boolean } | null>(null);
   const [revealListed, setRevealListed] = React.useState(0);
   React.useEffect(() => {
     if (!revealRequest) return;
@@ -716,7 +757,10 @@ export function DbCollectionNavigator({
     const pending = pendingRevealRef.current;
     if (!pending) return;
     const { req } = pending;
-    const id = `coll:${req.connectionId}:${req.dbName}:${req.collection}`;
+    const id =
+      req.collection === undefined
+        ? `db:${req.connectionId}:${req.dbName}`
+        : `coll:${req.connectionId}:${req.dbName}:${req.collection}`;
     if (rows.some((r) => r.id === id)) {
       pendingRevealRef.current = null;
       queueMicrotask(() => {
@@ -727,7 +771,9 @@ export function DbCollectionNavigator({
     }
     const c = ownGet(caches, req.connectionId);
     if (!pending.listed || ownGet(c?.collsLoading ?? {}, req.dbName)) return;
-    if (ownGet(c?.colls ?? {}, req.dbName)?.some((x) => x.name === req.collection)) return;
+    // A database's own row is drawn from its listing already: absent once its
+    // collections are in, it is gone.
+    if (req.collection !== undefined && ownGet(c?.colls ?? {}, req.dbName)?.some((x) => x.name === req.collection)) return;
     pendingRevealRef.current = null;
     queueMicrotask(() => onRevealHandled?.());
   }, [rows, revealListed, onRevealHandled, caches]);

@@ -25,6 +25,8 @@ import { FieldAutocompleteInput } from '../../features/fieldSuggestions/FieldAut
 import { useTextareaAutocomplete } from '../../features/fieldSuggestions/useTextareaAutocomplete';
 import { useCollectionWorkspace } from './context';
 import { ExplainDrawer } from './Aggregation/ExplainDrawer';
+import { consumeTabRequest, subscribeTabRequests, tabRequested } from './tabRequest';
+import { useLatest } from '../../commands/useLatest';
 import { QueryExpandModal } from './QueryExpandModal';
 import { LIMIT_EXPLANATION } from './queryCaps';
 import type { BuilderState, CollectionTabState, ExplainVerbosity } from '@shared/types';
@@ -225,6 +227,17 @@ function QueryBarInner({
     setExplainVerbosity(verbosity);
     setExplainOpen(true);
   };
+
+  // The palette's Explain query on this tab: this menu's queryPlanner item, once.
+  const explainRequested = React.useSyncExternalStore(subscribeTabRequests, () =>
+    tabRequested('explain', meta.tabId),
+  );
+  const onExplainRef = useLatest(onExplain);
+  React.useEffect(() => {
+    if (!explainRequested) return;
+    consumeTabRequest('explain', meta.tabId);
+    onExplainRef.current('queryPlanner');
+  }, [explainRequested, meta.tabId, onExplainRef]);
 
   // The fetcher and the create-index handoff are shared with the result bar's
   // plan badge. The filter is read through the repair, never the raw text.

@@ -6,6 +6,7 @@ import { DarkCtx } from '../../src/ThemeContext';
 import { AggregationTab } from '../../src/pages/Workspace/Aggregation/AggregationTab';
 import { notifications } from '@mantine/notifications';
 import { commandRegistry } from '../../src/commands/registry';
+import { _resetTabRequestsForTests, requestTab, tabRequested } from '../../src/pages/Workspace/tabRequest';
 import { installAtelierMock, uninstallAtelierMock } from '../helpers/atelierMock';
 import { invalidateSampleSchemaCache } from '../../src/features/fieldSuggestions/sources/sampleSchemaSource';
 import { invalidateSchemaEnumCache } from '../../src/features/fieldSuggestions/sources/schemaEnumSource';
@@ -1094,5 +1095,37 @@ describe('AggregationTab — the "Save pipeline" palette command', () => {
     runSaveCommand();
 
     await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('AggregationTab — a Run asked from outside (the palette’s saved pipeline Run)', () => {
+  afterEach(() => _resetTabRequestsForTests());
+
+  it('runs once for its own tab, and leaves another tab’s request alone', async () => {
+    const runSpy = vi.fn(async () => ({ rows: [], durationMs: 5, stageCounts: {}, stageSamples: {}, hasMore: false }));
+    installAtelierMock({ agg: { run: runSpy, cancel: async () => undefined } });
+    requestTab('runPipeline', 'other');
+    render(
+      <DarkCtx.Provider value={false}>
+        <AggregationTab
+          connectionId="c1"
+          dbName="app"
+          collection="orders"
+          state={{ ...DEFAULT_AGGREGATION_TAB_STATE, stages: [{ id: 1, op: '$match', body: '{}', enabled: true }] }}
+          darkMode={false}
+          sourceCount={42}
+          onPatch={vi.fn()}
+          tabId="t1"
+        />
+      </DarkCtx.Provider>,
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(runSpy).not.toHaveBeenCalled();
+    expect(tabRequested('runPipeline', 'other')).toBe(true);
+    act(() => requestTab('runPipeline', 't1'));
+    await waitFor(() => expect(runSpy).toHaveBeenCalledTimes(1));
+    expect(tabRequested('runPipeline', 't1')).toBe(false);
   });
 });

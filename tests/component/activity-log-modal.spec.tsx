@@ -45,7 +45,7 @@ describe('ActivityLogModal', () => {
     });
 
     fireEvent.click(screen.getByText('toggle'));
-    fireEvent.click(screen.getByText('Show activity log'));
+    fireEvent.click(screen.getByText('Open activity log'));
 
     const dialog = await screen.findByRole('dialog', { name: 'Activity log' });
     const row = within(dialog).getByText('Could not reach the server').closest('tr')!;

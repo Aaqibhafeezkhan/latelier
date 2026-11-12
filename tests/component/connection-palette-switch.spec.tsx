@@ -105,17 +105,29 @@ function dispatchPaletteToggle() {
   document.documentElement.dispatchEvent(new KeyboardEvent('keydown', init));
 }
 
+/** The Connection object's row in the open palette, by name. */
+function paletteRow(name: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[role="option"][data-kind="connection"]:has([data-title="${name}"])`);
+}
+
 /**
- * Opens the palette, filters to one Connection's open command, and picks it.
- * X16.4 §4.6 — "Switch to: X" is now "Open connection → X", because
- * choosing one adds a server rather than replacing the one you were on.
+ * Opens the palette, types `open <name>` and performs the Connection
+ * object's row, with its Open action (X07 §13.4). Choosing one adds a
+ * server rather than replacing the one you were on (X16.4 §4.6).
  */
 async function openViaPalette(name: string) {
   act(() => dispatchPaletteToggle());
   fireEvent.change(screen.getByLabelText('Search commands'), {
-    target: { value: `Open connection → ${name}` },
+    target: { value: `open ${name}` },
   });
-  await screen.findByText(`Open connection → ${name}`);
+  await waitFor(() => expect(paletteRow(name)).toBeTruthy());
+  // Tabs of that Connection, matched by their subtitle, are drawn above the
+  // Connections group (X07 §13.2): move down to the Connection's row.
+  const search = screen.getByLabelText('Search commands');
+  for (let i = 0; i < 10 && paletteRow(name)?.getAttribute('aria-selected') !== 'true'; i++) {
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
+  }
+  expect(paletteRow(name)?.getAttribute('aria-selected')).toBe('true');
   // Keyboard nav is bound to the search input, not the option row
   // (combobox pattern — see CommandPalette.tsx) — Enter is fired where a
   // real keyboard user would have focus.
@@ -165,7 +177,7 @@ afterEach(() => {
 });
 
 describe('command palette connection opening', () => {
-  it('offers an "Open connection" command per saved Connection', async () => {
+  it('offers a Connection object per saved Connection, with its host', async () => {
     installAtelierMock({
       tabs: { list: async () => [] },
       conn: { list: async () => NINE_CONNECTIONS },
@@ -177,9 +189,9 @@ describe('command palette connection opening', () => {
     // once ConnectionPaletteCommands' `useConnections()` resolves.
     act(() => dispatchPaletteToggle());
     for (const c of NINE_CONNECTIONS) {
-      const option = await screen.findByText(`Open connection → ${c.name}`);
-      const row = option.closest('[role="option"]') as HTMLElement;
-      expect(within(row).getByText(c.host)).toBeTruthy();
+      fireEvent.change(screen.getByLabelText('Search commands'), { target: { value: c.name } });
+      await waitFor(() => expect(paletteRow(c.name)).not.toBeNull());
+      expect(within(paletteRow(c.name)!).getByText(c.host)).toBeTruthy();
     }
   });
 

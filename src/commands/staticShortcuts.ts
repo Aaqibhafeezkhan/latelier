@@ -9,7 +9,10 @@ export const STATIC_SHORTCUTS: ReadonlyArray<{
 }> = [
   {
     section: 'Anywhere',
-    items: [{ keys: '⌘K', title: 'Open the command palette' }],
+    items: [
+      { keys: '⌘K', title: 'Open the command palette' },
+      { keys: '⌘P', title: 'Find a collection' },
+    ],
   },
   {
     // Bound by the workspace screen, so dead on the connection form.

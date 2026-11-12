@@ -115,7 +115,7 @@ test('export two of three Connections with passwords, import into a fresh profil
 
     await winA.reload();
     await winA.waitForLoadState('domcontentloaded');
-    await runPaletteCommand(winA, 'Export Connections…');
+    await runPaletteCommand(winA, 'Export connections…');
     const exportDialog = winA.getByRole('dialog', { name: 'Export Connections' });
     await expect(exportDialog.getByRole('checkbox', { name: 'Gamma' })).toBeChecked();
     await exportDialog.getByRole('checkbox', { name: 'Gamma' }).uncheck();

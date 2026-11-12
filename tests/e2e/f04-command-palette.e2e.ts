@@ -15,7 +15,7 @@ test.afterAll(stopAllMemoryServers);
  * the palette on its search input (`aria-label="Search commands"`, forwarded to
  * the input by `SpotlightSearch`; see `CommandPalette.tsx`).
  */
-test('command palette: ⌘K opens, "new connection" navigates, theme toggle persists', async () => {
+test('command palette: ⌘K opens, "new connection" navigates, the last query returns, theme toggle persists', async () => {
   await withApp(async (app) => {
     const win = await app.firstWindow();
     await win.waitForLoadState('domcontentloaded');
@@ -72,9 +72,19 @@ test('command palette: ⌘K opens, "new connection" navigates, theme toggle pers
 
       await win.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+K');
       await expect(palette).toBeVisible({ timeout: 4000 });
-      await search.fill('toggle dark');
-      await expect(palette.getByRole('option', { name: /Toggle dark mode/ })).toBeVisible();
+      // The palette reopens on its last query, selected, so typing replaces it.
+      await expect(search).toHaveValue('new connection');
+      await search.pressSequentially('dark mode');
+      await expect(search).toHaveValue('dark mode');
+      const darkMode = palette.getByRole('option', { name: /^Dark mode/ });
+      await expect(darkMode).toBeVisible();
+      const checked = await darkMode.getAttribute('aria-checked');
       await win.keyboard.press('Enter');
+      // A toggle flips its switch and leaves the palette open on its row.
+      await expect(darkMode).toHaveAttribute('aria-checked', checked === 'true' ? 'false' : 'true');
+      await expect(palette).toBeVisible();
+      await expect(search).toHaveAttribute('aria-activedescendant', (await darkMode.getAttribute('id'))!);
+      await win.keyboard.press('Escape');
       await expect(palette).not.toBeVisible({ timeout: 4000 });
 
       // Theme persistence is asynchronous (palette → useTheme → api.prefs.setTheme).

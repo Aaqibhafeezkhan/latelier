@@ -117,9 +117,6 @@ export default function ConnectionManager() {
 
   const selected = connections.find((c) => c.id === params.id) ?? null;
 
-  const selectedRef = React.useRef(selected);
-  React.useEffect(() => { selectedRef.current = selected; }, [selected]);
-
   const openDeleteConfirm = React.useCallback(async (target: ConnectionSummary) => {
     const tabCount = await fetchTabCount(target.id);
     setDeleteTarget({ id: target.id, name: target.name, tabCount });
@@ -135,16 +132,6 @@ export default function ConnectionManager() {
   useRegisterCommands(
     [
       {
-        id: 'connection.delete',
-        title: 'Delete selected connection',
-        group: 'connection',
-        keywords: ['remove', 'drop'],
-        when: (ctx) => ctx.connectionId !== null && selectedRef.current !== null,
-        perform: () => {
-          if (selectedRef.current) void openDeleteConfirm(selectedRef.current);
-        },
-      },
-      {
         id: 'connection.refresh',
         title: 'Refresh connection',
         group: 'connection',
@@ -153,7 +140,7 @@ export default function ConnectionManager() {
         perform: () => { void refresh(); },
       },
     ],
-    [refresh, openDeleteConfirm],
+    [refresh],
   );
 
   const handleDelete = React.useCallback((id: string) => {

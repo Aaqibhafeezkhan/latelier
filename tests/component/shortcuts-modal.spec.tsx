@@ -48,7 +48,7 @@ const dialog = () => screen.findByRole('dialog', { name: 'Keyboard shortcuts' })
 
 async function openFromPalette() {
   fireEvent.click(screen.getByText('toggle'));
-  fireEvent.click(await screen.findByText('Keyboard shortcuts…'));
+  fireEvent.click(await screen.findByText('Show keyboard shortcuts'));
   return dialog();
 }
 

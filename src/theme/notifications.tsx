@@ -1,4 +1,5 @@
-import { notifications } from '@mantine/notifications';
+import type React from 'react';
+import { notifications, type NotificationData } from '@mantine/notifications';
 import { Button, Group, Text } from '@mantine/core';
 import { recordActivity, type ActivityEntry } from './activityLog';
 
@@ -24,6 +25,10 @@ interface NotifyOptions {
    * once: clicking it runs `onClick` and dismisses the toast.
    */
   action?: NotifyAction;
+  /** Drawn before the title, in place of the colour bar. */
+  icon?: React.ReactNode;
+  /** Per-part style overrides, for a toast that has its own look (the palette's failure toast). */
+  styles?: NotificationData['styles'];
 }
 
 function show(
@@ -67,6 +72,8 @@ function show(
     title: options.title ?? defaultTitle,
     message: messageNode,
     autoClose,
+    icon: options.icon,
+    styles: options.styles,
   });
   return id;
 }
