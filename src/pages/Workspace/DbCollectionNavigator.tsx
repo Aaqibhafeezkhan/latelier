@@ -4,6 +4,7 @@ import {
   List,
   useDynamicRowHeight,
   useListRef,
+  type ListImperativeAPI,
   type RowComponentProps,
 } from 'react-window';
 import type { CollectionInfo, DbInfo } from '@shared/ipc';
@@ -225,6 +226,31 @@ function firstNavigableInSubtree(
 }
 
 const connExpandedKey = (id: string) => `ui.workspace.navigator.connExpanded:${id}`;
+
+/**
+ * Scrolls `targetId`'s row into view when it becomes the target, or when it
+ * comes back after leaving `rows` (a collapsed database, a filter). Never on
+ * a mere `rows` rebuild: background listings — the palette's sweep over every
+ * database — rebuild `rows` many times a second, and scrolling on each one
+ * pulled the tree back to the selection while someone scrolled away from it.
+ */
+function useScrollToTarget(
+  listRef: React.RefObject<ListImperativeAPI | null>,
+  rows: readonly TreeRow[],
+  targetId: string | null,
+) {
+  const scrolledToRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    const idx = targetId ? rows.findIndex((r) => r.id === targetId) : -1;
+    if (idx < 0) {
+      scrolledToRef.current = null;
+      return;
+    }
+    if (scrolledToRef.current === targetId) return;
+    scrolledToRef.current = targetId;
+    listRef.current?.scrollToRow({ index: idx, align: 'auto' });
+  }, [listRef, rows, targetId]);
+}
 
 /** Connection-colour rail down the left edge; muted when no live client. */
 const SPINE_WIDTH = 3;
@@ -761,8 +787,12 @@ export function DbCollectionNavigator({
       req.collection === undefined
         ? `db:${req.connectionId}:${req.dbName}`
         : `coll:${req.connectionId}:${req.dbName}:${req.collection}`;
-    if (rows.some((r) => r.id === id)) {
+    const idx = rows.findIndex((r) => r.id === id);
+    if (idx >= 0) {
       pendingRevealRef.current = null;
+      // Scrolled here, not left to the focus change: revealing the row that
+      // already has focus changes nothing that would scroll it.
+      listRef.current?.scrollToRow({ index: idx, align: 'auto' });
       queueMicrotask(() => {
         setFocusedId(id);
         onRevealHandled?.();
@@ -776,7 +806,7 @@ export function DbCollectionNavigator({
     if (req.collection !== undefined && ownGet(c?.colls ?? {}, req.dbName)?.some((x) => x.name === req.collection)) return;
     pendingRevealRef.current = null;
     queueMicrotask(() => onRevealHandled?.());
-  }, [rows, revealListed, onRevealHandled, caches]);
+  }, [rows, revealListed, onRevealHandled, caches, listRef]);
   const rowHeight = useDynamicRowHeight({ defaultRowHeight: 26 });
 
   React.useEffect(() => {
@@ -797,23 +827,12 @@ export function DbCollectionNavigator({
     });
   }, [rows, focusedId, focusedConnectionId, activeDbName, activeCollection]);
 
-  React.useEffect(() => {
-    if (!focusedConnectionId || !activeDbName || !activeCollection) return;
-    const idx = rows.findIndex(
-      (r) =>
-        r.kind === 'coll' &&
-        r.connectionId === focusedConnectionId &&
-        r.dbName === activeDbName &&
-        r.coll.name === activeCollection,
-    );
-    if (idx >= 0) listRef.current?.scrollToRow({ index: idx, align: 'auto' });
-  }, [focusedConnectionId, activeDbName, activeCollection, rows, listRef]);
-
-  React.useEffect(() => {
-    if (!focusedId) return;
-    const idx = rows.findIndex((r) => r.id === focusedId);
-    if (idx >= 0) listRef.current?.scrollToRow({ index: idx, align: 'auto' });
-  }, [focusedId, rows, listRef]);
+  const activeRowId =
+    focusedConnectionId && activeDbName && activeCollection
+      ? `coll:${focusedConnectionId}:${activeDbName}:${activeCollection}`
+      : null;
+  useScrollToTarget(listRef, rows, activeRowId);
+  useScrollToTarget(listRef, rows, focusedId);
 
   const openFromRow = React.useCallback(
     (
