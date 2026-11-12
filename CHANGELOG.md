@@ -22,6 +22,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-11-12
+
+### Added
+
+- **Local data is encrypted at rest.** Open tabs, saved queries, query
+  history, recent filter values and the operation log are stored in
+  `latelier.db` as AES-256-GCM cells, under a key the OS keychain protects.
+  The first start of this version encrypts what an older version left and
+  then compacts the file so the plaintext copies are gone. If the keychain can
+  no longer unlock the key, startup stops and offers Quit or **Reset protected
+  data**, which clears those values and keeps your connections. Settings shows
+  the protection state under **Local data protection**. On Linux with no
+  usable keyring the key is stored unprotected, and Settings says so.
+  SECURITY.md lists what this does not cover. Going back to 0.18.0 is not
+  supported, because it cannot read these values.
+- **Command palette v2: search everywhere.** One search finds collections,
+  tabs, saved queries and pipelines, databases and commands across every open
+  connection, with an action list per result, scopes, history, and
+  **Query…** and **Filter by field…** steps. ⌘P opens it too. Typing stays
+  fast on 10,000 collections.
+- **Rename saved queries and pipelines** in the Saved list, or with
+  **Rename…** from the palette.
+- **Views show their documents read-only.** Edit on a view opens the document
+  with an **Open <source>** button, and views no longer offer Insert, Edit,
+  Delete, Import or Update all, which the server refused anyway.
+- **`D` deletes the active document,** and ⌘, opens Settings.
+- Changing a collection's validator or a view's definition is recorded in the
+  operation log, naming what changed but never the values.
+- The builder's operator picker is grouped by class.
+
+### Changed
+
+- **Every result pane says what state it is in:** not run, empty, no match,
+  query error or failed, each with a next action. A query the server refuses
+  offers **Revert to last valid query**. The aggregation output and the
+  script pane use the same states.
+- **The Filter tab keeps its controls in place** as conditions come and go:
+  only the condition list grows, and it scrolls by itself.
+- **The results toolbar** collapses only for width, and one side panel shows
+  at a time below 1100 px wide.
+- **Dialogs** have docked footers and open with focus on their first field.
+  Toasts moved to the bottom left, clear of dialog buttons.
+- **Keyboard:** each list is one tab stop plus the active row's buttons.
+- **Settings** has a left rail, and dark dialogs use the app's surfaces.
+- **Type and contrast.** Text is never smaller than 11 px, and muted text,
+  placeholders, badges and filled buttons meet WCAG AA contrast in both
+  themes. The workspace now uses the bundled Inter font everywhere.
+- **Narrow stage lists** stack the stage editor over its preview instead of
+  squeezing it.
+- **Structure samples the size you pick.** Size 100 reads 100 documents (it
+  read up to 200), and the default goes from 50 to 100.
+- **Editing a query from a later page** runs it from page 1, with a hint
+  beside Run, and a page past the end of the results moves back to the last
+  page.
+- **Number types are shown as stored.** A Long or a whole-number Double now
+  shows as `{"$numberLong":"5"}` or `7.0` in results, aggregation output,
+  exports and references, instead of looking like an Int32.
+- Renderer errors are written to the main log, and log files roll at 10 MiB.
+- Electron 44.9.1, which includes the fix for
+  [GHSA-jr5w-w6x2-84p9](https://github.com/electron/electron/security/advisories/GHSA-jr5w-w6x2-84p9).
+
+### Fixed
+
+- **Editing a document no longer changes its number types.** A Long or a
+  whole-number Double, or any number in an array you edited, was saved back
+  as an Int32.
+- **References from an array** keep every document the server matched,
+  including through a dotted or projected target field, in source order.
+- Fast key presses in Table, Tree or JSON no longer crash the workspace.
+- Quitting right after an edit no longer loses it, and the quit prompt for an
+  unsaved pipeline survives a reload.
+- One filter check applies to Run, Copy code, Export, Explain, Open as
+  pipeline and the update-all and delete-all guards. Loading a Saved or
+  Recent query reopens the advanced row to match.
+- A pasted canonical EJSON date stays editable in the builder, and a `-0`
+  chip keeps its sign.
+- Operator autocomplete ranks by where the caret is (`$elemMatch`,
+  `$sort`/`$meta`, window operators, `$group` accumulators).
+- An empty filter no longer shows a false "no index" badge.
+- ⌘N opens New connection, as the palette says. In a text field a bare
+  Ctrl+N stays with the field.
+- Dialogs opened from the palette return focus to it, the Connection Switcher
+  takes focus when it opens, and busy Refresh and Save buttons stay
+  focusable.
+- "1 indexes" reads "1 index", and a page with no results reads "nothing to
+  show" instead of "showing 1–0".
+- The Mongo shell pane reports a Stop that failed.
+
 ## [0.18.0] — 2026-10-26
 
 ### Added

@@ -286,3 +286,9 @@ version), then rename `latelier.db` to `mongolab.db`, and `latelier.db-wal` /
 If you start a newer version again without these steps, it keeps using
 `latelier.db`. Anything entered on the older version stays in
 `mongolab.db`, which the newer version does not read.
+
+From 0.19.0, open tabs, saved queries, query history, recent filter values
+and the operation log are encrypted in `latelier.db`. Version 0.18.0 and
+older cannot read them, so going back from 0.19.0 is not supported: those
+come back broken or empty there. Connections and their saved passwords are
+not affected.
