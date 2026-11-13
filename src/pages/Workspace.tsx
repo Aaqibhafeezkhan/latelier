@@ -119,6 +119,12 @@ function WorkspaceInner() {
   const settings = useSettings();
   const palette = usePaletteApi();
 
+  const active = tabs.tabs.find((t) => t.id === tabs.activeId) ?? null;
+  const activeCollection = active?.kind === 'collection' ? active : null;
+  const activeScript = active?.kind === 'script' ? active : null;
+  const activeView: CollectionView =
+    activeCollection?.state.activeView ?? 'documents';
+
   // `resize()` treats a number as pixels and a string as a percentage —
   // `resize(26)` is 26px, not 26%. `expand()` alone reopens at the collapsed
   // 4% rail, so the width is set explicitly from the stored split after.
@@ -148,6 +154,9 @@ function WorkspaceInner() {
   // back also has to put the stored width back, not just the open state. On the
   // next frame: the navigator changes width in this same commit, and a size set
   // before the panel group has measured that would be taken against its old width.
+  // Leaving Documents shuts the drawer the same way, without writing the pref, so
+  // coming back restores it at its stored width (PanelBody keeps it mounted).
+  const builderShut = builderCollapsed || activeView !== 'documents';
   const builderSyncedOnce = React.useRef(false);
   React.useEffect(() => {
     if (!builderSyncedOnce.current) {
@@ -155,11 +164,11 @@ function WorkspaceInner() {
       return undefined;
     }
     const frame = requestAnimationFrame(() => {
-      if (builderCollapsed) builderPanelRef.current?.collapse();
+      if (builderShut) builderPanelRef.current?.collapse();
       else restoreBuilderWidth();
     });
     return () => cancelAnimationFrame(frame);
-  }, [builderCollapsed, restoreBuilderWidth]);
+  }, [builderShut, restoreBuilderWidth]);
 
   // Expands the pane first — when collapsed, BuilderPane isn't mounted, so a
   // patch targeting it would silently land in persisted state only.
@@ -193,11 +202,6 @@ function WorkspaceInner() {
     toggleBuilder();
   }, [toggleBuilder]);
 
-  const active = tabs.tabs.find((t) => t.id === tabs.activeId) ?? null;
-  const activeCollection = active?.kind === 'collection' ? active : null;
-  const activeScript = active?.kind === 'script' ? active : null;
-  const activeView: CollectionView =
-    activeCollection?.state.activeView ?? 'documents';
   const aggregationState =
     activeCollection?.state.aggregation ?? DEFAULT_AGGREGATION_TAB_STATE;
   const schemaState = activeCollection?.state.schema ?? DEFAULT_SCHEMA_TAB_STATE;
@@ -834,7 +838,7 @@ function WorkspaceInner() {
         shortcut: '⌘B',
         keywords: ['builder', 'filter', 'panel', 'sidebar', 'saved', 'recent', 'expand', 'collapse', 'toggle'],
         toggle: { checked: !builderCollapsed },
-        // Builder is aria-hidden outside documents view and absent for script tabs.
+        // Builder is shut and hidden outside documents view and absent for script tabs.
         when: () =>
           activeCollectionRef.current !== null &&
           (activeCollectionRef.current.state.activeView ?? 'documents') === 'documents',
@@ -1301,6 +1305,7 @@ function WorkspaceInner() {
     openEditConnectionModal,
     openDeleteConnectionModal,
     openConnectionTable,
+    openAddConnectionModal,
   } = connectionDialogs;
 
   // A full conn.list() refetch, not scoped to one Connection, registered
@@ -1569,6 +1574,7 @@ function WorkspaceInner() {
     onEdit: openEditConnectionModal,
     onDelete: openDeleteConnectionModal,
     onExpand: openConnectionTable,
+    onAdd: openAddConnectionModal,
   };
 
   // mode="static" (CSS grid), not the default "fixed" (position: fixed) —

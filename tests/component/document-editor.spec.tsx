@@ -786,6 +786,21 @@ describe('DocumentEditor — add field', () => {
     expect((JSON.parse(call.filterJson) as Record<string, unknown>).sku).toEqual({ $exists: false });
   });
 
+  it('renders the Add field suggestion list under <body>, outside the Modal content', async () => {
+    // A position: fixed box inside the Modal's transformed content is placed
+    // against that content, not the viewport — it must be portaled out.
+    setup({ sample: [{ _id: 1, sku: 'x' }] });
+    const input = within(addFieldBox()).getByRole('textbox');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 's' } });
+    const listbox = await screen.findByRole('listbox');
+
+    const modal = document.body.querySelector('[role="dialog"]') as HTMLElement;
+    expect(modal).toBeTruthy();
+    expect(modal.contains(listbox)).toBe(false);
+    expect(document.body.contains(listbox)).toBe(true);
+  });
+
   it('Escape with the suggestion popup open closes only the popup', async () => {
     const { onClose } = setup({ sample: [{ _id: 1, sku: 'x' }] });
     const input = within(addFieldBox()).getByRole('textbox');

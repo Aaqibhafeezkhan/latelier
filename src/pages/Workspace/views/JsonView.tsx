@@ -7,7 +7,7 @@ import {
   type RowComponentProps,
 } from 'react-window';
 import { I } from '../../../icons';
-import { ejsonStringify } from '../../../utils/ejson';
+import { ejsonStringifyReadable } from '../../../utils/ejson';
 import { docKey, isRecord } from '../../../utils/displayValue';
 import { tokenizeJson, type Token, type TokenKind } from '../../../utils/jsonHighlight';
 import { copyToClipboard } from '../../../utils/clipboard';
@@ -268,7 +268,7 @@ function DocCard({
   const json = React.useMemo(() => {
     const visible = redactHidden(doc, hiddenFields);
     try {
-      return ejsonStringify(visible, 2);
+      return ejsonStringifyReadable(visible, 2);
     } catch {
       return JSON.stringify(visible, null, 2);
     }
@@ -516,7 +516,7 @@ export function JsonView({ documents }: JsonViewProps) {
   }, []);
 
   const copyDoc = React.useCallback((doc: unknown, idx: number) => {
-    const text = ejsonStringify(doc, 2);
+    const text = ejsonStringifyReadable(doc, 2);
     // The badge is the success feedback, so it waits for the write to
     // resolve. A failure toasts and leaves no badge behind.
     void copyToClipboard(text).then((ok) => {

@@ -28,9 +28,10 @@ const ID_INDEX: IndexInfo = {
   sizeBytes: 4096,
 };
 
-function renderStructure(state = DEFAULT_SCHEMA_TAB_STATE, onPatch = vi.fn()) {
+function renderStructure(state = DEFAULT_SCHEMA_TAB_STATE, onPatch = vi.fn(), onChanged = vi.fn()) {
   return {
     onPatch,
+    onChanged,
     ...render(
       <StructureView
         connectionId="c1"
@@ -38,6 +39,7 @@ function renderStructure(state = DEFAULT_SCHEMA_TAB_STATE, onPatch = vi.fn()) {
         collection="orders"
         state={state}
         onPatch={onPatch}
+        onChanged={onChanged}
       />,
     ),
   };
@@ -851,15 +853,12 @@ function collectionTab(overrides: Partial<CollectionTab> = {}): CollectionTab {
   };
 }
 
-describe('Structure view — header count on return to Documents', () => {
-  // PanelBody only mounts `CollectionHeader` inside `view === 'documents'`
-  // (it dims-not-unmounts the builder pane for agg/structure, but the
-  // header itself is conditional). Leaving Structure and coming back to
-  // Documents therefore remounts it, which re-fetches `meta.collectionDetails`
-  // for free — no dedicated refresh signal needed. This proves that claim
-  // rather than assuming it.
-  it('re-fetches the header count after Structure → Documents, with no signal wired up', async () => {
-    let docCount = 10;
+describe('Structure view — header count across view switches', () => {
+  // `CollectionHeader` sits on the sub-tab row and stays mounted across the
+  // three views. Each read is a server-side stats aggregation, so a view
+  // switch alone must not repeat it.
+  it('does not re-read the header counts on a Documents ↔ Aggregation round trip', async () => {
+    const docCount = 10;
     const collectionDetails = vi.fn(async () => ({
       name: 'coll',
       type: 'collection' as const,
@@ -901,15 +900,17 @@ describe('Structure view — header count on return to Documents', () => {
       screen.getByText((_, el) => el?.textContent?.startsWith(`${n} docs in collection`) ?? false);
     await waitFor(() => expect(headerStats(10)).toBeTruthy());
 
-    await userEvent.click(screen.getByRole('tab', { name: /Structure/i }));
-    await screen.findByRole('region', { name: 'Statistics' });
-    docCount = 25;
-    const callsBeforeReturn = collectionDetails.mock.calls.length;
+    await waitFor(() => expect(collectionDetails).toHaveBeenCalled());
+    const callsBefore = collectionDetails.mock.calls.length;
 
+    await userEvent.click(screen.getByRole('tab', { name: /Aggregation/i }));
+    await screen.findByRole('button', { name: /Add stage/ });
     await userEvent.click(screen.getByRole('tab', { name: /Documents/i }));
+    await screen.findByTestId('query-bar-input');
+    await new Promise((r) => setTimeout(r, 50));
 
-    await waitFor(() => expect(headerStats(25)).toBeTruthy());
-    expect(collectionDetails.mock.calls.length).toBeGreaterThan(callsBeforeReturn);
+    expect(collectionDetails.mock.calls.length).toBe(callsBefore);
+    expect(headerStats(10)).toBeTruthy();
   });
 });
 
@@ -936,15 +937,18 @@ describe('StructureView — the statistics header follows writes', () => {
       },
     });
 
-    renderStructure();
+    const { onChanged } = renderStructure();
     const stats = await screen.findByRole('region', { name: 'Statistics' });
     await waitFor(() => expect(within(stats).getByText('2 · 8.0 KB')).toBeTruthy());
+    expect(onChanged).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByText('+ New index'));
     await userEvent.type(await screen.findByLabelText('Field 1'), 'email');
     await userEvent.click(screen.getByText('Create index'));
 
     await waitFor(() => expect(within(stats).getByText('3 · 12.0 KB')).toBeTruthy());
+    // The collection header above the sub-tabs re-reads its index count on this.
+    expect(onChanged).toHaveBeenCalled();
   });
 
   it('shows the new index count after an index is dropped', async () => {

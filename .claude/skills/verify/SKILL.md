@@ -79,8 +79,8 @@ await win.locator('[role="option"][aria-label="Verify"]').click();
 
 - Navigator filter placeholder is `Filter…` with a **Unicode ellipsis** (U+2026),
   not three periods. Use `input[aria-label="Filter collections"]`.
-- The sub-tab strip renders **uppercase via CSS**, and each accessible name
-  includes an icon glyph — `⚡ DOCUMENTS`, `Σ AGGREGATION`, `⚙ SCHEMA`. Match with
+- The sub-tab strip renders **uppercase via CSS** (`DOCUMENTS`, `AGGREGATION`,
+  `STRUCTURE`) with an aria-hidden icon before each label. Match with
   `getByRole('tab').filter({ hasText: /aggregation/i })`, never `^Aggregation`.
 - The navigator filter matches **collection** names, not database names. A db
   whose collections don't match is hidden entirely — that is by design.

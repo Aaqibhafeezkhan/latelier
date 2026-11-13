@@ -38,7 +38,13 @@ const PAGE_SIZE_DATA = PAGE_SIZE_OPTIONS.map((n) => ({ value: String(n), label: 
  * into any provider (workspace tab, saved-query preview, aggregation result
  * snapshot) and it renders against that consumer's state without rewiring.
  */
-export function ResultBar() {
+interface ResultBarProps {
+  /** Reference rules sit beside Fields: both shape how this collection's
+   * documents read. Only the workspace tab passes it; previews have no rules. */
+  references?: { count: number; onOpen: () => void };
+}
+
+export function ResultBar({ references }: ResultBarProps = {}) {
   const T = themeVars;
   const { state, actions, meta } = useCollectionWorkspace();
   const lastRun = state.lastRun;
@@ -100,7 +106,7 @@ export function ResultBar() {
       ? (planSummary.indexName ?? 'index')
       : null;
   const [barRef, barWidth] = useElementWidth<HTMLDivElement>();
-  const layout = resultBarLayout(barWidth);
+  const layout = resultBarLayout(barWidth, references !== undefined);
   // A stale count is the total and "· not current", at any width: the longer forms
   // leave that no room. This stays inside the count's slot, so no control moves.
   const countForm = isStale ? 'total' : layout.count;
@@ -407,6 +413,35 @@ export function ResultBar() {
         {/* Fields control — one control for all three views; each view reads
             the same per-tab `columnConfig`. */}
         <FieldsControl iconOnly={layout.iconControls} />
+
+        {references && (
+          <Tooltip
+            label={`Manage reference rules for this collection (${references.count})`}
+            withArrow
+          >
+            {layout.iconControls ? (
+              <ActionIcon
+                data-hint-anchor="refs.configure"
+                variant="default"
+                size={26}
+                onClick={references.onOpen}
+                aria-label={`References (${references.count})`}
+              >
+                {I.link}
+              </ActionIcon>
+            ) : (
+              <Button
+                data-hint-anchor="refs.configure"
+                variant="default"
+                size="compact-xs"
+                leftSection={I.link}
+                onClick={references.onOpen}
+              >
+                References ({references.count})
+              </Button>
+            )}
+          </Tooltip>
+        )}
 
         {/* Insert — primary create action, moved here from the header so it
             sits with the other document-level controls. Same handler as

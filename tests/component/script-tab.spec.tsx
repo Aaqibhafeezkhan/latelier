@@ -98,7 +98,7 @@ describe('ScriptTab', () => {
 
     const onPatch = vi.fn();
     render(<ScriptTab tab={tab()} onPatch={onPatch} />);
-    fireEvent.click(screen.getByText('▶ Run'));
+    fireEvent.click(screen.getByTestId('script-run-btn'));
 
     await waitFor(() => {
       expect(runSpy).toHaveBeenCalledWith(
@@ -212,7 +212,7 @@ describe('ScriptTab', () => {
     });
 
     render(<ScriptTab tab={tab()} onPatch={() => {}} />);
-    fireEvent.click(screen.getByText('▶ Run'));
+    fireEvent.click(screen.getByTestId('script-run-btn'));
 
     // The button flips to Cancel while the run is in-flight.
     const cancelBtn = await screen.findByText('Cancel');
@@ -241,7 +241,7 @@ describe('ScriptTab', () => {
     });
 
     render(<ScriptTab tab={tab()} onPatch={() => {}} />);
-    fireEvent.click(screen.getByText('▶ Run'));
+    fireEvent.click(screen.getByTestId('script-run-btn'));
     fireEvent.click(await screen.findByText('Cancel'));
 
     expect(await screen.findByText('Cancel failed')).toBeTruthy();
@@ -376,7 +376,7 @@ describe('ScriptTab — field-suggestion sample', () => {
     installAtelierMock({ script: { run, cancel: async () => undefined } });
     render(<ScriptTab tab={tab()} onPatch={() => {}} />);
 
-    fireEvent.click(screen.getByText('▶ Run'));
+    fireEvent.click(screen.getByTestId('script-run-btn'));
     await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
     expect(invalidate).not.toHaveBeenCalled();
     expect(invalidateSchemaEnumCache).not.toHaveBeenCalled();
@@ -395,7 +395,7 @@ describe('ScriptTab — field-suggestion sample', () => {
     const onPatch = vi.fn();
     render(<ScriptTab tab={tab()} onPatch={onPatch} />);
 
-    fireEvent.click(screen.getByText('▶ Run'));
+    fireEvent.click(screen.getByTestId('script-run-btn'));
 
     await waitFor(() => expect(onPatch).toHaveBeenCalledWith(expect.objectContaining({ lastError: expect.anything() })));
     expect(invalidate).toHaveBeenCalledExactlyOnceWith('c1');

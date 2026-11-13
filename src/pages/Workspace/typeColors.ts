@@ -1,26 +1,31 @@
 import type { DisplayType } from '../../utils/displayValue';
 
-// Soft, translucent badges that read as labels rather than blocks of color.
-// Backgrounds are alpha-blended brand tones; foregrounds are the matching
-// solid tone so the badge stays legible on both Paper and Deep surfaces.
-// Theme-derived entries (string/number/boolean/null) use Mantine CSS vars so
-// dark mode switches automatically without JS.
+// Four families plus a neutral, all CSS variables so both color schemes resolve without
+// JS: ids and dates take their own tokens (index.css `--atelier-type-*`, each held to 4.5:1
+// by tests/unit/theme-contrast.spec.ts), the numeric types share the `number` badge, and the
+// container-like types (array, object, regex, binary) stay neutral. Fixed hex values used to
+// live here and went dark-on-dark in the dark scheme.
 // Moved out of component `.tsx` files so `eslint-plugin-react-refresh`
 // (`only-export-components`) permits exporting the object constants (#307).
+const tinted = (token: string) => ({
+  bg: `color-mix(in srgb, var(${token}) 14%, transparent)`,
+  fg: `var(${token})`,
+});
+const NUMERIC = { bg: 'var(--atelier-accent-soft)', fg: 'var(--atelier-accent-ink)' };
+const NEUTRAL = { bg: 'var(--atelier-surface-raised)', fg: 'var(--atelier-text-muted)' };
+
 export const TYPE_HUES: Partial<Record<DisplayType, { bg: string; fg: string }>> = {
-  objectid: { bg: 'rgba(138,107,64,0.12)', fg: '#8A6B40' },
-  date: { bg: 'rgba(26,80,104,0.10)', fg: '#1A5068' },
-  long: { bg: 'rgba(107,58,138,0.10)', fg: '#6B3A8A' },
-  decimal: { bg: 'rgba(107,58,138,0.10)', fg: '#6B3A8A' },
-  regex: { bg: 'rgba(184,76,20,0.12)', fg: '#B84C14' },
-  binary: { bg: 'rgba(80,80,80,0.10)', fg: '#666' },
-  array: { bg: 'rgba(107,58,138,0.10)', fg: '#6B3A8A' },
-  object: { bg: 'rgba(80,80,138,0.10)', fg: '#5050A8' },
+  objectid: tinted('--atelier-type-id'),
+  date: tinted('--atelier-type-date'),
+  long: NUMERIC,
+  decimal: NUMERIC,
+  regex: NEUTRAL,
+  binary: NEUTRAL,
+  array: NEUTRAL,
+  object: NEUTRAL,
 };
 
-// Theme-sensitive badge colors expressed purely as CSS variables so no JS
-// re-read is needed when the color scheme flips. Defined in index.css under
-// :root / [data-mantine-color-scheme="dark"].
+// Theme-derived badge colors (string, number, boolean, null), also CSS variables.
 export const TYPE_THEMED: Partial<Record<DisplayType, { bg: string; fg: string }>> = {
   string: { bg: 'transparent', fg: 'var(--atelier-text-ghost)' },
   number: { bg: 'var(--atelier-accent-soft)', fg: 'var(--atelier-accent-ink)' },

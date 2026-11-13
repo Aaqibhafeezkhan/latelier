@@ -87,6 +87,33 @@ describe('JsonView — rendering', () => {
     expect(container.textContent).toContain('$date');
   });
 
+  it('renders lossless relaxations readably: ISO date and plain int, Long stays wrapped', () => {
+    const docs = [
+      {
+        _id: { $oid: '507f1f77bcf86cd799439011' },
+        createdAt: { $date: { $numberLong: '1735689600000' } },
+        qty: { $numberInt: '7' },
+        big: { $numberLong: '9007199254740993' },
+      },
+    ];
+    const { container } = renderJson(docs);
+    const text = container.textContent ?? '';
+    expect(text).toContain('2025-01-01T00:00:00.000Z');
+    expect(text).not.toContain('1735689600000');
+    expect(text).toMatch(/"qty":\s*7\b/);
+    expect(text).not.toContain('$numberInt');
+    expect(text).toContain('$numberLong');
+    expect(text).toContain('9007199254740993');
+    expect(text).toContain('$oid');
+  });
+
+  it('Copy writes the same readable text it displays', async () => {
+    renderJson([{ _id: 1, qty: { $numberInt: '7' }, createdAt: { $date: { $numberLong: '1735689600000' } } }]);
+    await userEvent.click(screen.getByRole('button', { name: /^Copy JSON/ }));
+    const written = (navigator.clipboard.writeText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    expect(JSON.parse(written)).toEqual({ _id: 1, qty: 7, createdAt: { $date: '2025-01-01T00:00:00.000Z' } });
+  });
+
   it('shows the Copy JSON tooltip when keyboard focus lands on the icon button', async () => {
     renderJson([{ _id: 1, sku: 'a' }]);
 

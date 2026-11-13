@@ -363,7 +363,7 @@ export function ConnectionExpandedTable({
               onChange={() => toggleChecked(c.id)}
             />
           </Table.Td>
-          <Table.Td>
+          <Table.Td style={{ whiteSpace: 'nowrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: T.gapSm }}>
               <span style={{ color: T.textGhost, display: 'flex', flexShrink: 0 }}>
                 {open ? I.chevD : I.chevR}
@@ -378,7 +378,20 @@ export function ConnectionExpandedTable({
                   flexShrink: 0,
                 }}
               />
-              <span style={{ fontWeight: 600, color: T.text }}>{c.name}</span>
+              {/* Capped so a very long name can't crush Host to nothing. */}
+              <span
+                title={c.name}
+                style={{
+                  fontWeight: 600,
+                  color: T.text,
+                  maxWidth: 240,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {c.name}
+              </span>
               {pinnedIds.has(c.id) && (
                 <span aria-hidden title="Pinned" style={{ display: 'flex', color: T.textMuted, flexShrink: 0 }}>
                   <IconPinFilled size={11} />
@@ -406,11 +419,25 @@ export function ConnectionExpandedTable({
               than its own column: five short columns for the widest surface
               in the app was the complaint, and Type never needed a header of
               its own to be legible next to the host. */}
-          <Table.Td style={{ fontFamily: 'ui-monospace, monospace', color: T.textMuted }}>
+          {/* maxWidth: 0 + width: 100% is the table-cell idiom for "take the
+              leftover width, then ellipsize": the other cells stay one line
+              (nowrap) and this long host gives way instead of wrapping. */}
+          <Table.Td
+            title={`${c.host}:${c.port} · ${formatConnectionType(c.connectionType)}`}
+            style={{
+              fontFamily: 'ui-monospace, monospace',
+              color: T.textMuted,
+              maxWidth: 0,
+              width: '100%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
             {c.host}:{c.port}
             <Text span size="xs" c="dimmed"> · {formatConnectionType(c.connectionType)}</Text>
           </Table.Td>
-          <Table.Td>
+          <Table.Td style={{ whiteSpace: 'nowrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: themeVars.gapXs }}>
               <span
                 aria-hidden
@@ -425,7 +452,7 @@ export function ConnectionExpandedTable({
               <span style={{ color: T.textMuted }}>{presentation.label}</span>
             </div>
           </Table.Td>
-          <Table.Td style={{ color: T.textMuted }}>{relativeTime(c.lastUsedAt, 'Never')}</Table.Td>
+          <Table.Td style={{ color: T.textMuted, whiteSpace: 'nowrap' }}>{relativeTime(c.lastUsedAt, 'Never')}</Table.Td>
           {/* The footer action bar is gone; the same four actions
               (Connect / Manage / Edit / Delete) render here instead, on the
               selected row only, matching the popover's own "act on the
@@ -603,9 +630,8 @@ export function ConnectionExpandedTable({
               table: { fontSize: T.fsSm },
               th: {
                 fontSize: T.fsXs,
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
                 fontWeight: 600,
+                whiteSpace: 'nowrap',
                 color: T.textMuted,
                 padding: '8px 12px',
               },

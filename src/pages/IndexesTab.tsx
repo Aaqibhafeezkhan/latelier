@@ -276,7 +276,7 @@ export function IndexesTab({
           background: T.surface,
         }}
       >
-        <div style={{ flex: 1 }} />
+        <div style={{ flex: 1, fontWeight: 600, color: T.text, fontSize: T.fsSm }}>Indexes</div>
 
         <Button
           size="compact-xs"
@@ -396,8 +396,6 @@ export function IndexesTab({
               table: { fontSize: T.fsSm },
               th: {
                 fontSize: T.fsXs,
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
                 fontWeight: 600,
                 color: T.textMuted,
                 padding: '8px 12px',
@@ -914,8 +912,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
           fontSize: T.fsXs,
           fontWeight: 600,
           color: T.textMuted,
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
           marginBottom: 6,
         }}
       >

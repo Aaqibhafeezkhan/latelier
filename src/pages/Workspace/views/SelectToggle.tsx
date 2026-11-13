@@ -1,5 +1,5 @@
 import { ActionIcon, Tooltip } from '@mantine/core';
-import { I } from '../../../icons';
+import { IconCheck } from '@tabler/icons-react';
 
 interface SelectToggleProps {
   selected: boolean;
@@ -15,7 +15,8 @@ interface SelectToggleProps {
 /**
  * Per-row selection checkbox shared by Table, Tree and JSON. A plain click
  * on a row/card only makes it the active row now; this (plus ⌘/Ctrl+click)
- * is the one visible way to add a row to the bulk-action selection.
+ * is the one visible way to add a row to the bulk-action selection. An
+ * unselected box is empty (a ghost-coloured check read as already checked).
  *
  * `aria-pressed` on a `<button>`, not a real `<input type="checkbox">` — the
  * toggle-button pattern — so it can sit inside a `role="group"`/`"row"`/
@@ -30,8 +31,9 @@ export function SelectToggle({ selected, docLabel, onToggle, tabIndex }: SelectT
         type="button"
         tabIndex={tabIndex}
         variant="default"
-        size="sm"
-        c={selected ? 'var(--atelier-accent)' : 'var(--atelier-text-ghost)'}
+        size={16}
+        radius={4}
+        c="var(--atelier-accent-text)"
         onClick={(e) => {
           e.stopPropagation();
           onToggle();
@@ -40,13 +42,16 @@ export function SelectToggle({ selected, docLabel, onToggle, tabIndex }: SelectT
         aria-label={label}
         style={{
           flexShrink: 0,
-          ...(selected && {
-            background: 'var(--atelier-accent-soft)',
-            borderColor: 'var(--atelier-accent-border)',
-          }),
+          minWidth: 16,
+          minHeight: 16,
+          borderWidth: 1.5,
+          // Drawn as a checkbox, not a button: no fill while off, solid accent while on.
+          ...(selected
+            ? { background: 'var(--atelier-accent)', borderColor: 'var(--atelier-accent)' }
+            : { background: 'transparent', borderColor: 'var(--atelier-text-ghost)' }),
         }}
       >
-        {I.check}
+        {selected ? <IconCheck size={12} stroke={3} /> : null}
       </ActionIcon>
     </Tooltip>
   );

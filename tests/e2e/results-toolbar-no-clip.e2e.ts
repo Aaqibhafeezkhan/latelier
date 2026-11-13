@@ -13,6 +13,7 @@ test.afterAll(stopAllMemoryServers);
  */
 const SIZES: Array<[number, number]> = [
   [900, 600],
+  [960, 640],
   [1024, 768],
   [1100, 800],
   [1280, 800],
@@ -58,6 +59,35 @@ function countIsCut(win: Page): Promise<boolean> {
   });
 }
 
+// Save, History and Run share the QUERY row with the filter: none of them may
+// clip, and a notice beside them must not squeeze the filter away.
+async function expectQueryRowWhole(win: Page, label: string, withNotice = false) {
+  const actions = win.getByTestId('query-bar-actions');
+  if (withNotice) {
+    // A refused ⌘↵ puts its reason beside Run: the case that could squeeze the row.
+    await win.getByTestId('query-bar-input').focus();
+    await win.keyboard.press('ControlOrMeta+Enter');
+    await expect(actions.locator('[role="alert"]').first(), `${label}: notice`).toBeVisible();
+  }
+  const row = await readBar(win, 'query-bar-actions');
+  expect(row.clipped, `${label}: query row clipped`).toEqual([]);
+  // A squeezed Mantine button keeps its box and clips its label inside it.
+  const labels = await win.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[data-testid="query-bar-actions"] [class*="Button-label"]')].map(
+      (el) => ({ text: el.textContent, cut: el.scrollWidth > el.clientWidth + 1 }),
+    ),
+  );
+  // Run at least: a selector that matched nothing would pass the check below.
+  expect(labels.length, `${label}: query row labels found`).toBeGreaterThanOrEqual(1);
+  expect(labels.filter((l) => l.cut).map((l) => l.text), `${label}: query row labels cut`).toEqual([]);
+  for (const name of ['Save', 'History']) {
+    await expect(actions.getByRole('button', { name, exact: true }), `${label}: ${name}`).toBeInViewport();
+  }
+  await expect(win.getByTestId('query-run-btn'), `${label}: Run`).toBeInViewport();
+  const filter = await win.getByTestId('query-bar-input').boundingBox();
+  expect(filter!.width, `${label}: filter width`).toBeGreaterThanOrEqual(120);
+}
+
 // The memory server is shared across this file, so each test seeds its own database.
 let seeded = 0;
 
@@ -89,6 +119,7 @@ test('results toolbar never clips, and a stale query changes nothing about it', 
         expect(fresh.clipped, `${width}: clipped`).toEqual([]);
         expect(fresh.barHeight, `${width}: one row`).toBe(44);
         expect(await countIsCut(win), `${width}: count cut`).toBe(false);
+        await expectQueryRowWhole(win, `${width}`);
 
         await input.fill('{ bad:');
         await expect(win.getByTestId('result-count-stale')).toBeVisible();
@@ -96,6 +127,7 @@ test('results toolbar never clips, and a stale query changes nothing about it', 
         expect(stale.clipped, `${width}: clipped when stale`).toEqual([]);
         expect(stale.left, `${width}: stale moved a control`).toEqual(fresh.left);
         expect(await countIsCut(win), `${width}: count cut when stale`).toBe(false);
+        await expectQueryRowWhole(win, `${width} stale`, true);
         // From the default window up there is room to say it whole.
         const label = await win.getByTestId('result-count-stale').evaluate((el) => {
           const style = getComputedStyle(el);
@@ -115,6 +147,24 @@ test('results toolbar never clips, and a stale query changes nothing about it', 
         await input.fill('{}');
         await expect(win.getByTestId('result-count-stale')).toHaveCount(0);
       }
+    });
+  });
+});
+
+test('the page-reset hint beside Run leaves the filter its room at 960', async () => {
+  await withApp(async (app) => {
+    const win = await app.firstWindow();
+    await win.waitForLoadState('domcontentloaded');
+    await expectConsoleClean(win, async () => {
+      await open(win);
+      await win.setViewportSize({ width: 960, height: 640 });
+      await win.waitForTimeout(300);
+      // 60 docs at 50 a page: page 2, then an edit that would send Run back to page 1.
+      await win.getByRole('button', { name: 'Next page', exact: true }).click();
+      await expect(win.getByTestId('result-bar')).toContainText('2 / 2', { timeout: 8000 });
+      await win.getByTestId('query-bar-input').fill('{"n":{"$gte":0}}');
+      await expect(win.getByTestId('page-reset-hint')).toBeVisible();
+      await expectQueryRowWhole(win, '960 page-reset hint');
     });
   });
 });

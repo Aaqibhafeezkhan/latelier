@@ -33,8 +33,11 @@ export class WorkspacePage {
     return this.win.locator(`[data-testid="nav-db-${dbName}"]`);
   }
 
-  /** The navigator's connection-level "Refresh" button — re-fetches the DB list. */
-  get navigatorRefreshButton() { return this.win.getByRole('button', { name: 'Refresh' }); }
+  /**
+   * The navigator's connection-level "Refresh" button — re-fetches the DB list.
+   * Scoped to the navigator: Structure has Refresh buttons of its own.
+   */
+  get navigatorRefreshButton() { return this.navigator.getByRole('button', { name: 'Refresh' }); }
 
   /** Treeitem for a collection inside a database. */
   collectionRow(dbName: string, collection: string) {

@@ -112,6 +112,13 @@ export interface ConnectionSwitcherProps {
    * switcher").
    */
   variant?: 'title' | 'cta';
+  /**
+   * Opens the add-connection form. With it, the `cta` variant shows a filled
+   * "New connection" button instead of the picker while no Connection exists
+   * (a first-run user has nothing to pick), and the empty list offers the
+   * same action. Omitted: both fall back to the picker-only behaviour.
+   */
+  onAdd?: () => void;
 }
 
 /** `⌘E` / `Ctrl+E`: open the full Connections table. */
@@ -348,6 +355,7 @@ export function ConnectionSwitcher({
   onDelete,
   onExpand,
   variant = 'title',
+  onAdd,
 }: ConnectionSwitcherProps) {
   const T = themeVars;
   const [opened, setOpened] = React.useState(false);
@@ -359,8 +367,9 @@ export function ConnectionSwitcher({
   // the search field (ADR
   // 0001's "add-mode when zero connections exist"). Read at open time via
   // `connections.length`, not a separate prop — the Switcher already knows
-  // its own connection count, and this stays correct however it was opened
-  // (TitleBar trigger or the empty state's `variant="cta"` one).
+  // its own connection count, and this stays correct however it was opened.
+  // With zero Connections the empty state's `variant="cta"` is no longer a
+  // trigger (it is the add button), so the TitleBar trigger is the way in.
   const addMode = connections.length === 0;
   const optionId = (connectionId: string) => `${baseId}-opt-${connectionId}`;
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -616,6 +625,17 @@ export function ConnectionSwitcher({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened]);
 
+  // Not a popover trigger: with nothing to pick, the CTA is the add action
+  // itself, so it stays out of Popover.Target (which would stamp
+  // aria-haspopup / aria-expanded on it).
+  if (variant === 'cta' && connections.length === 0 && onAdd) {
+    return (
+      <Button ref={triggerRef} variant="filled" size="sm" leftSection={I.plus} onClick={onAdd}>
+        New connection
+      </Button>
+    );
+  }
+
   return (
     <Popover
       opened={opened}
@@ -830,6 +850,22 @@ export function ConnectionSwitcher({
             ))
           )}
         </div>
+        {/* A sibling of the listbox, not a child: a listbox owns only
+            options and groups. */}
+        {connections.length === 0 && onAdd && (
+          <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 14 }}>
+            <Button
+              variant="light"
+              size="compact-xs"
+              onClick={() => {
+                close();
+                onAdd();
+              }}
+            >
+              New connection
+            </Button>
+          </div>
+        )}
         {/*
           The footer is how the keyboard path is learned from the mouse path:
           a user who only ever clicks still reads it every time they open the

@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '../helpers/render';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Workspace from '../../src/pages/Workspace';
 import { commandRegistry } from '../../src/commands/registry';
@@ -154,6 +155,22 @@ describe('W15 §2.3/§3.4 — field completion on projection and sort', () => {
     // The token is replaced in place — the `{ ` the user already typed
     // survives, so the completion drops into the document being written.
     await waitFor(() => expect((input as HTMLInputElement).value).toBe('{ name'));
+  });
+
+  it('pressing a suggestion keeps the Fields popover open and inserts the pick', async () => {
+    // The input lives in a Mantine Popover dropdown whose click-outside
+    // handler watches the DOM path of a real mousedown. A suggestion list
+    // portaled out of that dropdown would close it (and commit the half-typed
+    // projection) before the click landed.
+    mountWith(makeState());
+    const input = await openProjection();
+    typeWithCaret(input, '{ nam');
+    const option = await screen.findByRole('option', { name: /^name/ });
+
+    await userEvent.click(option);
+
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe('{ name'));
+    expect(screen.getByTestId('fields-projection')).toBe(input);
   });
 
   it('completes dotted paths', async () => {

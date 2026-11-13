@@ -5,7 +5,7 @@ import { copyToClipboard } from '../../utils/clipboard';
 import { I } from '../../icons';
 import { useCollectionWorkspace } from './context';
 import { EMPTY_DOCUMENTS, useResultSelection } from './resultSelection';
-import { bandOccupant } from './resultPaneState';
+import { bandOccupant, resultPaneKind } from './resultPaneState';
 import {
   buildDeleteSelectedFilterJson,
   selectedDocs,
@@ -139,6 +139,21 @@ export function SelectionActionBar({ onDeleteSelected, connectionLost }: Selecti
             Cancel
           </Button>
         </>
+      )}
+      {/* Only above rows: the empty, error and never-run panes have nothing to select. */}
+      {occupant === 'none' && resultPaneKind(state) === 'rows' && (
+        <span
+          data-testid="band-hint"
+          style={{
+            color: T.textGhost,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {`Select rows with the checkbox or ⌘/Ctrl-click to copy${meta.isView ? '' : ' or delete'} them`}
+        </span>
       )}
       {occupant === 'selection' && (
         <>

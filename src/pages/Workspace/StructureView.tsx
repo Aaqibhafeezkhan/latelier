@@ -14,6 +14,8 @@ interface Props {
   /** See `IndexCreateRequest` — threaded straight through to `IndexesTab`. */
   initialCreate?: IndexCreateRequest | null;
   onInitialCreateConsumed?: () => void;
+  /** An index was created or dropped: the collection header's index count is stale. */
+  onChanged?: () => void;
 }
 
 /**
@@ -39,6 +41,7 @@ export function StructureView({
   onPatch,
   initialCreate,
   onInitialCreateConsumed,
+  onChanged,
 }: Props) {
   const { details, error, loading, reload } = useCollectionDetails(connectionId, dbName, collection);
   return (
@@ -57,7 +60,10 @@ export function StructureView({
             expectedCount={details?.stats?.indexCount}
             initialCreate={initialCreate}
             onInitialCreateConsumed={onInitialCreateConsumed}
-            onChanged={() => void reload()}
+            onChanged={() => {
+              void reload();
+              onChanged?.();
+            }}
           />
           {/* The server refuses collMod rules on a view and on a time-series collection. */}
           {details?.type === 'collection' && (

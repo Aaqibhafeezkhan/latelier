@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DEFAULT_THEME, mergeMantineTheme } from '@mantine/core';
+import { TYPE_HUES } from '../../src/pages/Workspace/typeColors';
 import { cssVariablesResolver, mantineTheme } from '../../src/theme/mantineTheme';
 import {
   parseColor,
@@ -63,6 +64,8 @@ const TOKENS = {
   'json number': { varName: '--atelier-color-number', minRatio: 4.5 },
   'json string': { varName: '--atelier-color-string', minRatio: 4.5 },
   'json boolean': { varName: '--atelier-color-boolean', minRatio: 4.5 },
+  'type id badge': { varName: '--atelier-type-id', minRatio: 4.5 },
+  'type date badge': { varName: '--atelier-type-date', minRatio: 4.5 },
 } as const;
 
 describe('theme token contrast (WCAG AA, worst-case surface)', () => {
@@ -113,6 +116,95 @@ describe('theme token contrast (WCAG AA, worst-case surface)', () => {
     expect(resolved.light['--mantine-color-dimmed']).toBe('var(--atelier-text-muted)');
     expect(resolved.light['--mantine-color-placeholder']).toBe('var(--atelier-text-ghost)');
     expect(resolved.dark['--mantine-color-placeholder']).toBe('var(--atelier-text-ghost)');
+  });
+});
+
+const surfaceRgb = (block: string, name: string) => parseColor(readVar(block, name));
+
+// The dark surfaces collapsed into one slab (bg, toolbars, results within 1.05:1), so
+// panes stopped reading as layers. Each adjacent step must stay visibly apart.
+describe('dark surface layering', () => {
+  const steps = ['--atelier-bg', '--atelier-surface', '--atelier-surface-raised', '--atelier-surface-active'];
+  for (let i = 0; i < steps.length - 1; i++) {
+    it(`${steps[i]} and ${steps[i + 1]} differ by at least 1.1:1`, () => {
+      const a = surfaceRgb(darkBlock, steps[i]!);
+      const b = surfaceRgb(darkBlock, steps[i + 1]!);
+      expect(contrastRatio(a, b)).toBeGreaterThanOrEqual(1.1);
+    });
+  }
+
+  it('mirrors the surfaces into the Mantine dark palette', () => {
+    const dark = mergeMantineTheme(DEFAULT_THEME, mantineTheme).colors.dark;
+    expect(dark[8]).toBe(readVar(darkBlock, '--atelier-bg'));
+    expect(dark[7]).toBe(readVar(darkBlock, '--atelier-surface'));
+    expect(dark[6]).toBe(readVar(darkBlock, '--atelier-surface-raised'));
+    expect(dark[5]).toBe(readVar(darkBlock, '--atelier-surface-active'));
+  });
+});
+
+describe('Mantine dark variables from the resolver', () => {
+  const theme = mergeMantineTheme(DEFAULT_THEME, mantineTheme);
+  const { dark } = cssVariablesResolver(theme);
+  const surfaces = THEMES.dark.surfaces;
+
+  for (const surfaceVar of surfaces) {
+    it(`light-variant text clears 4.5:1 on its fill over ${surfaceVar}`, () => {
+      const surface = surfaceRgb(darkBlock, surfaceVar);
+      const fill = blend(parseColor(dark['--mantine-color-violet-light']!), surface);
+      const text = parseColor(dark['--mantine-color-violet-light-color']!);
+      expect(contrastRatio(text, fill)).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it(`light-variant fill stays visible over ${surfaceVar}`, () => {
+      const surface = surfaceRgb(darkBlock, surfaceVar);
+      const fill = blend(parseColor(dark['--mantine-color-violet-light']!), surface);
+      expect(contrastRatio(fill, surface)).toBeGreaterThanOrEqual(1.3);
+    });
+
+    it(`disabled text is quieter than default-control text over ${surfaceVar}`, () => {
+      const surface = surfaceRgb(darkBlock, surfaceVar);
+      const disabled = blend(parseColor(dark['--mantine-color-disabled-color']!), surface);
+      const enabled = parseColor(readVar(darkBlock, '--atelier-text'));
+      expect(contrastRatio(disabled, surface)).toBeLessThan(contrastRatio(enabled, surface));
+    });
+  }
+
+  it('covers every palette colour, not just violet', () => {
+    expect(dark['--mantine-color-red-light']).toMatch(/^rgba\(/);
+    expect(dark['--mantine-color-red-light-color']).toBe(theme.colors.red[1]);
+  });
+
+  it('draws disabled controls hollow, unlike the default control fill', () => {
+    expect(dark['--mantine-color-disabled']).toBe('transparent');
+    expect(dark['--mantine-color-disabled']).not.toBe(theme.colors.dark[6]);
+    expect(dark['--mantine-color-disabled-border']).toBe('var(--atelier-border-med)');
+  });
+
+  it('sets default-control text to the page text token and button labels to weight 500', () => {
+    expect(dark['--mantine-color-default-color']).toBe('var(--atelier-text)');
+    expect(theme.fontWeights.medium).toBe('500');
+  });
+});
+
+describe('type badges (typeColors.ts)', () => {
+  for (const [themeName, theme] of Object.entries(THEMES)) {
+    for (const token of ['--atelier-type-id', '--atelier-type-date']) {
+      for (const surfaceVar of theme.surfaces) {
+        it(`${themeName} ${token} on its 14% tint over ${surfaceVar} clears 4.5:1`, () => {
+          const fg = parseColor(readVar(theme.block, token));
+          const surface = surfaceRgb(theme.block, surfaceVar);
+          const bg = blend({ ...fg, a: 0.14 }, surface);
+          expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(4.5);
+        });
+      }
+    }
+  }
+
+  it('backs every hue with CSS variables only', () => {
+    for (const entry of Object.values(TYPE_HUES)) {
+      expect(entry!.fg).toMatch(/^var\(--atelier-/);
+      expect(entry!.bg).toMatch(/var\(--atelier-/);
+    }
   });
 });
 

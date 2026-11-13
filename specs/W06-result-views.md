@@ -49,6 +49,7 @@ Documents are always EJSON objects. A helper `toDisplayValue(v): { type, display
 Row layout (matches existing mock):
 - Collapsed: `[▸] [📄] [shortId]   [key: value · key: value · …]   [✏ pick preview]`.
 - Expanded: a field grid with three columns (field, value, type), nested objects/arrays expand on click.
+- A collapsed row is compact (about 33px) and the preview sits beside the id, left-aligned, with the row actions pinned to the right.
 
 ### Expansion state
 - `expanded: Set<string>` per tab (persisted in tab state).
@@ -63,6 +64,7 @@ Row layout (matches existing mock):
 - For `_id` of type `ObjectId`, show last 8 hex chars. For non-Object-id `_id`, show up to 12 chars of the EJSON stringification, prefixed with the type badge.
 
 ### Selection
+- An unselected select toggle is an empty box; the check appears only once the row is selected.
 - A plain click on the collapsed row header does not select: it expands or collapses the row (the chevron button does the same). Selecting is Cmd/Ctrl-click on the row, or the per-row select toggle (checkbox) at the row's left; both toggle that row into or out of the multi-selection (blue left border and tinted background on selected rows). There is no single-select-by-click mode.
 - Selection is a set of row indices shared by Table, Tree and JSON, so it survives a view switch and is cleared whenever the result set changes (new run, page change, tab switch).
 - Selection is consumed by W08 for `Edit document` / `Delete document(s)` actions; Edit and Delete also have their own buttons on each row.
@@ -76,7 +78,7 @@ Row layout (matches existing mock):
 ## 3. JSON view
 
 - Each doc in its own card (matches mock).
-- Uses `JSON.stringify(EJSON.parse(...), null, 2)` output with light syntax highlighting (keys bold; strings green; numbers blue; booleans orange; null grey — colors from tokens).
+- Rendered through `ejsonStringifyReadable` (lossless relaxations only — see `utils/ejson.ts`: plain numbers for `$numberInt`/fractional doubles, ISO text for `$date`; `$numberLong`, `$numberDecimal` and `$oid` stay wrapped); Copy uses the same text. Light syntax highlighting (keys bold; strings green; numbers blue; booleans orange; null grey — colors from tokens).
 - Syntax highlighting is computed at render time by a tiny tokenizer in `utils/jsonHighlight.ts` — do NOT bring in `prismjs` or `highlight.js` for iteration 1.
 - Active card: the card list is one tab stop (`role="tree"`, cards are `treeitem`s) with `aria-activedescendant` naming the active card, outlined while the list has focus — the same model as Tree and Table rows.
   - A plain click makes the card active; Cmd/Ctrl-click toggles it into the multi-selection; the per-card select toggle is the other way in.
@@ -87,7 +89,7 @@ Row layout (matches existing mock):
 
 - Derive columns:
   - Take the union of top-level keys across the first 50 docs.
-  - Ensure `_id` is first, then the current preview fields in order, then the remaining keys alphabetically.
+  - Ensure `_id` is first, then the current preview fields in order, then the remaining keys in the order they first appear across the sampled documents. Date columns default to a width that fits a full ISO timestamp.
 - Column widths: default auto with `max-width: 200px` + ellipsis overflow. User can drag column separators to resize (persisted in tab state as `state.columns.{field}.width`).
 - Nested objects/arrays show as `{N}` / `[N]` badges that expand into a small popover showing the nested JSON.
 - Any cell with a value has a hover/focus-revealed `⤢` that opens the full, untruncated value in a popover (`FullValuePopover`, shared with Tree leaves).
@@ -100,6 +102,7 @@ Row layout (matches existing mock):
 - Loading (between Run click and response):
   - first load (no run has landed in the tab yet): eight skeleton rows stand in for the body, inside a `role="status"` region labelled "Loading results";
   - any re-run, including one after an empty or errored result: keep the body as it is, with "Running…" and Cancel in the fixed band above the rows, itself `role="status"`, so nothing moves or is covered. Only one of the two status regions shows at a time.
+- With nothing to say (no selection, not running, connection fine), the fixed band holds a one-line hint naming how to select: "Select rows with the checkbox or ⌘/Ctrl-click to copy or delete them" ("… to copy them" on a view). Its height never changes.
 - One pane state stands in for rows whenever there are none, each with a next action:
   - not run yet: "Run the query to see results", with Run;
   - empty collection: "This collection is empty", with Import documents (Run again on a view);

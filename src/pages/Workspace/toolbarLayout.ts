@@ -28,17 +28,27 @@ const COUNT_RANGE_MIN = 640;
 const LABELS_MIN = 760;
 const PLAN_BADGE_MIN = 640;
 const ONE_ROW_MIN = 500;
+// The References control, measured with its gap: as a labelled button, then as an icon.
+const REFERENCES_LABEL_WIDTH = 141;
+const REFERENCES_ICON_WIDTH = 32;
 
-export function resultBarLayout(width: number | null): ResultBarLayout {
+/**
+ * `withReferences` is a control, not the query: the workspace tab shows the
+ * References button and previews do not, so the tab's steps sit that much wider.
+ */
+export function resultBarLayout(width: number | null, withReferences = false): ResultBarLayout {
   const w = width ?? Number.POSITIVE_INFINITY;
+  const labelled = withReferences ? w - REFERENCES_LABEL_WIDTH : w;
+  const iconic = withReferences ? w - REFERENCES_ICON_WIDTH : w;
+  const iconControls = labelled < LABELS_MIN;
   let count: CountForm = 'total';
-  if (w >= COUNT_FULL_MIN) count = 'full';
-  else if (w >= COUNT_RANGE_MIN) count = 'range';
+  if (labelled >= COUNT_FULL_MIN) count = 'full';
+  else if ((iconControls ? iconic : labelled) >= COUNT_RANGE_MIN) count = 'range';
   return {
     count,
-    iconControls: w < LABELS_MIN,
-    planBadge: w >= PLAN_BADGE_MIN,
-    wrap: w < ONE_ROW_MIN,
+    iconControls,
+    planBadge: iconic >= PLAN_BADGE_MIN,
+    wrap: iconic < ONE_ROW_MIN,
   };
 }
 

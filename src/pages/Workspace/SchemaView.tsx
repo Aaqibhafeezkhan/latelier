@@ -1,5 +1,6 @@
 import React from 'react';
 import { themeVars } from '../../theme/themeVars';
+import { I } from '../../icons';
 import { Button } from '@mantine/core';
 import { api, getErrorMessage, isIpcError } from '../../api/atelier';
 import type { SchemaSampleEntry, SchemaTabState } from '@shared/types';
@@ -107,6 +108,7 @@ export function SchemaView({
           fontSize: T.fsSm,
         }}
       >
+        <div style={{ fontWeight: 600, color: T.text }}>Schema</div>
         <div style={{ color: T.textMuted, flex: 1 }}>
           {state.ranAt ? (
             <>
@@ -143,7 +145,13 @@ export function SchemaView({
             ))}
           </select>
         </label>
-        <Button size="compact-xs" variant="filled" disabled={sampling} onClick={() => void runSample()}>
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          leftSection={I.sync}
+          disabled={sampling}
+          onClick={() => void runSample()}
+        >
           {sampling ? 'Sampling…' : 'Refresh'}
         </Button>
       </div>

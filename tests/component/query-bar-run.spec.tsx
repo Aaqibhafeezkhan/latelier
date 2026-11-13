@@ -84,6 +84,17 @@ describe('QueryBar - the hint that the next Run leaves this page (W07 §3)', () 
     expect(hintFor({ queryRaw: '{"a":2}' })?.textContent).toBe('Will jump to page 1 on run');
   });
 
+  it('shrinks to an icon in a narrow query bar, keeping its words for a screen reader', () => {
+    // jsdom lays nothing out; a narrow bar is what useElementWidth would read.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 500 } as DOMRect);
+    const hint = hintFor({ queryRaw: '{"a":2}' });
+    expect(hint?.querySelector('svg')).not.toBeNull();
+    expect(hint?.textContent).toBe('Will jump to page 1 on run');
+    // Save and History go icon-only too, under the same names.
+    expect(screen.getByRole('button', { name: 'Save' }).textContent).toBe('');
+    expect(screen.getByRole('button', { name: 'History' }).textContent).toBe('');
+  });
+
   it('stays away while the query is the one that ran', () => {
     expect(hintFor({})).toBeNull();
   });

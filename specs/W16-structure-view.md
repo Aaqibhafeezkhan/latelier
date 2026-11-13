@@ -103,6 +103,15 @@ Structure is a single vertically scrolling pane holding sections in order:
 The statistics section and the schema depth arrived after Tiers 1–4 without a
 strip change.
 
+Each section opens with a title row; its actions sit on the right, and every
+section's Refresh is the same subtle button with the refresh icon.
+
+The collection's breadcrumb and References sit on the sub-tab row itself, so
+they show in Structure too. Off Documents the Query Builder collapses to its
+rail and returns at its stored width on Documents; it stays mounted meanwhile,
+so its drafts and undo history survive, and the stored collapse preference is
+not touched.
+
 The stacking is the point, not an economy. The insight this view exists to
 produce is a *join across two sections* — "I filter on `status`; the schema
 says it is present in 98% of documents and is always a string; no index covers

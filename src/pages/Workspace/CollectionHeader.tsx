@@ -1,37 +1,38 @@
 import React from 'react';
-import { Button, Group, Tooltip } from '@mantine/core';
+import { Group, Tooltip } from '@mantine/core';
 import { themeVars } from '../../theme/themeVars';
 import { api } from '../../api/atelier';
+import { useElementWidth } from '../../hooks/useElementWidth';
+
+/** Below this the counts would crowd the name; Structure's Statistics still has them. */
+const STATS_MIN_WIDTH = 480;
 
 interface CollectionHeaderProps {
   connectionId: string;
   dbName: string;
   collection: string;
-  onOpenReferences: () => void;
-  referenceRuleCount: number;
   /**
-   * `useDocumentDialogs`'s write-completion counter — bumps once per
-   * finished insert/edit/delete/delete-many. Reusing that existing signal
-   * (rather than the query re-run itself) keeps this effect from firing on
-   * every sort/filter/page re-run too: `collectionDetails` runs a stats
-   * aggregation on the server, so it isn't free.
+   * Re-reads the counts whenever it changes. PanelBody builds it from
+   * `useDocumentDialogs`'s write-completion counter (once per finished
+   * insert/edit/delete/delete-many) and Structure's index changes. Not the
+   * query re-run or a view switch: that would fire on every sort/filter/page
+   * re-run too, and `collectionDetails` runs a stats aggregation on the
+   * server, so it isn't free.
    */
   refreshSignal?: number;
 }
 
 /**
- * Top breadcrumb header. The Tree|JSON|Table view switch moved down to
- * `<ResultBar/>` alongside the pagination so the top row stays a clean
- * breadcrumb-plus-stats line, plus the References button on the right.
- * Insert lives in `<ResultBar/>`; References is also in the navigator's
- * collection context menu and the command palette.
+ * Breadcrumb header, on the sub-tab row beside Documents / Aggregation /
+ * Structure, so it shows in all three. It fills what the tabs leave; the
+ * breadcrumb ellipsizes first. The Tree|JSON|Table view switch, Insert and
+ * References live in `<ResultBar/>`, References beside Fields; it is also in
+ * the navigator's collection context menu and the command palette.
  */
 export function CollectionHeader({
   connectionId,
   dbName,
   collection,
-  onOpenReferences,
-  referenceRuleCount,
   refreshSignal,
 }: CollectionHeaderProps) {
   const T = themeVars;
@@ -68,21 +69,24 @@ export function CollectionHeader({
     };
   }, [connectionId, dbName, collection, cacheKey, refreshSignal]);
 
+  // A count shows whole or not at all: "1…" would read as one document.
+  const [rowRef, rowWidth] = useElementWidth<HTMLDivElement>();
+  const roomForStats = rowWidth === null || rowWidth >= STATS_MIN_WIDTH;
+
   return (
     <Group
+      ref={rowRef}
       gap={themeVars.gapSm}
       wrap="nowrap"
       style={{
-        padding: '0 14px',
-        height: 42,
-        background: T.surface,
-        borderBottom: `1px solid ${T.border}`,
-        flexShrink: 0,
+        flex: 1,
+        minWidth: 0,
+        padding: '0 10px 0 14px',
       }}
     >
       {/* Breadcrumb + stats */}
-      <Group gap={T.gapSm} align="baseline" wrap="nowrap" style={{ minWidth: 0 }}>
-        <span style={{ fontSize: T.fsXs, color: T.textMuted }}>{dbName} /</span>
+      <Group gap={T.gapSm} align="baseline" wrap="nowrap" style={{ minWidth: 0, flex: '0 1 auto', overflow: 'hidden' }}>
+        <span style={{ fontSize: T.fsXs, color: T.textMuted, whiteSpace: 'nowrap', flexShrink: 0 }}>{dbName} /</span>
         <Tooltip label={collection} withArrow disabled={collection.length < 24}>
           <span
             style={{
@@ -90,6 +94,7 @@ export function CollectionHeader({
               fontWeight: 600,
               letterSpacing: '-0.02em',
               color: T.text,
+              minWidth: 0,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -98,8 +103,16 @@ export function CollectionHeader({
             {collection}
           </span>
         </Tooltip>
-        {(docCount !== null || indexCount !== null) && (
-          <span style={{ fontSize: T.fsXs, color: T.textMuted, marginLeft: 4 }}>
+        {roomForStats && (docCount !== null || indexCount !== null) && (
+          <span
+            style={{
+              fontSize: T.fsXs,
+              color: T.textMuted,
+              marginLeft: 4,
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
+            }}
+          >
             {docCount !== null && (
               <>
                 <strong style={{ fontWeight: 500, color: T.text }}>
@@ -119,19 +132,6 @@ export function CollectionHeader({
         )}
       </Group>
 
-      <span style={{ flex: 1 }} />
-
-      {/* References — secondary action; collapses to icon + count */}
-      <Tooltip label={`Manage reference rules for this collection (${referenceRuleCount})`} withArrow>
-        <Button
-          data-hint-anchor="refs.configure"
-          variant="default"
-          size="compact-xs"
-          onClick={onOpenReferences}
-        >
-          References ({referenceRuleCount})
-        </Button>
-      </Tooltip>
     </Group>
   );
 }

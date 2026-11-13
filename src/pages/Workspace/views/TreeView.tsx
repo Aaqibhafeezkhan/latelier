@@ -85,7 +85,9 @@ const CollapsedRowPreview = React.memo(function CollapsedRowPreview({
         flex: 1,
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'flex-end',
+        // Beside the id (W06 §2: `[shortId] [key: value …]`); `flex: 1` keeps the
+        // row actions pinned right.
+        justifyContent: 'flex-start',
         gap: 'var(--atelier-gap-sm)',
         overflow: 'hidden',
         flexWrap: 'nowrap',
@@ -277,10 +279,10 @@ function DocRowImpl({
           display: 'flex',
           alignItems: 'center',
           gap: 'var(--atelier-gap-sm)',
-          padding: '10px 12px',
+          padding: '4px 12px',
           cursor: 'pointer',
           fontSize: 'var(--atelier-fs-sm)',
-          minHeight: 44,
+          minHeight: 32,
           userSelect: 'none',
           // #60 — sighted-visible counterpart to `aria-activedescendant`.
           // Inset outline, a different channel from the selected
@@ -302,7 +304,7 @@ function DocRowImpl({
         <ActionIcon
           variant="subtle"
           color="gray"
-          size={28}
+          size={24}
           tabIndex={buttonTabIndex}
           c="var(--atelier-text-ghost)"
           onClick={(e) => {
@@ -346,7 +348,7 @@ function DocRowImpl({
           <Tooltip label={isView ? 'View document' : 'Edit document'} withArrow openDelay={400}>
             <ActionIcon
               variant="default"
-              size={26}
+              size={24}
               tabIndex={buttonTabIndex}
               c="var(--atelier-text-muted)"
               onClick={(e) => {
@@ -362,7 +364,7 @@ function DocRowImpl({
             <Tooltip label="Delete document" withArrow openDelay={400}>
               <ActionIcon
                 variant="default"
-                size={26}
+                size={24}
                 tabIndex={buttonTabIndex}
                 c="var(--atelier-red)"
                 onClick={(e) => {
@@ -378,7 +380,7 @@ function DocRowImpl({
           <Tooltip label="More actions" withArrow openDelay={400}>
             <ActionIcon
               variant="default"
-              size={26}
+              size={24}
               tabIndex={buttonTabIndex}
               c="var(--atelier-text-muted)"
               onClick={(e) => {
@@ -544,10 +546,10 @@ export function TreeView({
   );
 
   // Virtualize the outer doc list with react-window v2. Collapsed rows are
-  // ~44px; expanded rows grow with field count. useDynamicRowHeight observes
+  // 33px (32 + the 1px divider, measured in Electron); expanded rows grow with field count. useDynamicRowHeight observes
   // each rendered row and caches its measured height — no manual ref wiring,
   // no library-side scroll correction on resize.
-  const rowHeight = useDynamicRowHeight({ defaultRowHeight: 44 });
+  const rowHeight = useDynamicRowHeight({ defaultRowHeight: 33 });
 
   // #20 — the tree is the widget's single tab stop; see `TableView`'s
   // identical wiring (and `useRovingFocus`'s docstring) for why the scroll

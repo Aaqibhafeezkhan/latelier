@@ -102,6 +102,31 @@ test('collapsing the query drawer does not destroy its stored width', async () =
     const box = await drawer.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.width).toBeGreaterThan(120);
+
+    // Off Documents the drawer shuts without writing the pref, and Documents
+    // gets it back at the same width.
+    const subTabs = win.locator('[role="tablist"][aria-label="Collection view"]');
+    await subTabs.getByRole('tab', { name: /Aggregation/ }).click();
+    await expect(drawer).toBeHidden();
+    await expect(win.getByRole('button', { name: /Query Builder$/ })).toHaveCount(0);
+    // A stray press on the inert divider must not mark the restore below as the user's split.
+    const divider = win.getByRole('separator', { name: 'Resize Query Builder' });
+    await divider.dispatchEvent('pointerdown');
+    await divider.focus();
+    await win.keyboard.press('ArrowLeft');
+    await subTabs.getByRole('tab', { name: /Documents/ }).click();
+    await expect(drawer).toBeVisible();
+    await win.waitForTimeout(300);
+    const back = await drawer.boundingBox();
+    expect(Math.abs(back!.width - box!.width)).toBeLessThanOrEqual(2);
+    expect(await readSplit()).toBe(afterReopen);
+    const collapsedPref = await win.evaluate(async () => {
+      const api = (window as unknown as {
+        atelier: { prefs: { get: (key: string) => Promise<unknown> } };
+      }).atelier;
+      return api.prefs.get('ui.workspace.builderCollapsed');
+    });
+    expect(collapsedPref).toBe(false);
   } finally {
     await app.close();
     fs.rmSync(userDataDir, { recursive: true, force: true });

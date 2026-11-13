@@ -22,6 +22,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-11-13
+
+### Changed
+
+- **The dark theme reads in layers.** The window, panels, raised controls and
+  selected items are now distinct shades. Tinted buttons such as the filter's
+  AND / OR / NOR toggle no longer look disabled, and disabled controls look
+  inert. Muted text is lighter, and ObjectId and date type badges have their
+  own readable colours.
+- **Three bars above the data instead of five.** The collection name with its
+  document and index counts sits on the Documents / Aggregation / Structure
+  row, and Save and History moved into the query row (icons on narrow
+  windows).
+- **References sits beside Fields** in the result bar, as both shape how a
+  collection's documents read.
+- **The query builder folds away off Documents** and comes back at its saved
+  width.
+- **Table columns follow document order,** `_id` first, instead of
+  alphabetical, and date columns start wide enough for the full value.
+- **Tree rows are denser:** 33 px instead of about 49.
+- **The JSON view shows readable values,** plain numbers and dates instead of
+  `$numberInt` / `$date` wrappers, without losing Long or Decimal128 precision.
+  Copy gives the same text.
+- **The row checkbox is empty until you select the row,** and the band above
+  the results says how to select rows.
+- Run and Refresh look the same everywhere, sub-tabs use line icons, Structure
+  sections have titles, and table headers are in sentence case.
+
+### Fixed
+
+- **Table rows keep their actions readable when scrolled sideways,** and an
+  expanded row's detail stays in view.
+- **Field suggestions in the Insert dialog open under the input.**
+- **With no connections, the connection switcher offers New connection.**
+- **Connection table rows stay on one line,** with long names cut short.
+
 ## [0.19.1] — 2026-11-12
 
 ### Fixed

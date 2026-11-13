@@ -190,6 +190,31 @@ describe('TreeView — rendering and interaction', () => {
     expect(container.querySelector('[data-selected="true"]')).not.toBeNull();
   });
 
+  // A ghost-coloured check on an unselected box read as already checked.
+  it('an unselected checkbox is empty and shows a check only once selected', () => {
+    const docs = [{ _id: { $oid: '507f1f77bcf86cd799439011' }, name: 'alpha' }];
+    const { getByRole } = renderTree(docs);
+    const checkbox = getByRole('button', { name: 'Select document 99439011' });
+
+    expect(checkbox.getAttribute('aria-pressed')).toBe('false');
+    expect(checkbox.querySelector('svg')).toBeNull();
+
+    fireEvent.click(checkbox);
+
+    expect(checkbox.getAttribute('aria-pressed')).toBe('true');
+    expect(checkbox.querySelector('svg')).not.toBeNull();
+  });
+
+  it('collapsed rows pack the preview beside the id and use compact paddings', () => {
+    const docs = [{ _id: { $oid: '507f1f77bcf86cd799439011' }, name: 'alpha' }];
+    const { getByRole, getByText } = renderTree(docs);
+    const row = getByRole('treeitem');
+    expect(row.style.padding).toBe('4px 12px');
+    expect(row.style.minHeight).toBe('32px');
+    const previewBox = getByText('"alpha"').closest('div[style*="flex: 1"]') as HTMLElement;
+    expect(previewBox.style.justifyContent).toBe('flex-start');
+  });
+
   // #20 — roving focus: the tree itself is the widget's only tab stop.
   describe('roving focus (#20)', () => {
     const threeDocs = [

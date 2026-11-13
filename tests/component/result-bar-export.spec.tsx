@@ -174,8 +174,8 @@ describe('ResultBar — Export', () => {
     const { defaultName, content } = saveFile.mock.calls[0]![0];
     expect(defaultName).toBe('orders.csv');
     // Column order is the Fields control's derived order: `_id` first, then
-    // the rest alphabetized (`deriveColumns`).
-    expect(content).toBe('_id,age,name\n507f1f77bcf86cd799439011,30,"Ann, A."\n');
+    // the rest in first-seen order (`deriveColumns`).
+    expect(content).toBe('_id,name,age\n507f1f77bcf86cd799439011,"Ann, A.",30\n');
   });
 
   it('a Relaxed EJSON export unwraps the int sentinel', async () => {
@@ -336,8 +336,8 @@ describe('ResultBar — Export all matching', () => {
     const input = exportFn.mock.calls[0]![0];
     expect(input.columns).toEqual([
       { header: '_id', path: '_id' },
-      { header: 'age', path: 'age' },
       { header: 'name', path: 'name' },
+      { header: 'age', path: 'age' },
     ]);
   });
 });

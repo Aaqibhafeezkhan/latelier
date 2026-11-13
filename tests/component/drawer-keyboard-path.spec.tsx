@@ -93,7 +93,7 @@ describe('the query drawer has a palette entry', () => {
     expect(row.getAttribute('aria-checked')).toBe('true');
   });
 
-  it('is withheld in the aggregation view, where the builder is aria-hidden', async () => {
+  it('is withheld in the aggregation view, where the builder is shut and hidden', async () => {
     renderWorkspace('aggregation');
     await waitFor(() => expect(screen.getByRole('banner').textContent).toContain('Prod'));
 
@@ -137,12 +137,15 @@ describe('⌘B toggles the drawer', () => {
   it('does nothing in the aggregation view', async () => {
     renderWorkspace('aggregation');
     await waitFor(() => expect(screen.getByRole('banner').textContent).toContain('Prod'));
-    const before = await screen.findByRole('button', { name: 'Collapse Query Builder' });
+    // Off Documents the drawer is shut with no notch to reopen it.
+    await screen.findByRole('tab', { name: /Aggregation/ });
+    expect(screen.queryByRole('button', { name: /Query Builder$/ })).toBeNull();
 
     fireEvent.keyDown(window, { key: 'b', metaKey: true });
 
-    // Still expanded — the notch never flipped to "Open".
-    await waitFor(() => expect(before).toBeTruthy());
+    // The stored state never flipped: Documents still shows the drawer open.
+    fireEvent.click(screen.getByRole('tab', { name: /Documents/ }));
+    expect(await screen.findByRole('button', { name: 'Collapse Query Builder' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Open Query Builder' })).toBeNull();
   });
 });

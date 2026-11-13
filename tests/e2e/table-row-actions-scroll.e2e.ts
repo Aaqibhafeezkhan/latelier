@@ -69,3 +69,48 @@ test('Table row actions stay within view while scrolled horizontally, and back',
     await expect.poll(withinContainer).toBe(true);
   });
 });
+
+/**
+ * The expanded detail is a row child, so it used to scroll away with the
+ * cells. It is laid out against the scroll container's visible slice instead
+ * (`detailLeft`/`detailWidth` in `TableView.tsx`) — again only a laid-out
+ * browser can say whether the arithmetic is right.
+ */
+test('Table expanded detail stays inside the visible box after horizontal scroll', async () => {
+  const fields = Array.from({ length: 12 }, (_, i) => String.fromCharCode(97 + i, 97 + i));
+  const doc: Record<string, string> = { _id: '1' };
+  for (const f of fields) doc[f] = `val-${f}`;
+
+  await withOpenOrders('Detail Scroll', [doc], 'val-aa', async (win, ws) => {
+    await ws.viewTableButton.click();
+    await expect(ws.tableHeader('aa')).toBeVisible({ timeout: 5000 });
+
+    const scrollContainer = win.locator('[data-testid="table-scroll-container"]');
+    await win.getByRole('button', { name: 'Expand document' }).click();
+    const detail = win.locator('[data-expanded-doc-section]');
+    await expect(detail).toBeVisible();
+
+    const withinContainer = async () => {
+      const box = await detail.boundingBox();
+      const containerBox = await scrollContainer.boundingBox();
+      if (!box || !containerBox) return false;
+      return (
+        box.x >= containerBox.x - 1 &&
+        box.x + box.width <= containerBox.x + containerBox.width + 1
+      );
+    };
+
+    await expect.poll(withinContainer).toBe(true);
+
+    await scrollContainer.evaluate((el) => {
+      el.scrollLeft = el.scrollWidth;
+    });
+    await expect.poll(async () => scrollContainer.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+    await expect.poll(withinContainer).toBe(true);
+
+    // The last row must not be clipped at full scroll (whole-pixel row heights).
+    const box = await detail.boundingBox();
+    const containerBox = await scrollContainer.boundingBox();
+    expect(box!.y + box!.height).toBeLessThanOrEqual(containerBox!.y + containerBox!.height + 1);
+  });
+});

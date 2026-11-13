@@ -1492,7 +1492,9 @@ describe('ConnectionSwitcher — expanded table', () => {
     // fired `onExpand`, not a DOM-wide "the Switcher trigger" query — a query
     // like that has no way to prefer the one the user actually used, and used
     // to land back on the TitleBar trigger regardless of which one opened it.
-    mount({ connections: [] });
+    // One saved, disconnected Connection: with none, the CTA is the "New
+    // connection" action and opens no popover to return focus from.
+    mount({ connections: [conn({ status: 'unknown' })] });
     const ctaTrigger = await screen.findByRole('button', { name: 'Select a connection' });
 
     await userEvent.click(ctaTrigger);
@@ -1504,6 +1506,41 @@ describe('ConnectionSwitcher — expanded table', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Connections' })).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(ctaTrigger));
+  });
+
+  it('shows a filled "New connection" CTA, not the picker, in the empty state when none are saved', async () => {
+    mount({ connections: [] });
+    const cta = await screen.findByRole('button', { name: 'New connection' });
+
+    // Not a popover trigger: nothing to pick, so no "Select a connection".
+    expect(screen.queryByRole('button', { name: 'Select a connection' })).toBeNull();
+    expect(cta.getAttribute('aria-haspopup')).toBeNull();
+
+    await userEvent.click(cta);
+
+    await screen.findByRole('dialog', { name: 'New Connection' });
+  });
+
+  it('offers "New connection" in the empty list of the Switcher popover', async () => {
+    mount({ connections: [] });
+    await userEvent.click(await titleBar().findByRole('button', { name: /Connection: none selected/i }));
+    const listbox = await screen.findByRole('listbox', { name: 'Connections' });
+
+    // A listbox owns only options and groups: the button sits beside it.
+    // Scoped to the popover: the empty state's own CTA has the same name.
+    const add = within(listbox.parentElement as HTMLElement).getByRole('button', { name: 'New connection' });
+    expect(listbox.contains(add)).toBe(false);
+    await userEvent.click(add);
+
+    await screen.findByRole('dialog', { name: 'New Connection' });
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: 'Connections' })).toBeNull());
+  });
+
+  it('keeps the "Select a connection" picker once a Connection is saved', async () => {
+    mount({ connections: [conn({ status: 'unknown' })] });
+
+    expect(await screen.findByRole('button', { name: 'Select a connection' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'New connection' })).toBeNull();
   });
 
   it('offers "+ New" instead of a dead end when there are no saved Connections', async () => {

@@ -12,6 +12,7 @@ import { logFailure } from '../../utils/rendererLog';
 import { invalidateSampleSchemaCache } from '../../features/fieldSuggestions/sources/sampleSchemaSource';
 import { invalidateSchemaEnumCache } from '../../features/fieldSuggestions/sources/schemaEnumSource';
 import { themeVars } from '../../theme/themeVars';
+import { I } from '../../icons';
 import { Button, Group, Select, TextInput, Tooltip } from '@mantine/core';
 import { ScriptEditor } from '../../components/ScriptEditor';
 import { PaneState } from '../../components/PaneState';
@@ -240,8 +241,9 @@ function ScriptTabInner({ tab, defaultDb, onPatch }: ScriptTabProps) {
               size="compact-xs"
               onClick={runScript}
               data-testid="script-run-btn"
+              leftSection={I.play}
             >
-              ▶ Run
+              Run
             </Button>
           </Tooltip>
         )}

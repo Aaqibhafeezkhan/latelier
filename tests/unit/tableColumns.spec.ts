@@ -5,6 +5,8 @@ import {
   getValueAtPath,
   orderFields,
   deriveColumns,
+  defaultColumnWidth,
+  DEFAULT_COLUMN_WIDTH,
   ariaSortFor,
   nestedReferenceFor,
 } from '../../src/pages/Workspace/views/tableColumns';
@@ -258,19 +260,23 @@ describe('getValueAtPath', () => {
 });
 
 describe('deriveColumns field ordering', () => {
-  // `nonId.sort()` with no compare function orders by UTF-16 code unit, which
-  // puts every capitalised field ahead of every lowercase one: `Name`, `Zip`,
-  // `age`. That reads as two separate alphabets in the column chooser. The
-  // explicit `localeCompare` comparator is what interleaves them, and this
-  // pins it — a revert to a bare `.sort()` fails here, not silently in the UI.
-  it('alphabetises case-insensitively rather than by code unit', () => {
-    expect(deriveColumns([{ _id: 1, Zip: 1, age: 1, Name: 1, _tag: 1 }])).toEqual([
+  // First-seen order matches what the document itself reads like (orderNo,
+  // status, ...), which an alphabetical sort scrambles. A sort of any kind
+  // fails this: `zeta` sorts after `alpha` but appears first.
+  it('keeps non-_id fields in the order they are first seen', () => {
+    expect(deriveColumns([{ _id: 1, zeta: 1, alpha: 1, Name: 1, _tag: 1 }])).toEqual([
       '_id',
-      '_tag',
-      'age',
+      'zeta',
+      'alpha',
       'Name',
-      'Zip',
+      '_tag',
     ]);
+  });
+
+  it('places a key first seen in a later document after earlier keys', () => {
+    expect(
+      deriveColumns([{ _id: 1, b: 1 }, { _id: 2, b: 2, z: 1 }, { _id: 3, a: 1, b: 3 }]),
+    ).toEqual(['_id', 'b', 'z', 'a']);
   });
 
   it('keeps _id first whatever the other fields sort to', () => {
@@ -278,7 +284,7 @@ describe('deriveColumns field ordering', () => {
   });
 
   it('unions fields across documents without duplicating', () => {
-    expect(deriveColumns([{ _id: 1, b: 1 }, { _id: 2, a: 1, b: 2 }])).toEqual(['_id', 'a', 'b']);
+    expect(deriveColumns([{ _id: 1, b: 1 }, { _id: 2, a: 1, b: 2 }])).toEqual(['_id', 'b', 'a']);
   });
 
   it('scans only the first 50 documents — a field introduced later stays undiscovered', () => {
@@ -290,6 +296,41 @@ describe('deriveColumns field ordering', () => {
   it('skips a non-record entry in the documents array instead of throwing', () => {
     const docs = [{ _id: 1, name: 'a' }, null, { _id: 2, name: 'b' }];
     expect(deriveColumns(docs)).toEqual(['_id', 'name']);
+  });
+});
+
+describe('defaultColumnWidth', () => {
+  const date = { $date: '2026-01-01T00:00:00.000Z' };
+
+  it('gives _id 200 whatever the documents hold', () => {
+    expect(defaultColumnWidth('_id', [])).toBe(200);
+    expect(defaultColumnWidth('_id', [{ _id: date }])).toBe(200);
+  });
+
+  it('gives a date column room for a full ISO timestamp', () => {
+    expect(defaultColumnWidth('createdAt', [{ createdAt: date }])).toBe(210);
+  });
+
+  it('classifies by the first defined value, skipping documents without the field', () => {
+    expect(defaultColumnWidth('createdAt', [{ a: 1 }, null, { createdAt: date }])).toBe(210);
+  });
+
+  it('does not widen a column whose first defined value is not a date', () => {
+    expect(defaultColumnWidth('status', [{ status: 'open' }, { status: date }])).toBe(160);
+    expect(defaultColumnWidth('n', [{ n: 1 }])).toBe(DEFAULT_COLUMN_WIDTH);
+  });
+
+  it('falls back to 160 for no documents or a field no document has', () => {
+    expect(defaultColumnWidth('status', [])).toBe(160);
+    expect(defaultColumnWidth('status', [{ a: 1 }])).toBe(160);
+  });
+
+  it('scans only the first 50 documents', () => {
+    const docs: unknown[] = Array.from({ length: 50 }, () => ({}));
+    docs.push({ createdAt: date });
+    expect(defaultColumnWidth('createdAt', docs)).toBe(160);
+    docs.splice(49, 1, { createdAt: date });
+    expect(defaultColumnWidth('createdAt', docs)).toBe(210);
   });
 });
 

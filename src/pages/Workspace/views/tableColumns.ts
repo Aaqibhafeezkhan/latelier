@@ -1,11 +1,12 @@
 import { isRecord, toDisplayValue } from '../../../utils/displayValue';
+import { ownGet } from '../../../utils/ownProperty';
 import { getAtSegments } from '../documentDiff';
 import type { ReferenceRule, TableColumnConfig } from '@shared/types';
 import type { SortDir } from '../builder';
 
 /**
  * Schema-derived field list — scans the first 50 documents, keeping `_id`
- * first and the rest alphabetized. Shared by `TableView` (the rendered
+ * first and the rest in the order they first appear. Shared by `TableView` (the rendered
  * columns) and `FieldsControl` (the show/hide/reorder field list), so both
  * always agree on which fields exist.
  */
@@ -23,7 +24,28 @@ export function deriveColumns(documents: unknown[]): string[] {
     }
   }
 
-  return ['_id', ...nonId.sort((a, b) => a.localeCompare(b))];
+  return ['_id', ...nonId];
+}
+
+export const DEFAULT_COLUMN_WIDTH = 160;
+const ID_COLUMN_WIDTH = 200;
+// Wide enough for a full ISO timestamp (`2026-01-01T00:00:00.000Z`) in the cell font.
+const DATE_COLUMN_WIDTH = 210;
+
+/**
+ * Width a column gets before the user resizes it: `_id` is wider, and so is
+ * a column whose first defined value (within the first 50 documents) is a
+ * date, so an ISO timestamp is not cut off.
+ */
+export function defaultColumnWidth(field: string, documents: unknown[]): number {
+  if (field === '_id') return ID_COLUMN_WIDTH;
+  for (const doc of documents.slice(0, 50)) {
+    if (!isRecord(doc)) continue;
+    const value = ownGet(doc, field);
+    if (value === undefined) continue;
+    return toDisplayValue(value).type === 'date' ? DATE_COLUMN_WIDTH : DEFAULT_COLUMN_WIDTH;
+  }
+  return DEFAULT_COLUMN_WIDTH;
 }
 
 /**

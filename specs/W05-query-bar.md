@@ -60,16 +60,23 @@ State lives on the collection tab and persists.
 Above the result area; matches mock.
 
 ```
+┌─ Sub-tab row ───────────────────────────────────────────────────────────┐
+│ [Documents][Aggregation][Structure]  shop / orders  180 docs  [References]│
+└─────────────────────────────────────────────────────────────────────────┘
 ┌─ Query bar ─────────────────────────────────────────────────────────────┐
-│ [🔎 query] [ { posted: { $eq: true }, … }                 ] [sync pill] │
-│                                                                         │
-│           [Run]                                                         │
+│ [▸ query][ { posted: { $eq: true }, … }      ][Save][History] | [Run ▾] │
 └─────────────────────────────────────────────────────────────────────────┘
 ┌─ Result bar ────────────────────────────────────────────────────────────┐
 │ [▲ N docs] · [▲ 42 ms]                        [pagination — W07]        │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+- Three bars sit above the rows: the sub-tab row, the query row, the result
+  bar. The breadcrumb and References sit on the sub-tab row, beside the
+  Documents / Aggregation / Structure tabs, so they show in all three views.
+  Save, History and the Run split end the query row itself; any notice sits
+  before them, so Run never moves. Below ~640px of query bar, Save and History
+  shrink to icon buttons that keep their names.
 - Input: monospace, grows to a max of ~12 lines (shift+enter newline).
 - **Autocomplete** (X02): field-name suggestions appear at the caret in
   key positions (`{ sta`, `{ user.na`, `{ $or: [{ na| }] }`, etc.) and

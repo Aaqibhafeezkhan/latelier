@@ -116,7 +116,7 @@ describe('the pane of a Dormant script tab shows not-connected + Connect', () =>
     expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy();
     // No ScriptTab chrome: neither the title input nor the Run button.
     expect(screen.queryByDisplayValue('My script')).toBeNull();
-    expect(screen.queryByText('▶ Run')).toBeNull();
+    expect(screen.queryByTestId('script-run-btn')).toBeNull();
   });
 
   it('renders the script editor normally when the Connection is connected', async () => {

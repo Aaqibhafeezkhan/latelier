@@ -41,12 +41,14 @@ import {
   getValueAtPath,
   nestedReferenceFor,
   ariaSortFor,
+  defaultColumnWidth,
+  DEFAULT_COLUMN_WIDTH,
   type ResolvedColumn,
 } from './tableColumns';
 
 interface TableViewProps {
   documents: unknown[];
-  /** Per-column width overrides, keyed by field. Falls back to 200px for `_id`, 160px otherwise. */
+  /** Per-column width overrides, keyed by field. Falls back to `defaultColumnWidth` (200px for `_id`, 210px for a date column, 160px otherwise). */
   columns?: Record<string, { width: number }>;
   columnConfig?: TableColumnConfig;
   onColumnResize: (field: string, width: number) => void;
@@ -701,6 +703,11 @@ interface TableRowProps {
   // Hand-computed pin for the actions column — see `TableView`'s own
   // `actionsOffset` for why native `position: sticky` can't be used here.
   actionsOffset: number;
+  // The visible slice of the scroll container, in row coordinates. The
+  // expanded detail is laid out at `left`/`width` this describes so it stays
+  // in view under horizontal scroll instead of scrolling away with the cells.
+  detailLeft: number;
+  detailWidth: number;
 }
 
 // `ariaAttributes` is intentionally not destructured off the row props.
@@ -737,6 +744,8 @@ function TableRowImpl({
   onDeleteDoc,
   onOpenRowMenu,
   actionsOffset,
+  detailLeft,
+  detailWidth,
 }: RowComponentProps<TableRowProps>) {
   const isView = !!useCollectionWorkspace().meta.isView;
   const doc = documents[index];
@@ -881,7 +890,7 @@ function TableRowImpl({
           const fieldPath = col.kind === 'field' ? col.field : col.label ?? col.path;
           const cellKey = `${index}:${col.field}`;
           const isCopied = copiedCell === cellKey;
-          const width = ownGet(widths, col.field) ?? 160;
+          const width = ownGet(widths, col.field) ?? DEFAULT_COLUMN_WIDTH;
           const directRule = val !== undefined ? refsByField?.get(fieldPath) : undefined;
           // A rule on a dotted path inside an object cell never matches the
           // column key, so the parent cell carries the chip for the nested
@@ -940,75 +949,88 @@ function TableRowImpl({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
-            gap: 'var(--atelier-gap-xs)',
             padding: '0 6px',
             borderBottom: '1px solid var(--atelier-border)',
             borderLeft: '1px solid var(--atelier-border)',
             boxSizing: 'border-box',
-            background: rowBackground,
+            // Always opaque, like the header's actions cell: fading the
+            // whole cell let the data cells slid under it show through.
+            // The row tint can be translucent (a selected row), so paint it
+            // over an opaque base.
+            backgroundColor: 'var(--atelier-surface)',
+            backgroundImage: `linear-gradient(${rowBackground}, ${rowBackground})`,
             transform: `translateX(${actionsOffset}px)`,
-            opacity: actionsVisible ? 1 : 0,
-            pointerEvents: actionsVisible ? 'auto' : 'none',
           }}
           onFocus={() => setActionsFocused(true)}
           onBlur={() => setActionsFocused(false)}
         >
-          <Tooltip label={isView ? 'View document' : 'Edit document'} withArrow openDelay={400}>
-            <ActionIcon
-              variant="default"
-              size="sm"
-              c="var(--atelier-text-muted)"
-              onClick={(e) => {
-                e.stopPropagation();
-                onEditDoc(doc);
-              }}
-              tabIndex={buttonTabIndex}
-              aria-label={`${isView ? 'View' : 'Edit'} document ${getDocId(doc)}`}
-            >
-              {I.edit}
-            </ActionIcon>
-          </Tooltip>
-          {!isView && (
-            <Tooltip label="Delete document" withArrow openDelay={400}>
+          <div
+            data-testid="table-row-actions"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--atelier-gap-xs)',
+              opacity: actionsVisible ? 1 : 0,
+              pointerEvents: actionsVisible ? 'auto' : 'none',
+            }}
+          >
+            <Tooltip label={isView ? 'View document' : 'Edit document'} withArrow openDelay={400}>
               <ActionIcon
                 variant="default"
                 size="sm"
-                c="var(--atelier-red)"
+                c="var(--atelier-text-muted)"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onDeleteDoc(doc);
+                  onEditDoc(doc);
                 }}
                 tabIndex={buttonTabIndex}
-                aria-label={`Delete document ${getDocId(doc)}`}
+                aria-label={`${isView ? 'View' : 'Edit'} document ${getDocId(doc)}`}
               >
-                {I.trash}
+                {I.edit}
               </ActionIcon>
             </Tooltip>
-          )}
-          <Tooltip label="More actions" withArrow openDelay={400}>
-            <ActionIcon
-              variant="default"
-              size="sm"
-              c="var(--atelier-text-muted)"
-              onClick={(e) => {
-                e.stopPropagation();
-                // A keyboard-activated click (Enter/Space) reports `detail:
-                // 0` in Chromium (the app's only runtime — a mouse click is
-                // always >= 1); only that path grabs focus into the menu and
-                // returns it to this button on dismiss, matching the
-                // keyboard-open convention the field/cell menus above use.
-                const viaKeyboard = e.detail === 0;
-                onOpenRowMenu(doc, anchorFromRect(e.currentTarget.getBoundingClientRect()), {
-                  returnFocusTo: viaKeyboard ? e.currentTarget : undefined,
-                  focusMenuOnOpen: viaKeyboard,
-                });
-              }}
-              tabIndex={buttonTabIndex}
-              aria-label={`More actions for document ${getDocId(doc)}`}
-            >
-              {I.more}
-            </ActionIcon>
-          </Tooltip>
+            {!isView && (
+              <Tooltip label="Delete document" withArrow openDelay={400}>
+                <ActionIcon
+                  variant="default"
+                  size="sm"
+                  c="var(--atelier-red)"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteDoc(doc);
+                  }}
+                  tabIndex={buttonTabIndex}
+                  aria-label={`Delete document ${getDocId(doc)}`}
+                >
+                  {I.trash}
+                </ActionIcon>
+              </Tooltip>
+            )}
+            <Tooltip label="More actions" withArrow openDelay={400}>
+              <ActionIcon
+                variant="default"
+                size="sm"
+                c="var(--atelier-text-muted)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // A keyboard-activated click (Enter/Space) reports `detail:
+                  // 0` in Chromium (the app's only runtime — a mouse click is
+                  // always >= 1); only that path grabs focus into the menu and
+                  // returns it to this button on dismiss, matching the
+                  // keyboard-open convention the field/cell menus above use.
+                  const viaKeyboard = e.detail === 0;
+                  onOpenRowMenu(doc, anchorFromRect(e.currentTarget.getBoundingClientRect()), {
+                    returnFocusTo: viaKeyboard ? e.currentTarget : undefined,
+                    focusMenuOnOpen: viaKeyboard,
+                  });
+                }}
+                tabIndex={buttonTabIndex}
+                aria-label={`More actions for document ${getDocId(doc)}`}
+              >
+                {I.more}
+              </ActionIcon>
+            </Tooltip>
+          </div>
         </div>
       </div>
 
@@ -1017,19 +1039,29 @@ function TableRowImpl({
           own `role="tree"`/`data-expanded-doc-section` wrapper and (#20)
           its own roving-focus tab stop. */}
       {isExpanded && isRecord(doc) && (
-        <DocFieldTree
-          doc={doc}
-          docId={docId}
-          expandedPaths={deepPaths}
-          onToggle={toggleDeepPath}
-          copiedPath={fieldCopiedPath}
-          onCopy={handleCopyField}
-          onOpenMenu={handleOpenFieldMenu}
-          refsByField={refsByField}
-          onRefHover={onRefHover}
-          onRefHoverLeave={onRefHoverLeave}
-          onRefOpen={onRefOpen}
-        />
+        // `left`, not a transform: a transform makes a containing block for
+        // the fixed-position popovers inside the tree.
+        <div
+          style={{
+            position: 'relative',
+            left: detailLeft,
+            width: detailWidth > 0 ? detailWidth : undefined,
+          }}
+        >
+          <DocFieldTree
+            doc={doc}
+            docId={docId}
+            expandedPaths={deepPaths}
+            onToggle={toggleDeepPath}
+            copiedPath={fieldCopiedPath}
+            onCopy={handleCopyField}
+            onOpenMenu={handleOpenFieldMenu}
+            refsByField={refsByField}
+            onRefHover={onRefHover}
+            onRefHoverLeave={onRefHoverLeave}
+            onRefOpen={onRefOpen}
+          />
+        </div>
       )}
     </div>
   );
@@ -1162,8 +1194,8 @@ export function TableView({
   const [liveDrag, setLiveDrag] = React.useState<{ field: string; width: number } | null>(null);
 
   const propWidth = React.useCallback(
-    (field: string) => columnsProp?.[field]?.width ?? (field === '_id' ? 200 : 160),
-    [columnsProp],
+    (field: string) => columnsProp?.[field]?.width ?? defaultColumnWidth(field, documents),
+    [columnsProp, documents],
   );
   const getWidth = React.useCallback(
     (field: string) =>
@@ -1180,7 +1212,7 @@ export function TableView({
     () =>
       GUTTER_WIDTH +
       ACTIONS_WIDTH +
-      columns.reduce((sum, c) => sum + (ownGet(widths, c.field) ?? 160), 0),
+      columns.reduce((sum, c) => sum + (ownGet(widths, c.field) ?? DEFAULT_COLUMN_WIDTH), 0),
     [columns, widths],
   );
 
@@ -1211,12 +1243,21 @@ export function TableView({
   // the actions offset reads the grid element too.
   const listRef = useListRef(null);
   const [actionsOffset, setActionsOffset] = React.useState(0);
+  const [detail, setDetail] = React.useState({ left: 0, width: 0 });
+  const { left: detailLeft, width: detailWidth } = detail;
   const computeActionsOffset = React.useCallback(() => {
     const el = tableWrapperRef.current;
     if (!el) return;
     const visibleRight = el.scrollLeft + el.clientWidth;
     const grid = listRef.current?.element;
-    setActionsOffset((grid ? Math.min(visibleRight, grid.clientWidth) : visibleRight) - totalWidth);
+    const rightEdge = grid ? Math.min(visibleRight, grid.clientWidth) : visibleRight;
+    setActionsOffset(rightEdge - totalWidth);
+    // Same-valued updates bail out, so a scroll that moves nothing re-renders nothing.
+    setDetail((d) =>
+      d.left === el.scrollLeft && d.width === rightEdge - el.scrollLeft
+        ? d
+        : { left: el.scrollLeft, width: rightEdge - el.scrollLeft },
+    );
   }, [totalWidth, listRef]);
   const scrollRaf = React.useRef<number | null>(null);
   const handleTableScroll = React.useCallback(() => {
@@ -1504,6 +1545,8 @@ export function TableView({
       onDeleteDoc,
       onOpenRowMenu: handleOpenRowMenu,
       actionsOffset,
+      detailLeft,
+      detailWidth,
     }),
     [
       documents,
@@ -1533,6 +1576,8 @@ export function TableView({
       onDeleteDoc,
       handleOpenRowMenu,
       actionsOffset,
+      detailLeft,
+      detailWidth,
     ],
   );
 
@@ -1625,7 +1670,7 @@ export function TableView({
           )}
         </div>
         {columns.map((col) => {
-          const w = ownGet(widths, col.field) ?? 160;
+          const w = ownGet(widths, col.field) ?? DEFAULT_COLUMN_WIDTH;
           const sortable = !!onSortField && col.kind === 'field';
           const dir = col.kind === 'field' ? ownGet(sortMap, col.field) : undefined;
           const indicator = dir === 1 ? '↑' : dir === -1 ? '↓' : null;

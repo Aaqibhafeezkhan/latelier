@@ -3,10 +3,12 @@ import {
   Button,
   CloseButton,
   createTheme,
+  alpha,
   type CSSVariablesResolver,
   defaultVariantColorsResolver,
   Input,
   InputWrapper,
+  keys,
   SegmentedControl,
   Tooltip,
   type VariantColorsResolver,
@@ -38,17 +40,17 @@ const violet: MantineColorsTuple = [
 // the dialog and dropdown surface (= --atelier-surface), 6 the input and raised
 // surface, 5 hover (= surface-active), 4 borders, 8 and 9 the page and below it.
 // The light steps are text: 0 body (11.8:1 on 7), 2 descriptions, 3 placeholders
-// (5.4:1 on the input surface), so none falls under 4.5:1.
+// (5.2:1 on the input surface), so none falls under 4.5:1.
 const dark: MantineColorsTuple = [
   '#cdd5de',
   '#b9c2cc',
   '#a9b4c0',
   '#8b98a5',
   '#2e3842',
-  '#232b34',
-  '#1c2228',
+  '#29313a',
+  '#1f252c',
   '#161a1e',
-  '#0f1214',
+  '#0b0e10',
   '#0a0d0f',
 ];
 
@@ -86,21 +88,45 @@ const LABEL_FZ = 'var(--atelier-fs-md)';
 // A Button, ActionIcon or Badge with neither `color` nor `variant` never reaches
 // variantColorResolver: its stylesheet falls back to the primary-filled variable, so that
 // variable has to carry the same fill.
-export const cssVariablesResolver: CSSVariablesResolver = () => ({
-  variables: {
-    '--mantine-primary-color-filled': filledFills.violet!.bg,
-    '--mantine-primary-color-filled-hover': filledFills.violet!.hover,
-  },
-  light: {
-    '--mantine-color-dimmed': 'var(--atelier-text-muted)',
-    '--mantine-color-placeholder': 'var(--atelier-text-ghost)',
-  },
-  dark: { '--mantine-color-placeholder': 'var(--atelier-text-ghost)' },
-});
+// Dark `light` variant: Mantine fills it with darken(colors[9], 0.5), a near-black that
+// vanishes on the dark surfaces (1.0x), with the pale colors[0] on top. Here the fill is a
+// translucent tint of colors[2] and the text colors[1], so a `variant="light"` control
+// reads as its colour. Dark disabled: Mantine reuses the default control's fill and border
+// (dark-6, dark-4), so a disabled control looked like an enabled one; here it is a hollow
+// outline with dimmed text. Dark default-color: white, heavier than the data beside it.
+export const cssVariablesResolver: CSSVariablesResolver = (theme) => {
+  const darkLight: Record<string, string> = {};
+  for (const name of keys(theme.colors)) {
+    const shades = theme.colors[name]!;
+    darkLight[`--mantine-color-${name}-light`] = alpha(shades[2]!, 0.2);
+    darkLight[`--mantine-color-${name}-light-hover`] = alpha(shades[2]!, 0.28);
+    darkLight[`--mantine-color-${name}-light-color`] = shades[1]!;
+  }
+  return {
+    variables: {
+      '--mantine-primary-color-filled': filledFills.violet!.bg,
+      '--mantine-primary-color-filled-hover': filledFills.violet!.hover,
+    },
+    light: {
+      '--mantine-color-dimmed': 'var(--atelier-text-muted)',
+      '--mantine-color-placeholder': 'var(--atelier-text-ghost)',
+    },
+    dark: {
+      ...darkLight,
+      '--mantine-color-placeholder': 'var(--atelier-text-ghost)',
+      '--mantine-color-default-color': 'var(--atelier-text)',
+      '--mantine-color-disabled': 'transparent',
+      '--mantine-color-disabled-border': 'var(--atelier-border-med)',
+      '--mantine-color-disabled-color': 'rgba(200,210,220,0.40)',
+    },
+  };
+};
 
 export const mantineTheme: MantineThemeOverride = createTheme({
   primaryColor: 'violet',
   respectReducedMotion: true,
+  // Button labels use the medium weight, which Mantine sets to 600: heavier than the data.
+  fontWeights: { medium: '500' },
   primaryShade: { light: 4, dark: 4 },
   colors: { violet, dark },
   variantColorResolver,

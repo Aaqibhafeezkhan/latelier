@@ -27,6 +27,19 @@ function renderFieldTree(
   );
 }
 
+describe('DocFieldTree — field-grid header', () => {
+  // The header names columns, so it is sentence case; the Type badge below is
+  // the value label that stays uppercase.
+  it('is sentence case, semi-bold, not letter-spaced', () => {
+    const { container } = renderFieldTree({ a: 1 });
+    const header = container.querySelector<HTMLElement>('[aria-hidden="true"]')!;
+    expect(header.textContent).toBe('FieldValueType');
+    expect(header.style.textTransform).toBe('');
+    expect(header.style.letterSpacing).toBe('');
+    expect(header.style.fontWeight).toBe('600');
+  });
+});
+
 // #20 — roving focus over one expanded document's field tree. Each expanded
 // document mounts its own independent `DocFieldTree`, so it owns its own
 // single tab stop rather than joining the outer Table/Tree grid's.

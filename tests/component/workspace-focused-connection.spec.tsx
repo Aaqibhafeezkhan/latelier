@@ -232,15 +232,13 @@ describe('The Focused Tab’s Connection', () => {
         <Workspace />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText(/No connection is open/i)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(offered ? /No connections yet\. Add one/i : /No connection is open/i)).toBeTruthy(),
+    );
     expect(screen.queryByRole('button', { name: 'Import connections' }) !== null).toBe(offered);
   });
 
-  it('shows the empty state when zero Connections are saved, and the Switcher opens in add-mode', async () => {
-    // Acceptance criteria: zero saved Connections yields the empty
-    // state, and the Switcher opens in add-mode — here, focusing "+ Add
-    // connection" instead of the (useless, with nothing to search) search
-    // field.
+  it('first run: zero Connections show a "New connection" CTA that opens the add form', async () => {
     installAtelierMock({
       tabs: { list: async () => [] },
       conn: { list: async () => [] },
@@ -252,22 +250,56 @@ describe('The Focused Tab’s Connection', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() =>
-      expect(screen.getByText(/No connection is open/i)).toBeTruthy(),
+    await waitFor(() => expect(screen.getByText(/No connections yet\. Add one to get started/i)).toBeTruthy());
+    const emptyState = within(
+      screen.getByText(/No connections yet\. Add one to get started/i).parentElement as HTMLElement,
     );
-    // Reachable from the empty state itself, not only the TitleBar — scoped
-    // to the empty state's own container since both triggers render at once
-    // here (belt-and-suspenders: the CTA's fixed "Select a connection" name
-    // no longer collides with the TitleBar's "Connection: none selected").
+    await userEvent.click(emptyState.getByRole('button', { name: 'New connection' }));
+
+    expect(await screen.findByRole('dialog', { name: 'New Connection' })).toBeTruthy();
+  });
+
+  it('zero Connections: the TitleBar Switcher still opens in add-mode, focusing "Manage connections"', async () => {
+    // ADR 0001's add-mode: with nothing to search, focus lands on the way to
+    // add one. The empty-state CTA is no longer a popover here, so the
+    // TitleBar trigger is the way in.
+    installAtelierMock({
+      tabs: { list: async () => [] },
+      conn: { list: async () => [] },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/workspace']}>
+        <Workspace />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await titleBar().findByRole('button', { name: /Connection: none selected/i }));
+
+    const manageButton = await screen.findByRole('button', { name: 'Manage connections' });
+    await waitFor(() => expect(document.activeElement).toBe(manageButton));
+  });
+
+  it('one saved Connection, none open: the empty-state CTA is still the "Select a connection" picker', async () => {
+    installAtelierMock({
+      tabs: { list: async () => [] },
+      conn: { list: async () => [conn({ status: 'unknown' })] },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/workspace']}>
+        <Workspace />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText(/No connection is open/i)).toBeTruthy());
+    // Scoped to the empty state's own container: both triggers render at once.
     const emptyState = within(
       screen.getByText(/No connection is open/i).parentElement as HTMLElement,
     );
-    const cta = emptyState.getByRole('button', { name: 'Select a connection' });
-    await userEvent.click(cta);
+    await userEvent.click(emptyState.getByRole('button', { name: 'Select a connection' }));
 
-    // Zero Connections: focus lands on the way to add one, not the empty search.
-    const manageButton = await screen.findByRole('button', { name: 'Manage connections' });
-    await waitFor(() => expect(document.activeElement).toBe(manageButton));
+    expect(await screen.findByRole('listbox', { name: 'Connections' })).toBeTruthy();
   });
 
   it('treats a Focused Tab whose Connection no longer exists as unrestorable — the empty state, not a crash', async () => {

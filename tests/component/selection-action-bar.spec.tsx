@@ -96,6 +96,71 @@ describe('SelectionActionBar', () => {
     expect(strip().style.boxSizing).toBe('border-box');
   });
 
+  it('with nothing else to say, the band holds a one-line hint naming how to select', () => {
+    const { container } = renderBar(vi.fn());
+    const hint = () => container.querySelector<HTMLElement>('[data-testid="band-hint"]');
+    expect(hint()?.textContent).toBe(
+      'Select rows with the checkbox or ⌘/Ctrl-click to copy or delete them',
+    );
+    selectFirstCard();
+    expect(hint()).toBeNull();
+  });
+
+  it('shows no hint when there are no rows to select (empty, never-run)', () => {
+    const empty = render(
+      <CollectionWorkspaceProvider
+        state={makeState({ lastRun: { documents: [], durationMs: 1, ranAt: new Date().toISOString() } })}
+        actions={emptyWorkspaceActions()}
+        meta={makeMeta()}
+      >
+        <ResultViewer>
+          <ResultViewer.SelectionBar onDeleteSelected={vi.fn()} />
+          <ResultViewer.Json />
+        </ResultViewer>
+      </CollectionWorkspaceProvider>,
+    );
+    expect(empty.container.querySelector('[data-testid="band-hint"]')).toBeNull();
+    expect(empty.container.querySelector('[data-testid="selection-bar"]')).not.toBeNull();
+    empty.unmount();
+
+    const neverRun = render(
+      <CollectionWorkspaceProvider
+        state={makeState({ lastRun: undefined })}
+        actions={emptyWorkspaceActions()}
+        meta={makeMeta()}
+      >
+        <ResultViewer>
+          <ResultViewer.SelectionBar onDeleteSelected={vi.fn()} />
+          <ResultViewer.Json />
+        </ResultViewer>
+      </CollectionWorkspaceProvider>,
+    );
+    expect(neverRun.container.querySelector('[data-testid="band-hint"]')).toBeNull();
+  });
+
+  it('the hint stays on one line inside the fixed band', () => {
+    const { container } = renderBar(vi.fn());
+    const hint = container.querySelector<HTMLElement>('[data-testid="band-hint"]')!;
+    expect(hint.style.whiteSpace).toBe('nowrap');
+    expect(hint.style.overflow).toBe('hidden');
+    expect(hint.style.textOverflow).toBe('ellipsis');
+    expect(hint.style.minWidth).toBe('0px');
+  });
+
+  it('the hint gives way to Running… and keeps the band height', () => {
+    const { container } = renderBar(vi.fn(), { isLoading: true });
+    expect(container.querySelector('[data-testid="band-hint"]')).toBeNull();
+    expect(container.textContent).toContain('Running…');
+    expect(container.querySelector<HTMLElement>('[data-testid="selection-bar"]')!.style.height).toBe('31px');
+  });
+
+  it('on a view the hint does not offer delete', () => {
+    const { container } = renderBar(vi.fn(), { isView: true });
+    expect(container.querySelector('[data-testid="band-hint"]')?.textContent).toBe(
+      'Select rows with the checkbox or ⌘/Ctrl-click to copy them',
+    );
+  });
+
   it('#106 — read-only still renders nothing at all, strip included', () => {
     const { container } = renderBar(vi.fn(), { isReadOnly: true });
     expect(container.querySelector('[data-testid="selection-bar"]')).toBeNull();

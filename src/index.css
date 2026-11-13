@@ -84,21 +84,24 @@
   --atelier-color-number:   #1565c0;
   --atelier-color-string:   #1b6e20;
   --atelier-color-boolean:  #a8380a;
+  /* Type badges (typeColors.ts), held to 4.5:1 by theme-contrast.spec */
+  --atelier-type-id:        #6f552f;
+  --atelier-type-date:      #1a5068;
 }
 
 [data-mantine-color-scheme="dark"] {
   /* Surfaces */
-  --atelier-bg:             #0f1214;
+  --atelier-bg:             #0b0e10;
   --atelier-surface:        #161a1e;
-  --atelier-surface-raised: #1c2228;
-  --atelier-surface-active: #232b34;
+  --atelier-surface-raised: #1f252c;
+  --atelier-surface-active: #29313a;
   /* Borders */
   --atelier-border:         rgba(200,210,220,0.08);
   --atelier-border-med:     rgba(200,210,220,0.14);
   /* Text */
   --atelier-text:           #cdd5de;
-  --atelier-text-muted:     rgba(200,210,220,0.70);
-  --atelier-text-ghost:     rgba(200,210,220,0.62);
+  --atelier-text-muted:     rgba(200,210,220,0.76);
+  --atelier-text-ghost:     rgba(200,210,220,0.68);
   --mantine-color-dimmed:   var(--atelier-text-muted);
   /* Accent */
   --atelier-accent:         #7c6af7;
@@ -131,6 +134,8 @@
   --atelier-color-number:   #90caf9;
   --atelier-color-string:   #8fd5a0;
   --atelier-color-boolean:  #fb923c;
+  --atelier-type-id:        #e0b97a;
+  --atelier-type-date:      #7cc4e4;
   /* Editor syntax (editorTheme.ts). Each is held to 4.5:1 on --atelier-surface by
      tests/unit/editor-theme-contrast.spec.ts; comments only need 3:1. */
   --atelier-syn-keyword:    #c4a7ff;

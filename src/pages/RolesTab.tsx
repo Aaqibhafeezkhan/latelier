@@ -244,8 +244,6 @@ export function RolesTab({
               table: { fontSize: T.fsSm },
               th: {
                 fontSize: T.fsXs,
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
                 fontWeight: 600,
                 color: T.textMuted,
                 padding: '8px 12px',

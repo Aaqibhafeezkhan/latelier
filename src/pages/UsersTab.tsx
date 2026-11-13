@@ -371,8 +371,6 @@ export function UsersTab({
               table: { fontSize: T.fsSm },
               th: {
                 fontSize: T.fsXs,
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
                 fontWeight: 600,
                 color: T.textMuted,
                 padding: '8px 12px',
@@ -907,8 +905,6 @@ function DrawerSection({ title, children }: { title: string; children: React.Rea
           fontSize: T.fsXs,
           fontWeight: 600,
           color: T.textMuted,
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
           marginBottom: 6,
         }}
       >
