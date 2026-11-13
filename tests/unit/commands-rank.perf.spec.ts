@@ -187,18 +187,29 @@ describe.skipIf(underStryker || !PERF)('capped layout at 50,000 collections', ()
   });
 });
 
+// A single cold sample on a shared 2-core runner under coverage lands near the
+// bound by itself, and one GC pause or preemption pushes it over. Each sample
+// gets its own fresh registration, so every one is still a first keystroke, and
+// the fastest is compared: noise only ever adds time, while work that grows per
+// row shows up in every sample.
+const GUARD_SAMPLES = 3;
+
 describe.skipIf(underStryker)('capped layout regression guard', () => {
   it('lays out the first typed query after registering 50,000 collections well inside a coarse bound', () => {
-    const off = commandRegistry.add(catalog(50_000, 'guard:'));
-    try {
-      const t0 = performance.now();
-      const layout = layoutPalette(commandRegistry.list(), 'o', ctx, ['cmd.3'], 'all');
-      const ms = performance.now() - t0;
-      expect(layout.entries.length).toBeLessThanOrEqual(2 * 6);
-      expect(ms).toBeLessThanOrEqual(COARSE_BOUND_MS);
-    } finally {
-      off();
+    const times: number[] = [];
+    for (let i = 0; i < GUARD_SAMPLES; i++) {
+      const off = commandRegistry.add(catalog(50_000, `guard${i}:`));
+      try {
+        collectGarbage();
+        const t0 = performance.now();
+        const layout = layoutPalette(commandRegistry.list(), 'o', ctx, ['cmd.3'], 'all');
+        times.push(performance.now() - t0);
+        expect(layout.entries.length).toBeLessThanOrEqual(2 * 6);
+      } finally {
+        off();
+      }
     }
+    expect(Math.min(...times)).toBeLessThanOrEqual(COARSE_BOUND_MS);
   });
 });
 

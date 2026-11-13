@@ -1,6 +1,13 @@
 import path from 'node:path';
 import { defineConfig } from 'vitest/config';
 
+// Coverage runs and CI runners get the component project's timing headroom:
+// `ci.yml` runs with `--coverage`, but `release.yml`'s Verify job runs plain
+// `npm test` on the same 2-core runner, where a cold Workspace mount alone
+// outlasts the strict defaults. Plain local runs keep them, so a slow test
+// still fails (or shows up via slowTestThreshold) on a contributor's machine.
+const slowRun = process.argv.includes('--coverage') || process.env.CI === 'true';
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -48,14 +55,12 @@ export default defineConfig({
           setupFiles: ['tests/helpers/jsdomSetup.ts'],
           // jsdom role queries over a large tree run ~8x slower on the CI
           // runner under --coverage than locally; the 5s default flaked (#550).
-          // Only coverage runs get the headroom, so a slow test still fails
-          // (or shows up via slowTestThreshold) in a plain run. `npm test`
-          // forwards `--coverage` into each child vitest's argv.
-          testTimeout: process.argv.includes('--coverage') ? 20_000 : 5_000,
+          // `npm test` forwards `--coverage` into each child vitest's argv.
+          testTimeout: slowRun ? 20_000 : 5_000,
           // The setup file runs in a forked worker, whose argv is the worker
           // script, not this command line, so it cannot look for `--coverage`
           // itself. Hand it the answer from here.
-          env: { ATELIER_COVERAGE_RUN: process.argv.includes('--coverage') ? '1' : '0' },
+          env: { ATELIER_SLOW_RUN: slowRun ? '1' : '0' },
         },
       },
     ],

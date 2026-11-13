@@ -110,10 +110,10 @@ beforeEach(() => {
 // since they have no setupFiles of their own.
 installJsdomTeardown();
 
-// findBy*/waitFor give up after 1 s by default. Under --coverage on a CI runner a
-// cold Workspace mount alone can take longer, so the first test of a file fails
-// for lack of time, not for lack of the element. Same condition as testTimeout
-// in vitest.config.ts, which sets ATELIER_COVERAGE_RUN: this file runs in a
-// worker whose own argv never carries `--coverage`. Plain local runs keep the
-// strict default.
-if (process.env.ATELIER_COVERAGE_RUN === '1') configure({ asyncUtilTimeout: 10_000 });
+// findBy*/waitFor give up after 1 s by default. On a CI runner, with or without
+// --coverage, a cold Workspace mount alone can take longer, so the first test of
+// a file fails for lack of time, not for lack of the element. Same condition as
+// testTimeout in vitest.config.ts, which sets ATELIER_SLOW_RUN: this file runs
+// in a worker whose own argv never carries `--coverage`. Plain local runs keep
+// the strict default.
+if (process.env.ATELIER_SLOW_RUN === '1') configure({ asyncUtilTimeout: 10_000 });
